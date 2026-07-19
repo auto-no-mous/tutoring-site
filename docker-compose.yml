@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # Overrides whatever DATABASE_URL is in .env so the SQLite file always lives on
+      # the named volume below. Point this at a postgresql+asyncpg:// DSN instead when
+      # migrating off SQLite (section 9) - drop the override and set it in .env.
+      DATABASE_URL: sqlite+aiosqlite:///storage/db.sqlite3
+    volumes:
+      - backend_storage:/app/storage
+    expose:
+      - "8000"
+
+  nginx:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  backend_storage:

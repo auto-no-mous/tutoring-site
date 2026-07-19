@@ -1,0 +1,88 @@
+import { createRouter, createWebHistory } from "vue-router";
+
+import { useAuthStore } from "@/stores/auth";
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    {
+      path: "/",
+      name: "catalog",
+      component: () => import("@/views/CatalogView.vue"),
+    },
+    {
+      path: "/login",
+      name: "login",
+      component: () => import("@/views/LoginView.vue"),
+      meta: { guestOnly: true },
+    },
+    {
+      path: "/register",
+      name: "register",
+      component: () => import("@/views/RegisterView.vue"),
+      meta: { guestOnly: true },
+    },
+    {
+      path: "/cabinet",
+      name: "cabinet",
+      component: () => import("@/views/CabinetView.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/admin",
+      name: "admin",
+      component: () => import("@/views/AdminView.vue"),
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: "/tutors/:id",
+      name: "tutor-profile",
+      component: () => import("@/views/TutorProfileView.vue"),
+    },
+    {
+      path: "/tutors/:id/book",
+      name: "tutor-booking",
+      component: () => import("@/views/TutorBookingView.vue"),
+    },
+    {
+      path: "/legal/privacy",
+      name: "privacy-policy",
+      component: () => import("@/views/PrivacyPolicyView.vue"),
+    },
+    {
+      path: "/legal/agreement",
+      name: "user-agreement",
+      component: () => import("@/views/UserAgreementView.vue"),
+    },
+    {
+      path: "/:pathMatch(.*)*",
+      name: "not-found",
+      component: () => import("@/views/NotFoundView.vue"),
+    },
+  ],
+});
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore();
+  if (!auth.isInitialized) {
+    await auth.init();
+  }
+  const isAdmin = auth.user?.role === "admin";
+
+  if (to.meta.requiresAuth && !auth.isAuthenticated) {
+    return { name: "login", query: { redirect: to.fullPath } };
+  }
+  if (to.meta.guestOnly && auth.isAuthenticated) {
+    return { name: isAdmin ? "admin" : "cabinet" };
+  }
+  if (to.meta.requiresAdmin && !isAdmin) {
+    return { name: "cabinet" };
+  }
+  // Admin has no ordinary tutor/student cabinet - keep it out of their way.
+  if (to.name === "cabinet" && isAdmin) {
+    return { name: "admin" };
+  }
+  return true;
+});
+
+export default router;

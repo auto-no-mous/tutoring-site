@@ -1,0 +1,100 @@
+<script setup lang="ts">
+import { onMounted, ref } from "vue";
+
+import { deleteStudent, listStudents, updateStudent } from "@/api/admin";
+import type { User } from "@/types/user";
+
+const students = ref<User[]>([]);
+const editingId = ref<string | null>(null);
+const editFirstName = ref("");
+const editLastName = ref("");
+const editEmail = ref("");
+
+async function load(): Promise<void> {
+  students.value = await listStudents();
+}
+
+function startEdit(student: User): void {
+  editingId.value = student.id;
+  editFirstName.value = student.first_name;
+  editLastName.value = student.last_name;
+  editEmail.value = student.email ?? "";
+}
+
+function cancelEdit(): void {
+  editingId.value = null;
+}
+
+async function saveEdit(student: User): Promise<void> {
+  await updateStudent(student.id, {
+    first_name: editFirstName.value,
+    last_name: editLastName.value,
+    email: editEmail.value || undefined,
+  });
+  editingId.value = null;
+  await load();
+}
+
+async function toggleActive(student: User): Promise<void> {
+  await updateStudent(student.id, { is_active: !student.is_active });
+  await load();
+}
+
+async function remove(student: User): Promise<void> {
+  if (!window.confirm(`Удалить ученика «${student.display_name}» безвозвратно?`)) return;
+  await deleteStudent(student.id);
+  await load();
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <div class="flex flex-col gap-2">
+    <div v-for="student in students" :key="student.id" class="rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
+      <template v-if="editingId === student.id">
+        <div class="flex flex-wrap items-end gap-2">
+          <label class="flex flex-col gap-1 text-xs">
+            Фамилия
+            <input v-model="editLastName" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" />
+          </label>
+          <label class="flex flex-col gap-1 text-xs">
+            Имя
+            <input v-model="editFirstName" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" />
+          </label>
+          <label class="flex flex-col gap-1 text-xs">
+            Почта
+            <input v-model="editEmail" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" />
+          </label>
+          <button type="button" class="rounded-md bg-slate-900 px-2 py-1 text-xs text-white dark:bg-white dark:text-slate-900" @click="saveEdit(student)">
+            Сохранить
+          </button>
+          <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="cancelEdit">
+            Отмена
+          </button>
+        </div>
+      </template>
+      <div v-else class="flex items-center justify-between">
+        <div>
+          <div class="font-medium">
+            {{ student.display_name }}
+            <span v-if="!student.is_active" class="ml-1 text-xs text-red-600 dark:text-red-400">(заблокирован)</span>
+          </div>
+          <div class="text-slate-500">{{ student.email }}</div>
+        </div>
+        <div class="flex gap-2">
+          <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="startEdit(student)">
+            Изменить
+          </button>
+          <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="toggleActive(student)">
+            {{ student.is_active ? "Заблокировать" : "Разблокировать" }}
+          </button>
+          <button type="button" class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 dark:border-red-800" @click="remove(student)">
+            Удалить
+          </button>
+        </div>
+      </div>
+    </div>
+    <p v-if="students.length === 0" class="text-sm text-slate-400">Учеников пока нет.</p>
+  </div>
+</template>
