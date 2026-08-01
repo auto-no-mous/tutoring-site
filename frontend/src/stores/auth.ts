@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { apiClient, clearTokens, getAccessToken, setTokens } from "@/api/client";
+import { getMyProfile } from "@/api/tutors";
 import type { User, UserRole } from "@/types/user";
 
 interface TokenPair {
@@ -22,12 +23,20 @@ interface RegisterPayload {
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<User | null>(null);
   const isInitialized = ref(false);
+  // Denormalized from the tutor's own TutorProfile (see ProfileTab.vue), purely for
+  // the header avatar (components/UserMenu.vue) - students have no photo field.
+  const tutorPhotoUrl = ref<string | null>(null);
 
   const isAuthenticated = computed(() => user.value !== null);
+
+  function setTutorPhotoUrl(url: string | null): void {
+    tutorPhotoUrl.value = url;
+  }
 
   async function fetchCurrentUser(): Promise<void> {
     if (!getAccessToken()) {
       user.value = null;
+      tutorPhotoUrl.value = null;
       return;
     }
     try {
@@ -35,7 +44,19 @@ export const useAuthStore = defineStore("auth", () => {
       user.value = data;
     } catch {
       user.value = null;
+      tutorPhotoUrl.value = null;
       clearTokens();
+      return;
+    }
+    if (user.value.role === "tutor") {
+      // Best-effort only - a hiccup here shouldn't take down the whole session.
+      try {
+        tutorPhotoUrl.value = (await getMyProfile()).photo_url;
+      } catch {
+        tutorPhotoUrl.value = null;
+      }
+    } else {
+      tutorPhotoUrl.value = null;
     }
   }
 
@@ -63,7 +84,19 @@ export const useAuthStore = defineStore("auth", () => {
   async function logout(): Promise<void> {
     clearTokens();
     user.value = null;
+    tutorPhotoUrl.value = null;
   }
 
-  return { user, isAuthenticated, isInitialized, init, login, register, logout, fetchCurrentUser };
+  return {
+    user,
+    isAuthenticated,
+    isInitialized,
+    tutorPhotoUrl,
+    setTutorPhotoUrl,
+    init,
+    login,
+    register,
+    logout,
+    fetchCurrentUser,
+  };
 });

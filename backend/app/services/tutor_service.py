@@ -28,8 +28,46 @@ async def get_profile_by_id(db: AsyncSession, tutor_id: uuid.UUID) -> TutorProfi
     return profile
 
 
+# "me" is already a reserved path segment for the tutor's own /tutors/me/* routes -
+# a tutor with this slug would make /tutors/me resolve to the self-service endpoint
+# instead of their public profile.
+RESERVED_SLUGS = {"me"}
+
+
+async def get_profile_by_id_or_slug(db: AsyncSession, id_or_slug: str) -> TutorProfile:
+    """Public-profile lookup (see api/v1/tutors.py::get_public_profile): accepts
+    either the tutor's real UUID or their custom slug, so /tutors/<slug> and
+    /tutors/<uuid> both work."""
+    try:
+        tutor_id = uuid.UUID(id_or_slug)
+    except ValueError:
+        result = await db.execute(select(TutorProfile).where(TutorProfile.slug == id_or_slug))
+        profile = result.scalar_one_or_none()
+    else:
+        profile = await db.get(TutorProfile, tutor_id)
+    if profile is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Анкета репетитора не найдена")
+    return profile
+
+
+async def _apply_slug_change(db: AsyncSession, profile: TutorProfile, slug: str) -> None:
+    if slug in RESERVED_SLUGS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Этот ник зарезервирован, выберите другой")
+    result = await db.execute(select(TutorProfile.id).where(TutorProfile.slug == slug, TutorProfile.id != profile.id))
+    if result.scalar_one_or_none() is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Этот ник уже занят другим репетитором")
+    profile.slug = slug
+
+
 async def update_profile(db: AsyncSession, profile: TutorProfile, payload: TutorProfileUpdate) -> TutorProfile:
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "slug" in data:
+        slug = data.pop("slug")
+        if slug is None:
+            profile.slug = None
+        else:
+            await _apply_slug_change(db, profile, slug)
+    for field, value in data.items():
         setattr(profile, field, value)
     await db.commit()
     await db.refresh(profile)
@@ -48,7 +86,9 @@ async def search_catalog(
     subject_id: uuid.UUID | None = None,
     price_min: float | None = None,
     price_max: float | None = None,
-) -> list[dict]:
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
     """Public catalog: hidden profiles are excluded (section 2.1); direct-link access
     to a hidden profile is handled separately by get_profile_by_id.
 
@@ -81,6 +121,9 @@ async def search_catalog(
     if price_max is not None:
         query = query.where(price_agg.c.hourly_price <= price_max)
 
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+
+    query = query.order_by(User.display_name).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     rows = result.all()
     tutor_ids = [profile.id for profile, *_ in rows]
@@ -97,10 +140,11 @@ async def search_catalog(
                 "display_name": display_name,
                 "name_patronymic": f"{first_name} {patronymic}" if patronymic else first_name,
                 "photo_url": profile.photo_url,
+                "slug": profile.slug,
                 "subjects": subjects_by_tutor.get(profile.id, []),
                 "hourly_price": float(hourly_price) if hourly_price is not None else None,
                 "avg_rating": avg_rating,
                 "reviews_count": reviews_count,
             }
         )
-    return items
+    return items, total

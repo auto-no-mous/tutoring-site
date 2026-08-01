@@ -4,19 +4,26 @@ import { computed, onMounted, ref } from "vue";
 import {
   acceptApplication,
   createGroup,
+  getOccurrenceAttendance,
   listApplications,
   listMembers,
   listMyGroups,
   listOccurrences,
   rejectApplication,
   removeMember,
+  setOccurrenceAttendance,
   updateOccurrence,
 } from "@/api/groups";
 import { getMyLessonTypes } from "@/api/tutors";
-import type { GroupApplication, GroupMembership, GroupOccurrence } from "@/types/group";
+import type { GroupApplication, GroupAttendanceEntry, GroupMembership, GroupOccurrence } from "@/types/group";
 import type { Group } from "@/types/group";
 import type { LessonType } from "@/types/tutor";
 import { formatDateTimeWithMsk } from "@/utils/time";
+
+const ATTENDANCE_OPTIONS = [
+  { value: "conducted", label: "Присутствовал" },
+  { value: "student_no_show", label: "Не явился" },
+];
 
 const groups = ref<Group[]>([]);
 const groupLessonTypes = ref<LessonType[]>([]);
@@ -89,6 +96,40 @@ async function remove(member: GroupMembership): Promise<void> {
 async function cancelOccurrence(occurrence: GroupOccurrence): Promise<void> {
   await updateOccurrence(occurrence.group_id, occurrence.id, { status: "cancelled" });
   await selectGroup(occurrence.group_id);
+}
+
+function isPastLiveOccurrence(occ: GroupOccurrence): boolean {
+  return (occ.status === "scheduled" || occ.status === "completed") && new Date(occ.end_at) < new Date();
+}
+
+const openAttendanceOccurrenceId = ref<string | null>(null);
+const attendance = ref<GroupAttendanceEntry[]>([]);
+const isSavingAttendance = ref(false);
+const attendanceSavedMessage = ref("");
+
+async function toggleAttendance(occ: GroupOccurrence): Promise<void> {
+  if (openAttendanceOccurrenceId.value === occ.id) {
+    openAttendanceOccurrenceId.value = null;
+    return;
+  }
+  attendanceSavedMessage.value = "";
+  attendance.value = await getOccurrenceAttendance(occ.group_id, occ.id);
+  openAttendanceOccurrenceId.value = occ.id;
+}
+
+async function saveAttendance(occ: GroupOccurrence): Promise<void> {
+  isSavingAttendance.value = true;
+  attendanceSavedMessage.value = "";
+  try {
+    attendance.value = await setOccurrenceAttendance(
+      occ.group_id,
+      occ.id,
+      attendance.value.map((a) => ({ student_id: a.student_id, outcome: a.outcome })),
+    );
+    attendanceSavedMessage.value = "Сохранено";
+  } finally {
+    isSavingAttendance.value = false;
+  }
 }
 
 const pendingApplications = computed(() => applications.value.filter((a) => a.status === "pending"));
@@ -175,11 +216,43 @@ onMounted(load);
 
       <section>
         <h2 class="text-lg font-medium">Занятия группы</h2>
-        <div v-for="occ in occurrences.slice(0, 12)" :key="occ.id" class="mt-2 flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
-          <span :class="occ.status === 'cancelled' ? 'text-slate-400 line-through' : ''">{{ formatDateTimeWithMsk(occ.start_at) }}</span>
-          <button v-if="occ.status === 'scheduled'" type="button" class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 dark:border-red-800" @click="cancelOccurrence(occ)">
-            Отменить
-          </button>
+        <div v-for="occ in occurrences.slice(0, 12)" :key="occ.id" class="mt-2 rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
+          <div class="flex items-center justify-between">
+            <span :class="occ.status === 'cancelled' ? 'text-slate-400 line-through' : ''">{{ formatDateTimeWithMsk(occ.start_at) }}</span>
+            <div class="flex gap-2">
+              <button
+                v-if="isPastLiveOccurrence(occ)"
+                type="button"
+                class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
+                @click="toggleAttendance(occ)"
+              >
+                {{ openAttendanceOccurrenceId === occ.id ? "Скрыть" : "Посещаемость" }}
+              </button>
+              <button v-if="occ.status === 'scheduled'" type="button" class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 dark:border-red-800" @click="cancelOccurrence(occ)">
+                Отменить
+              </button>
+            </div>
+          </div>
+          <div v-if="openAttendanceOccurrenceId === occ.id" class="mt-2 flex flex-col gap-2 border-t border-slate-200 pt-2 dark:border-slate-800">
+            <p v-if="attendance.length === 0" class="text-xs text-slate-400">На тот момент в группе никого не было.</p>
+            <div v-for="entry in attendance" :key="entry.student_id" class="flex items-center justify-between text-xs">
+              <span>{{ entry.student_display_name }}</span>
+              <select v-model="entry.outcome" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700">
+                <option v-for="opt in ATTENDANCE_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+            <div v-if="attendance.length > 0" class="flex items-center gap-3">
+              <button
+                type="button"
+                :disabled="isSavingAttendance"
+                class="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                @click="saveAttendance(occ)"
+              >
+                Сохранить
+              </button>
+              <span v-if="attendanceSavedMessage" class="text-xs text-green-600 dark:text-green-400">{{ attendanceSavedMessage }}</span>
+            </div>
+          </div>
         </div>
       </section>
     </template>

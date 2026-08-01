@@ -55,3 +55,18 @@ export async function uploadSubmission(submissionId: string, file: File, comment
   const { data } = await apiClient.post<HomeworkSubmission>(`/homework/submissions/${submissionId}/upload`, form);
   return data;
 }
+
+export async function getMyStudentsHomeworkStatus() {
+  const { data } = await apiClient.get<Record<string, string>>("/homework/tutor/me/student-status");
+  return data;
+}
+
+export async function getStudentHomeworkForTutor(studentId: string) {
+  const { data } = await apiClient.get<StudentHomework[]>(`/homework/tutor/me/students/${studentId}`);
+  return data;
+}
+
+export async function setSubmissionStatus(submissionId: string, status: string) {
+  const { data } = await apiClient.patch<HomeworkSubmission>(`/homework/submissions/${submissionId}/status`, { status });
+  return data;
+}

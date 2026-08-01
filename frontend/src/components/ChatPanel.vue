@@ -88,7 +88,11 @@ onMounted(loadThreads);
             placeholder="Сообщение…"
             class="flex-1 rounded-md border border-slate-300 bg-transparent px-3 py-1.5 text-sm dark:border-slate-700"
           />
-          <input type="file" class="w-32 text-xs" @change="onFileChange" />
+          <input
+            type="file"
+            class="w-32 text-xs file:mr-2 file:rounded-md file:border-0 file:bg-slate-900 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
+            @change="onFileChange"
+          />
           <button
             type="submit"
             :disabled="isSending"

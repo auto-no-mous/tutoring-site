@@ -39,6 +39,10 @@ class BookingRescheduleRequest(BaseModel):
     new_start_at: UTCDateTime
 
 
+class BookingOutcomeUpdate(BaseModel):
+    outcome: str
+
+
 class BookingOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -58,6 +62,7 @@ class BookingOut(BaseModel):
     cancelled_at: UTCDateTime | None
     cancel_reason: str | None
     rescheduled_from_id: uuid.UUID | None
+    outcome: str | None
     student_display_name: str | None = None
     # Whether the recurring series this booking belongs to is still generating future
     # occurrences - lets the frontend hide "stop recurring" once it's already stopped
@@ -66,8 +71,17 @@ class BookingOut(BaseModel):
     # Populated only on student-facing responses (student doesn't otherwise know which
     # lesson type / tutor a card refers to) - see api/v1/bookings.py::_to_booking_out.
     lesson_type_name: str | None = None
-    # "Имя Отчество" only (no surname), per the student cabinet's card format.
+    # "Имя Отчество" only (no surname), per the student cabinet's card format. Admin's
+    # listing (api/v1/admin.py::list_bookings) instead populates this with the full
+    # display_name, since it has no single "counterpart" to omit the surname for.
     tutor_display_name: str | None = None
+
+
+class BookingPageOut(BaseModel):
+    items: list[BookingOut]
+    total: int
+    page: int
+    page_size: int
 
 
 class RecurringSeriesOut(BaseModel):

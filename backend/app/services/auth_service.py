@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -82,21 +82,36 @@ async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID | str) -> User | N
     return await db.get(User, user_uuid)
 
 
+async def prepare_email_change(db: AsyncSession, user: User, new_email: str) -> bool:
+    """Applies an email change to `user` in-memory (caller still has to commit) after
+    checking it's not already taken. Changing email re-requires verification, same as
+    at registration - it's the login identifier, so it can't stay trusted unproven
+    after a change. Returns whether anything actually changed, so the caller knows
+    whether to send a fresh verification email once the transaction is committed.
+    Shared by self-service settings and admin's user edit (app.services.admin_service)."""
+    if new_email == user.email:
+        return False
+    existing = await _get_user_by_email(db, new_email)
+    if existing is not None and existing.id != user.id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Эта почта уже используется другим аккаунтом")
+    user.email = new_email
+    user.email_verified = False
+    return True
+
+
+async def send_email_verification(user: User) -> None:
+    if not user.email:
+        return
+    token = create_email_verification_token(str(user.id))
+    await send_verification_email(user.email, token)
+
+
 async def update_user_settings(db: AsyncSession, user: User, payload: UserSettingsUpdate) -> User:
     data = payload.model_dump(exclude_unset=True)
 
-    # Changing email re-requires verification, same as at registration - it's the
-    # login identifier, so we don't trust it unproven after a change.
     email_changed = False
     if "email" in data:
-        new_email = data.pop("email")
-        if new_email != user.email:
-            existing = await _get_user_by_email(db, new_email)
-            if existing is not None and existing.id != user.id:
-                raise HTTPException(status.HTTP_409_CONFLICT, "Эта почта уже используется другим аккаунтом")
-            user.email = new_email
-            user.email_verified = False
-            email_changed = True
+        email_changed = await prepare_email_change(db, user, data.pop("email"))
 
     for field, value in data.items():
         setattr(user, field, value)
@@ -106,9 +121,8 @@ async def update_user_settings(db: AsyncSession, user: User, payload: UserSettin
     await db.commit()
     await db.refresh(user)
 
-    if email_changed and user.email:
-        token = create_email_verification_token(str(user.id))
-        await send_verification_email(user.email, token)
+    if email_changed:
+        await send_email_verification(user)
 
     return user
 
@@ -145,14 +159,36 @@ async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
     return user
 
 
+MAX_FAILED_LOGIN_ATTEMPTS = 5
+LOGIN_LOCKOUT_DURATION = timedelta(minutes=15)
+
+
 async def authenticate_user(db: AsyncSession, payload: LoginRequest) -> User:
     user = await _get_user_by_email(db, payload.email)
     if user is None or user.password_hash is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверная почта или пароль")
+
+    if user.locked_until is not None and ensure_aware(user.locked_until) > utcnow():
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"Аккаунт временно заблокирован из-за неудачных попыток входа. "
+            f"Попробуйте снова через {LOGIN_LOCKOUT_DURATION.seconds // 60} мин.",
+        )
+
     if not verify_password(payload.password, user.password_hash):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
+            user.locked_until = utcnow() + LOGIN_LOCKOUT_DURATION
+        await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверная почта или пароль")
+
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Аккаунт заблокирован")
+
+    if user.failed_login_attempts or user.locked_until:
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        await db.commit()
     return user
 
 
@@ -203,6 +239,16 @@ async def revoke_refresh_token(db: AsyncSession, refresh_token: str) -> None:
     if stored is not None:
         stored.revoked = True
         await db.commit()
+
+
+async def resend_verification_email(user: User) -> None:
+    if user.email is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "На аккаунте не указана почта")
+    if user.email_verified:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Почта уже подтверждена")
+
+    token = create_email_verification_token(str(user.id))
+    await send_verification_email(user.email, token)
 
 
 async def verify_email(db: AsyncSession, token: str) -> User:

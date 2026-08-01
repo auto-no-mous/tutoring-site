@@ -46,6 +46,7 @@ export interface GroupMembership {
   status: string;
   joined_at: string;
   left_at: string | null;
+  left_by: string | null;
   group_name: string;
   tutor_display_name: string;
 }
@@ -57,4 +58,10 @@ export interface GroupOccurrence {
   end_at: string;
   status: string;
   original_start_at: string | null;
+}
+
+export interface GroupAttendanceEntry {
+  student_id: string;
+  student_display_name: string;
+  outcome: string;
 }

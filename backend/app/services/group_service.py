@@ -6,15 +6,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.enums import GroupApplicationStatus, GroupMembershipStatus, GroupOccurrenceStatus, NotificationEvent
-from app.models.group import Group, GroupApplication, GroupMembership, GroupOccurrence, GroupSchedule
+from app.models.enums import (
+    BookedBy,
+    GroupApplicationStatus,
+    GroupAttendanceOutcome,
+    GroupMembershipStatus,
+    GroupOccurrenceStatus,
+    NotificationEvent,
+    UserRole,
+)
+from app.models.group import Group, GroupApplication, GroupAttendance, GroupMembership, GroupOccurrence, GroupSchedule
 from app.models.lesson_type import LessonType
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.schemas.group import GroupCreate, GroupOccurrenceUpdate, GroupScheduleSlotIn, GroupUpdate
 from app.services import chat_service, notification_service, schedule_service
+from app.services.booking_service import get_student_names
 from app.services.schedule_service import MSK
-from app.utils.time import utcnow
+from app.utils.time import ensure_aware, utcnow
 
 OCCURRENCE_WEEKS_AHEAD = 8
 
@@ -337,9 +346,10 @@ async def list_members(db: AsyncSession, group_id: uuid.UUID, active_only: bool 
     return list(result.scalars().all())
 
 
-async def _leave(db: AsyncSession, membership: GroupMembership) -> GroupMembership:
+async def _leave(db: AsyncSession, membership: GroupMembership, actor: str) -> GroupMembership:
     membership.status = GroupMembershipStatus.LEFT.value
     membership.left_at = utcnow()
+    membership.left_by = actor
     await db.commit()
     await db.refresh(membership)
     return membership
@@ -356,7 +366,7 @@ async def leave_group(db: AsyncSession, student: User, group: Group) -> GroupMem
     membership = result.scalar_one_or_none()
     if membership is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Вы не состоите в этой группе")
-    membership = await _leave(db, membership)
+    membership = await _leave(db, membership, BookedBy.STUDENT.value)
 
     await notification_service.notify_tutor(
         db,
@@ -379,7 +389,67 @@ async def remove_member_by_tutor(db: AsyncSession, group: Group, student_id: uui
     membership = result.scalar_one_or_none()
     if membership is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не состоит в этой группе")
-    return await _leave(db, membership)
+    return await _leave(db, membership, BookedBy.TUTOR.value)
+
+
+async def admin_remove_member(db: AsyncSession, group: Group, student_id: uuid.UUID) -> GroupMembership:
+    result = await db.execute(
+        select(GroupMembership).where(
+            GroupMembership.group_id == group.id,
+            GroupMembership.student_id == student_id,
+            GroupMembership.status == GroupMembershipStatus.ACTIVE.value,
+        )
+    )
+    membership = result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не состоит в этой группе")
+    return await _leave(db, membership, BookedBy.ADMIN.value)
+
+
+async def admin_reassign_tutor(db: AsyncSession, group: Group, tutor_id: uuid.UUID, lesson_type_id: uuid.UUID) -> Group:
+    """Admin override: moves a group to a different tutor, along with a group-format
+    lesson type belonging to that tutor (a group's lesson type must belong to its own
+    tutor - see _get_group_lesson_type). Existing schedule slots/occurrences and
+    memberships are left untouched; only future occurrence generation will use the new
+    tutor's calendar."""
+    await _get_group_lesson_type(db, tutor_id, lesson_type_id)
+    group.tutor_id = tutor_id
+    group.lesson_type_id = lesson_type_id
+    await db.commit()
+    await db.refresh(group)
+    return group
+
+
+async def admin_add_member(db: AsyncSession, group: Group, student_id: uuid.UUID) -> GroupMembership:
+    """Admin override: enrolls a student directly, bypassing the apply/accept flow
+    (section 2.11 normally requires one) - still respects group capacity."""
+    student = await db.get(User, student_id)
+    if student is None or student.role != UserRole.STUDENT.value:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не найден")
+
+    result = await db.execute(
+        select(GroupMembership).where(GroupMembership.group_id == group.id, GroupMembership.student_id == student_id)
+    )
+    membership = result.scalar_one_or_none()
+    if membership is not None and membership.status == GroupMembershipStatus.ACTIVE.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ученик уже состоит в этой группе")
+
+    active_count = await count_active_members(db, group.id)
+    if active_count >= group.capacity:
+        raise HTTPException(status.HTTP_409_CONFLICT, "В группе нет свободных мест")
+
+    if membership is not None:
+        membership.status = GroupMembershipStatus.ACTIVE.value
+        membership.joined_at = utcnow()
+        membership.left_at = None
+        membership.left_by = None
+    else:
+        membership = GroupMembership(group_id=group.id, student_id=student_id)
+        db.add(membership)
+
+    await db.commit()
+    await db.refresh(membership)
+    return membership
 
 
 async def list_memberships_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[GroupMembership]:
@@ -394,3 +464,64 @@ async def list_memberships_for_student(db: AsyncSession, student_id: uuid.UUID) 
 async def list_applications_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[GroupApplication]:
     result = await db.execute(select(GroupApplication).where(GroupApplication.student_id == student_id))
     return list(result.scalars().all())
+
+
+async def list_active_member_ids_at(db: AsyncSession, group_id: uuid.UUID, at: dt.datetime) -> list[uuid.UUID]:
+    """Students whose membership covered a given moment - same "were they actually
+    in the group at the time" logic stats_service uses for monthly student counts."""
+    result = await db.execute(
+        select(GroupMembership.student_id).where(
+            GroupMembership.group_id == group_id,
+            GroupMembership.joined_at <= at,
+            (GroupMembership.left_at.is_(None)) | (GroupMembership.left_at > at),
+        )
+    )
+    return [row[0] for row in result.all()]
+
+
+async def get_occurrence_attendance(db: AsyncSession, occurrence: GroupOccurrence) -> list[dict]:
+    """Per-student outcome for a past occurrence, one entry per student who was an
+    active member at occurrence.start_at. Students with no GroupAttendance row yet
+    default to CONDUCTED (see GroupAttendance docstring)."""
+    student_ids = await list_active_member_ids_at(db, occurrence.group_id, ensure_aware(occurrence.start_at))
+    if not student_ids:
+        return []
+
+    result = await db.execute(
+        select(GroupAttendance).where(
+            GroupAttendance.occurrence_id == occurrence.id, GroupAttendance.student_id.in_(student_ids)
+        )
+    )
+    outcomes = {row.student_id: row.outcome for row in result.scalars().all()}
+
+    names = await get_student_names(db, student_ids)
+    return [
+        {
+            "student_id": student_id,
+            "student_display_name": names.get(student_id, ""),
+            "outcome": outcomes.get(student_id, GroupAttendanceOutcome.CONDUCTED.value),
+        }
+        for student_id in student_ids
+    ]
+
+
+async def set_occurrence_attendance(
+    db: AsyncSession, occurrence: GroupOccurrence, entries: list[tuple[uuid.UUID, str]]
+) -> None:
+    active_ids = set(await list_active_member_ids_at(db, occurrence.group_id, ensure_aware(occurrence.start_at)))
+
+    result = await db.execute(
+        select(GroupAttendance).where(GroupAttendance.occurrence_id == occurrence.id)
+    )
+    existing = {row.student_id: row for row in result.scalars().all()}
+
+    for student_id, outcome in entries:
+        if student_id not in active_ids:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Ученик не был участником группы на момент занятия")
+        row = existing.get(student_id)
+        if row is not None:
+            row.outcome = outcome
+        else:
+            db.add(GroupAttendance(occurrence_id=occurrence.id, student_id=student_id, outcome=outcome))
+
+    await db.commit()

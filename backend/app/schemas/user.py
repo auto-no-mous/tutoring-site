@@ -14,6 +14,7 @@ class UserOut(BaseModel):
     first_name: str
     last_name: str
     patronymic: str | None
+    grade: int | None
     role: str
     email_verified: bool
     is_active: bool
@@ -27,6 +28,8 @@ class UserSettingsUpdate(BaseModel):
     first_name: str | None = Field(default=None, min_length=1, max_length=255)
     last_name: str | None = Field(default=None, min_length=1, max_length=255)
     patronymic: str | None = Field(default=None, max_length=255)
+    # School grade (класс); only meaningful for students.
+    grade: int | None = Field(default=None, ge=1, le=11)
     # Changing email re-requires verification - see auth_service.update_user_settings.
     email: EmailStr | None = None
     # Student's local timezone override (section 6); meaningless for tutors, whose

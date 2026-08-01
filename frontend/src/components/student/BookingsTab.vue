@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import { cancelBooking, listMyBookings } from "@/api/bookings";
+import { listMyBookings } from "@/api/bookings";
+import BookingCard from "@/components/BookingCard.vue";
 import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
-import RescheduleModal from "@/components/student/RescheduleModal.vue";
+import RescheduleModal from "@/components/RescheduleModal.vue";
+import { useToastStore } from "@/stores/toast";
 import type { Booking } from "@/types/booking";
 import { formatDateTimeWithMsk } from "@/utils/time";
 import { groupByWeekAndDay } from "@/utils/scheduleGrouping";
 
+const toast = useToastStore();
+
 const bookings = ref<Booking[]>([]);
-const error = ref("");
 const reschedulingBooking = ref<Booking | null>(null);
 
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -32,25 +35,14 @@ async function load(): Promise<void> {
   bookings.value = await listMyBookings();
 }
 
-async function cancel(booking: Booking): Promise<void> {
-  error.value = "";
-  if (!window.confirm("Отменить это занятие?")) return;
-  try {
-    await cancelBooking(booking.id);
-    await load();
-  } catch {
-    error.value = "Отмена недоступна: нарушены сроки или лимит отмен репетитора.";
-  }
-}
-
 function openReschedule(booking: Booking): void {
-  error.value = "";
   reschedulingBooking.value = booking;
 }
 
 async function onRescheduled(): Promise<void> {
   reschedulingBooking.value = null;
   await load();
+  toast.show("Занятие перенесено");
 }
 
 onMounted(load);
@@ -58,27 +50,10 @@ onMounted(load);
 
 <template>
   <div class="flex max-w-2xl flex-col gap-6">
-    <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-
     <section>
       <BookingScheduleGroups :weeks="weeks">
         <template #default="{ item: booking }">
-          <div class="flex items-center justify-between">
-            <div class="font-medium">{{ formatDateTimeWithMsk(booking.start_at) }}</div>
-            <a v-if="booking.meeting_link" :href="booking.meeting_link" target="_blank" class="text-xs underline">Перейти на занятие</a>
-          </div>
-          <div class="text-sm text-slate-500">
-            {{ booking.lesson_type_name }} · Репетитор {{ booking.tutor_display_name }}
-          </div>
-          <div v-if="booking.recurring_series_id" class="mt-1 text-xs text-slate-500">Еженедельная запись</div>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="openReschedule(booking)">
-              Перенести
-            </button>
-            <button type="button" class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 dark:border-red-800" @click="cancel(booking)">
-              Отменить
-            </button>
-          </div>
+          <BookingCard :booking="booking" role="student" @changed="load" @reschedule-requested="openReschedule" />
         </template>
       </BookingScheduleGroups>
     </section>

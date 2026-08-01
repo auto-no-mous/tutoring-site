@@ -1,3 +1,4 @@
+import datetime as dt
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,8 +7,15 @@ from app.api.deps import DbSession, require_roles
 from app.models.enums import UserRole
 from app.models.group import Group
 from app.models.user import User
-from app.schemas.admin import AdminBookingCreate, AdminStudentUpdate, AdminTutorUpdate
-from app.schemas.booking import BookingOut, BookingTutorUpdate, ManualBookingCreate
+from app.schemas.admin import (
+    AdminBookingCreate,
+    AdminBookingReschedule,
+    AdminGroupMemberAdd,
+    AdminGroupTutorReassign,
+    AdminStudentUpdate,
+    AdminTutorUpdate,
+)
+from app.schemas.booking import BookingOut, BookingPageOut, BookingTutorUpdate, ManualBookingCreate
 from app.schemas.group import (
     GroupApplicationOut,
     GroupMembershipOut,
@@ -15,6 +23,7 @@ from app.schemas.group import (
     GroupScheduleSlotOut,
     GroupUpdate,
 )
+from app.schemas.schedule import SlotOut
 from app.schemas.subject import (
     DirectionCreate,
     DirectionOut,
@@ -25,7 +34,7 @@ from app.schemas.subject import (
 )
 from app.schemas.tutor import TutorProfileOut
 from app.schemas.user import UserOut
-from app.services import admin_service, booking_service, group_service, subject_service
+from app.services import admin_service, booking_service, group_service, schedule_service, subject_service
 
 router = APIRouter(
     prefix="/admin", tags=["admin"], dependencies=[Depends(require_roles(UserRole.ADMIN.value))]
@@ -49,11 +58,16 @@ def _to_group_out(group: Group, member_count: int) -> GroupOut:
 # --- Tutors -------------------------------------------------------------------
 
 
-def _to_profile_out(profile, user: User | None) -> TutorProfileOut:
+def _to_profile_out(profile, user: User | None, subjects: list | None = None) -> TutorProfileOut:
     return TutorProfileOut.model_validate(profile, from_attributes=True).model_copy(
         update={
             "display_name": user.display_name if user else None,
             "is_active": user.is_active if user else None,
+            "first_name": user.first_name if user else None,
+            "last_name": user.last_name if user else None,
+            "patronymic": user.patronymic if user else None,
+            "email": user.email if user else None,
+            "subjects": subjects or [],
         }
     )
 
@@ -64,7 +78,8 @@ async def list_tutors(db: DbSession) -> list[TutorProfileOut]:
     out = []
     for profile in profiles:
         user = await db.get(User, profile.user_id)
-        out.append(_to_profile_out(profile, user))
+        subject_rows = await subject_service.get_tutor_subjects(db, profile.id)
+        out.append(_to_profile_out(profile, user, subject_service.to_tutor_subject_out(subject_rows)))
     return out
 
 
@@ -120,18 +135,45 @@ async def delete_student(student_id: uuid.UUID, db: DbSession) -> None:
 # --- Bookings (individual lessons) -----------------------------------------------
 
 
-@router.get("/bookings", response_model=list[BookingOut])
+@router.get("/bookings", response_model=BookingPageOut)
 async def list_bookings(
-    db: DbSession, tutor_id: uuid.UUID | None = None, student_id: uuid.UUID | None = None
-) -> list[BookingOut]:
-    rows = await booking_service.list_all_bookings(db, tutor_id, student_id)
-    names = await booking_service.get_student_names(db, [r.student_id for r in rows if r.student_id])
-    return [
+    db: DbSession,
+    tutor_id: uuid.UUID | None = None,
+    student_id: uuid.UUID | None = None,
+    date_from: dt.datetime | None = None,
+    date_to: dt.datetime | None = None,
+    subject_id: uuid.UUID | None = None,
+    direction_id: uuid.UUID | None = None,
+    grade: int | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> BookingPageOut:
+    if page < 1 or not (1 <= page_size <= 100):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Некорректные параметры страницы")
+    rows, total = await booking_service.list_all_bookings(
+        db,
+        tutor_id,
+        student_id,
+        date_from,
+        date_to,
+        subject_id=subject_id,
+        direction_id=direction_id,
+        grade=grade,
+        page=page,
+        page_size=page_size,
+    )
+    student_names = await booking_service.get_student_names(db, [r.student_id for r in rows if r.student_id])
+    tutor_names = await booking_service.get_tutor_display_names(db, [r.tutor_id for r in rows])
+    items = [
         BookingOut.model_validate(r, from_attributes=True).model_copy(
-            update={"student_display_name": names.get(r.student_id) if r.student_id else None}
+            update={
+                "student_display_name": student_names.get(r.student_id) if r.student_id else None,
+                "tutor_display_name": tutor_names.get(r.tutor_id),
+            }
         )
         for r in rows
     ]
+    return BookingPageOut(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.post("/bookings", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
@@ -163,6 +205,48 @@ async def delete_booking(booking_id: uuid.UUID, db: DbSession) -> None:
     await booking_service.delete_booking(db, booking)
 
 
+@router.get("/bookings/{booking_id}/reschedule/dates", response_model=list[dt.date])
+async def get_admin_reschedule_dates(
+    booking_id: uuid.UUID, date_from: dt.date, date_to: dt.date, db: DbSession, duration_minutes: int | None = None
+) -> list[dt.date]:
+    if (date_to - date_from).days > 60:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Слишком большой диапазон дат")
+    booking = await booking_service.get_booking_or_404(db, booking_id)
+    tutor, default_duration = await booking_service.get_admin_reschedule_context(db, booking)
+    return await schedule_service.compute_available_dates_by_duration(
+        db,
+        tutor,
+        duration_minutes or default_duration,
+        date_from,
+        date_to,
+        exclude_booking_id=booking.id,
+        ignore_lead_time=True,
+    )
+
+
+@router.get("/bookings/{booking_id}/reschedule/slots", response_model=list[SlotOut])
+async def get_admin_reschedule_slots(
+    booking_id: uuid.UUID, date: dt.date, db: DbSession, duration_minutes: int | None = None
+) -> list[SlotOut]:
+    booking = await booking_service.get_booking_or_404(db, booking_id)
+    tutor, default_duration = await booking_service.get_admin_reschedule_context(db, booking)
+    return await schedule_service.compute_day_slots_by_duration(
+        db, tutor, duration_minutes or default_duration, date, exclude_booking_id=booking.id, ignore_lead_time=True
+    )
+
+
+@router.post("/bookings/{booking_id}/reschedule", response_model=BookingOut)
+async def reschedule_booking(booking_id: uuid.UUID, payload: AdminBookingReschedule, db: DbSession) -> BookingOut:
+    booking = await booking_service.get_booking_or_404(db, booking_id)
+    new_booking = await booking_service.admin_reschedule_booking(
+        db, booking, payload.new_start_at, payload.duration_minutes
+    )
+    names = await booking_service.get_student_names(db, [new_booking.student_id] if new_booking.student_id else [])
+    return BookingOut.model_validate(new_booking, from_attributes=True).model_copy(
+        update={"student_display_name": names.get(new_booking.student_id) if new_booking.student_id else None}
+    )
+
+
 # --- Groups, applications, membership --------------------------------------------
 
 
@@ -189,6 +273,15 @@ async def delete_group(group_id: uuid.UUID, db: DbSession) -> None:
     group = await group_service.get_group_or_404(db, group_id)
     await db.delete(group)
     await db.commit()
+
+
+@router.post("/groups/{group_id}/reassign-tutor", response_model=GroupOut)
+async def reassign_group_tutor(group_id: uuid.UUID, payload: AdminGroupTutorReassign, db: DbSession) -> GroupOut:
+    group = await group_service.get_group_or_404(db, group_id)
+    await admin_service.get_tutor_or_404(db, payload.tutor_id)
+    group = await group_service.admin_reassign_tutor(db, group, payload.tutor_id, payload.lesson_type_id)
+    count = await group_service.count_active_members(db, group.id)
+    return _to_group_out(group, count)
 
 
 @router.get("/groups/{group_id}/applications", response_model=list[GroupApplicationOut])
@@ -228,7 +321,14 @@ async def list_members(group_id: uuid.UUID, db: DbSession) -> list[GroupMembersh
 @router.delete("/groups/{group_id}/members/{student_id}", response_model=GroupMembershipOut)
 async def remove_member(group_id: uuid.UUID, student_id: uuid.UUID, db: DbSession) -> GroupMembershipOut:
     group = await group_service.get_group_or_404(db, group_id)
-    membership = await group_service.remove_member_by_tutor(db, group, student_id)
+    membership = await group_service.admin_remove_member(db, group, student_id)
+    return GroupMembershipOut.model_validate(membership, from_attributes=True)
+
+
+@router.post("/groups/{group_id}/members", response_model=GroupMembershipOut, status_code=status.HTTP_201_CREATED)
+async def add_member(group_id: uuid.UUID, payload: AdminGroupMemberAdd, db: DbSession) -> GroupMembershipOut:
+    group = await group_service.get_group_or_404(db, group_id)
+    membership = await group_service.admin_add_member(db, group, payload.student_id)
     return GroupMembershipOut.model_validate(membership, from_attributes=True)
 
 

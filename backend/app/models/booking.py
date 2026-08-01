@@ -55,6 +55,11 @@ class Booking(UUIDPKMixin, TimestampMixin, Base):
     is_manual_block: Mapped[bool] = mapped_column(Boolean, default=False)
     booked_by: Mapped[str] = mapped_column(String(16), default=BookedBy.STUDENT.value)
 
+    # Set by the tutor after the lesson time has passed (activity log). None means
+    # "not yet recorded" - the log/UI default a past scheduled booking to CONDUCTED
+    # without requiring a write, so the tutor only needs to act on exceptions.
+    outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Per-student link to the external meeting resource (section 2.6).
     meeting_link: Mapped[str | None] = mapped_column(String(512), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -15,6 +15,7 @@ export interface Booking {
   cancelled_at: string | null;
   cancel_reason: string | null;
   rescheduled_from_id: string | null;
+  outcome: string | null;
   student_display_name?: string | null;
   series_is_active?: boolean | null;
   lesson_type_name?: string | null;

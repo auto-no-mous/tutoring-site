@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
@@ -23,6 +23,13 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Brute-force protection (see auth_service.authenticate_user): counts consecutive
+    # failed password attempts since the last success, reset to 0 on a successful
+    # login. Once it reaches the threshold, locked_until is set and login is rejected
+    # until that timestamp passes, regardless of the counter.
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     vk_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
 
     # Denormalized full name, composed from the fields below at registration/settings-
@@ -35,6 +42,9 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     # Patronymic (отчество): mainly meaningful for tutors' formal ФИО, optional for
     # everyone since the field doesn't universally apply (e.g. VK-only accounts).
     patronymic: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # School grade (класс), e.g. 10 for "10-й класс". Only meaningful for students,
+    # used to identify them in the tutor's homework-assignment student picker.
+    grade: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Section 6: student's timezone, auto-detected with manual override. Stored as an
@@ -49,6 +59,13 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     # Notification channel settings (section 2.7)
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     email_notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Short-lived token for the "Подключить Telegram" deep-link flow (see
+    # app.services.telegram_service.create_link_token / the bot's /start handler in
+    # app.scripts.run_telegram_bot) - only one pending link attempt at a time, so this
+    # lives directly on the user rather than in a separate table.
+    telegram_link_token: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    telegram_link_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tutor_profile: Mapped["TutorProfile | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"

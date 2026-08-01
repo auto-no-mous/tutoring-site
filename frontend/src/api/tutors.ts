@@ -1,11 +1,24 @@
 import { apiClient } from "@/api/client";
-import type { AvailabilityInterval, LessonType, Slot, TutorCatalogItem, TutorProfile, TutorPublicProfile } from "@/types/tutor";
+import type { AvailabilityInterval, LessonType, Slot, TutorCatalogItem, TutorProfile, TutorPublicProfile, TutorStudent } from "@/types/tutor";
 import type { GroupPublic } from "@/types/group";
 import type { RatingSummary, Review } from "@/types/stats";
 import type { TutorSubject, TutorSubjectSelection } from "@/types/subject";
 
-export async function getCatalog(params: { subject_id?: string; price_min?: number; price_max?: number }) {
-  const { data } = await apiClient.get<TutorCatalogItem[]>("/tutors", { params });
+export interface TutorCatalogPage {
+  items: TutorCatalogItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export async function getCatalog(params: {
+  subject_id?: string;
+  price_min?: number;
+  price_max?: number;
+  page?: number;
+  page_size?: number;
+}) {
+  const { data } = await apiClient.get<TutorCatalogPage>("/tutors", { params });
   return data;
 }
 
@@ -70,6 +83,13 @@ export async function uploadMyPhoto(file: File) {
   return data;
 }
 
+export async function uploadAboutImage(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await apiClient.post<{ url: string }>("/tutors/me/about-image", form);
+  return data.url;
+}
+
 export async function getMyAvailability() {
   const { data } = await apiClient.get<AvailabilityInterval[]>("/tutors/me/availability");
   return data;
@@ -102,6 +122,11 @@ export async function updateLessonType(id: string, payload: Partial<LessonType>)
 
 export async function deleteLessonType(id: string) {
   await apiClient.delete(`/tutors/me/lesson-types/${id}`);
+}
+
+export async function getMyStudents() {
+  const { data } = await apiClient.get<TutorStudent[]>("/tutors/me/students");
+  return data;
 }
 
 export async function getMySubjects() {

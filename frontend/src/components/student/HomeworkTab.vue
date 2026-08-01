@@ -57,7 +57,11 @@ onMounted(load);
           Отметить выполненным
         </button>
         <div v-else class="flex items-center gap-2">
-          <input type="file" class="text-xs" @change="onFileChange(item.submission_id, $event)" />
+          <input
+            type="file"
+            class="text-xs file:mr-2 file:rounded-md file:border-0 file:bg-slate-900 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
+            @change="onFileChange(item.submission_id, $event)"
+          />
           <button type="button" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs text-white dark:bg-white dark:text-slate-900" @click="upload(item)">
             Отправить
           </button>

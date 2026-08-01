@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.enums import UserRole
+from app.models.enums import GroupAttendanceOutcome, UserRole
 from app.models.group import Group
 from app.models.lesson_type import LessonType
 from app.models.tutor import TutorProfile
@@ -12,6 +12,8 @@ from app.models.user import User
 from app.schemas.group import (
     GroupApplicationCreate,
     GroupApplicationOut,
+    GroupAttendanceEntryOut,
+    GroupAttendanceReplace,
     GroupCreate,
     GroupMembershipOut,
     GroupOccurrenceCreate,
@@ -239,6 +241,43 @@ async def delete_occurrence(group_id: uuid.UUID, occurrence_id: uuid.UUID, curre
     if occurrence.group_id != group_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Занятие группы не найдено")
     await group_service.delete_occurrence(db, occurrence)
+
+
+@router.get("/{group_id}/occurrences/{occurrence_id}/attendance", response_model=list[GroupAttendanceEntryOut])
+async def get_occurrence_attendance(
+    group_id: uuid.UUID, occurrence_id: uuid.UUID, current_user: CurrentUser, db: DbSession
+) -> list[GroupAttendanceEntryOut]:
+    _require_tutor(current_user)
+    await _owned_group(db, current_user, group_id)
+    occurrence = await group_service.get_occurrence_or_404(db, occurrence_id)
+    if occurrence.group_id != group_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Занятие группы не найдено")
+    rows = await group_service.get_occurrence_attendance(db, occurrence)
+    return [GroupAttendanceEntryOut(**row) for row in rows]
+
+
+@router.put("/{group_id}/occurrences/{occurrence_id}/attendance", response_model=list[GroupAttendanceEntryOut])
+async def set_occurrence_attendance(
+    group_id: uuid.UUID,
+    occurrence_id: uuid.UUID,
+    payload: GroupAttendanceReplace,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[GroupAttendanceEntryOut]:
+    _require_tutor(current_user)
+    await _owned_group(db, current_user, group_id)
+    occurrence = await group_service.get_occurrence_or_404(db, occurrence_id)
+    if occurrence.group_id != group_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Занятие группы не найдено")
+    valid_outcomes = {o.value for o in GroupAttendanceOutcome}
+    for entry in payload.entries:
+        if entry.outcome not in valid_outcomes:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Некорректный статус посещения")
+    await group_service.set_occurrence_attendance(
+        db, occurrence, [(e.student_id, e.outcome) for e in payload.entries]
+    )
+    rows = await group_service.get_occurrence_attendance(db, occurrence)
+    return [GroupAttendanceEntryOut(**row) for row in rows]
 
 
 @router.post("/{group_id}/apply", response_model=GroupApplicationOut, status_code=status.HTTP_201_CREATED)

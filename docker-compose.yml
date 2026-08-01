@@ -22,5 +22,23 @@ services:
     ports:
       - "80:80"
 
+  # Long-polling Telegram bot (see README "Telegram-бот"), the /start handler behind
+  # the "Подключить Telegram" flow in Settings. Optional and off by default - only
+  # meaningful once TELEGRAM_BOT_TOKEN is actually set in backend/.env, so it's
+  # gated behind a profile: `docker compose --profile bot up -d` to include it.
+  # Without that flag `docker compose up` never starts it, so an unconfigured token
+  # can't crash-loop this service.
+  bot:
+    build: ./backend
+    restart: unless-stopped
+    profiles: ["bot"]
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:///storage/db.sqlite3
+    volumes:
+      - backend_storage:/app/storage
+    command: ["python", "-m", "app.scripts.run_telegram_bot"]
+
 volumes:
   backend_storage:

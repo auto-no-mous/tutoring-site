@@ -4,8 +4,13 @@ from datetime import datetime
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.enums import HomeworkSubmissionMode, UserRole
-from app.schemas.homework import HomeworkAssignmentOut, HomeworkSubmissionOut, StudentHomeworkOut
+from app.models.enums import HomeworkSubmissionMode, HomeworkSubmissionStatus, UserRole
+from app.schemas.homework import (
+    HomeworkAssignmentOut,
+    HomeworkSubmissionOut,
+    HomeworkSubmissionStatusUpdate,
+    StudentHomeworkOut,
+)
 from app.services import file_service, homework_service, tutor_service
 from app.utils.time import to_utc
 
@@ -73,6 +78,24 @@ async def list_my_assignments(current_user: CurrentUser, db: DbSession) -> list[
     return [HomeworkAssignmentOut.model_validate(r, from_attributes=True) for r in rows]
 
 
+@router.get("/tutor/me/student-status", response_model=dict[str, str])
+async def my_students_homework_status(current_user: CurrentUser, db: DbSession) -> dict[str, str]:
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    status_map = await homework_service.get_student_status_map(db, profile.id)
+    return {str(student_id): value for student_id, value in status_map.items()}
+
+
+@router.get("/tutor/me/students/{student_id}", response_model=list[StudentHomeworkOut])
+async def student_homework_for_tutor(
+    student_id: uuid.UUID, current_user: CurrentUser, db: DbSession
+) -> list[StudentHomeworkOut]:
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    items = await homework_service.list_student_homework_for_tutor(db, profile.id, student_id)
+    return [StudentHomeworkOut(**item) for item in items]
+
+
 @router.get("/{assignment_id}/submissions", response_model=list[HomeworkSubmissionOut])
 async def list_submissions(assignment_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> list[HomeworkSubmissionOut]:
     _require_tutor(current_user)
@@ -106,6 +129,19 @@ async def mark_done(submission_id: uuid.UUID, current_user: CurrentUser, db: DbS
     _require_student(current_user)
     submission = await homework_service.get_submission_or_404(db, submission_id)
     submission = await homework_service.mark_submission_done(db, submission, current_user)
+    return HomeworkSubmissionOut.model_validate(submission, from_attributes=True)
+
+
+@router.patch("/submissions/{submission_id}/status", response_model=HomeworkSubmissionOut)
+async def set_submission_status(
+    submission_id: uuid.UUID, payload: HomeworkSubmissionStatusUpdate, current_user: CurrentUser, db: DbSession
+) -> HomeworkSubmissionOut:
+    _require_tutor(current_user)
+    if payload.status not in (s.value for s in HomeworkSubmissionStatus):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Некорректный статус")
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    submission = await homework_service.get_submission_or_404(db, submission_id)
+    submission = await homework_service.set_submission_status(db, profile, submission, payload.status)
     return HomeworkSubmissionOut.model_validate(submission, from_attributes=True)
 
 

@@ -10,6 +10,7 @@ class AdminTutorUpdate(TutorProfileUpdate):
     first_name: str | None = Field(default=None, min_length=1, max_length=255)
     last_name: str | None = Field(default=None, min_length=1, max_length=255)
     patronymic: str | None = Field(default=None, max_length=255)
+    email: EmailStr | None = None
     is_active: bool | None = None
 
 
@@ -18,7 +19,18 @@ class AdminStudentUpdate(BaseModel):
     last_name: str | None = Field(default=None, min_length=1, max_length=255)
     patronymic: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = None
+    grade: int | None = Field(default=None, ge=1, le=11)
+    timezone: str | None = None
     is_active: bool | None = None
+
+
+class AdminGroupMemberAdd(BaseModel):
+    student_id: uuid.UUID
+
+
+class AdminGroupTutorReassign(BaseModel):
+    tutor_id: uuid.UUID
+    lesson_type_id: uuid.UUID
 
 
 class AdminBookingCreate(BaseModel):
@@ -29,3 +41,8 @@ class AdminBookingCreate(BaseModel):
     end_at: UTCDateTime
     meeting_link: str | None = None
     notes: str | None = None
+
+
+class AdminBookingReschedule(BaseModel):
+    new_start_at: UTCDateTime
+    duration_minutes: int | None = Field(default=None, gt=0)

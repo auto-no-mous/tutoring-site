@@ -146,20 +146,26 @@ async def is_slot_available(
     return not slot_conflicts(start_at_utc, end_at_utc, tutor.break_between_lessons_minutes, reserved_zones)
 
 
-async def compute_day_slots(
+async def compute_day_slots_by_duration(
     db: AsyncSession,
     tutor: TutorProfile,
-    lesson_type: LessonType,
+    duration_minutes: int,
     target_date: dt.date,
     exclude_booking_id: uuid.UUID | None = None,
+    ignore_lead_time: bool = False,
 ) -> list[SlotOut]:
+    """Core slot-grid computation, keyed off a raw duration rather than a LessonType
+    row - lets the admin reschedule browser work for manual bookings too (see
+    compute_day_slots below and booking_service.get_admin_reschedule_context).
+    `ignore_lead_time` skips the tutor's min_lead_time_hours cushion, consistent with
+    admin_reschedule_booking having no policy limits."""
     weekday = target_date.weekday()  # Monday=0 ... Sunday=6, matches WeeklyAvailability.weekday
     intervals = await get_weekly_intervals(db, tutor.id, weekday)
     if not intervals:
         return []
 
     step = dt.timedelta(minutes=tutor.slot_granularity_minutes)
-    duration = dt.timedelta(minutes=lesson_type.duration_minutes)
+    duration = dt.timedelta(minutes=duration_minutes)
     break_minutes = tutor.break_between_lessons_minutes
 
     day_start_utc = _combine_msk(target_date, dt.time(0, 0)).astimezone(dt.timezone.utc)
@@ -175,7 +181,7 @@ async def compute_day_slots(
         exclude_booking_id=exclude_booking_id,
     )
 
-    not_before = utcnow() + dt.timedelta(hours=tutor.min_lead_time_hours)
+    not_before = utcnow() if ignore_lead_time else utcnow() + dt.timedelta(hours=tutor.min_lead_time_hours)
 
     slots: list[SlotOut] = []
     for interval_start, interval_end in intervals:
@@ -201,6 +207,39 @@ async def compute_day_slots(
     return slots
 
 
+async def compute_day_slots(
+    db: AsyncSession,
+    tutor: TutorProfile,
+    lesson_type: LessonType,
+    target_date: dt.date,
+    exclude_booking_id: uuid.UUID | None = None,
+) -> list[SlotOut]:
+    return await compute_day_slots_by_duration(
+        db, tutor, lesson_type.duration_minutes, target_date, exclude_booking_id=exclude_booking_id
+    )
+
+
+async def compute_available_dates_by_duration(
+    db: AsyncSession,
+    tutor: TutorProfile,
+    duration_minutes: int,
+    date_from: dt.date,
+    date_to: dt.date,
+    exclude_booking_id: uuid.UUID | None = None,
+    ignore_lead_time: bool = False,
+) -> list[dt.date]:
+    available_dates: list[dt.date] = []
+    current = date_from
+    while current <= date_to:
+        slots = await compute_day_slots_by_duration(
+            db, tutor, duration_minutes, current, exclude_booking_id=exclude_booking_id, ignore_lead_time=ignore_lead_time
+        )
+        if any(s.available for s in slots):
+            available_dates.append(current)
+        current += dt.timedelta(days=1)
+    return available_dates
+
+
 async def compute_available_dates(
     db: AsyncSession,
     tutor: TutorProfile,
@@ -209,11 +248,6 @@ async def compute_available_dates(
     date_to: dt.date,
     exclude_booking_id: uuid.UUID | None = None,
 ) -> list[dt.date]:
-    available_dates: list[dt.date] = []
-    current = date_from
-    while current <= date_to:
-        slots = await compute_day_slots(db, tutor, lesson_type, current, exclude_booking_id=exclude_booking_id)
-        if any(s.available for s in slots):
-            available_dates.append(current)
-        current += dt.timedelta(days=1)
-    return available_dates
+    return await compute_available_dates_by_duration(
+        db, tutor, lesson_type.duration_minutes, date_from, date_to, exclude_booking_id=exclude_booking_id
+    )

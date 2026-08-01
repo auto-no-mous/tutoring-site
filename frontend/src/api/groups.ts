@@ -1,5 +1,12 @@
 import { apiClient } from "@/api/client";
-import type { Group, GroupApplication, GroupMembership, GroupOccurrence, GroupScheduleSlot } from "@/types/group";
+import type {
+  Group,
+  GroupApplication,
+  GroupAttendanceEntry,
+  GroupMembership,
+  GroupOccurrence,
+  GroupScheduleSlot,
+} from "@/types/group";
 
 export async function createGroup(payload: {
   name: string;
@@ -95,5 +102,24 @@ export async function myMemberships() {
 
 export async function myApplications() {
   const { data } = await apiClient.get<GroupApplication[]>("/groups/me/applications");
+  return data;
+}
+
+export async function getOccurrenceAttendance(groupId: string, occurrenceId: string) {
+  const { data } = await apiClient.get<GroupAttendanceEntry[]>(
+    `/groups/${groupId}/occurrences/${occurrenceId}/attendance`,
+  );
+  return data;
+}
+
+export async function setOccurrenceAttendance(
+  groupId: string,
+  occurrenceId: string,
+  entries: { student_id: string; outcome: string }[],
+) {
+  const { data } = await apiClient.put<GroupAttendanceEntry[]>(
+    `/groups/${groupId}/occurrences/${occurrenceId}/attendance`,
+    { entries },
+  );
   return data;
 }

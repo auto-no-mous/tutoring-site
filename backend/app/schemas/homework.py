@@ -33,6 +33,10 @@ class HomeworkSubmissionOut(BaseModel):
     submitted_at: UTCDateTime | None
 
 
+class HomeworkSubmissionStatusUpdate(BaseModel):
+    status: str
+
+
 class StudentHomeworkOut(BaseModel):
     submission_id: uuid.UUID
     assignment_id: uuid.UUID

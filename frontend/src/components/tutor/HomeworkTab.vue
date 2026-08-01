@@ -3,12 +3,15 @@ import { onMounted, ref } from "vue";
 
 import { listMyGroups } from "@/api/groups";
 import { createHomework, deleteAssignment, listMyAssignments, listSubmissions } from "@/api/homework";
+import { getMyStudents } from "@/api/tutors";
 import type { Group } from "@/types/group";
 import type { HomeworkAssignment, HomeworkSubmission } from "@/types/homework";
+import type { TutorStudent } from "@/types/tutor";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
 const assignments = ref<HomeworkAssignment[]>([]);
 const groups = ref<Group[]>([]);
+const students = ref<TutorStudent[]>([]);
 const submissionsByAssignment = ref<Record<string, HomeworkSubmission[]>>({});
 
 const title = ref("");
@@ -20,10 +23,20 @@ const contentUrl = ref("");
 const file = ref<File | null>(null);
 const error = ref("");
 
+function studentLabel(student: TutorStudent): string {
+  const name = `${student.last_name} ${student.first_name}`.trim();
+  return student.grade ? `${name}, ${student.grade}-й класс` : name;
+}
+
 async function load(): Promise<void> {
-  const [assignmentsData, groupsData] = await Promise.all([listMyAssignments(), listMyGroups()]);
+  const [assignmentsData, groupsData, studentsData] = await Promise.all([
+    listMyAssignments(),
+    listMyGroups(),
+    getMyStudents(),
+  ]);
   assignments.value = assignmentsData;
   groups.value = groupsData;
+  students.value = studentsData;
 }
 
 function onFileChange(event: Event): void {
@@ -70,23 +83,26 @@ onMounted(load);
 <template>
   <div class="flex max-w-2xl flex-col gap-6">
     <form class="flex flex-col gap-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800" @submit.prevent="create">
-      <label class="flex flex-col gap-1 text-sm">
-        Название задания
-        <input v-model="title" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
-      </label>
       <div class="flex gap-4 text-sm">
         <label class="flex items-center gap-2"><input v-model="targetType" type="radio" value="student" /> Ученику</label>
         <label class="flex items-center gap-2"><input v-model="targetType" type="radio" value="group" /> Группе</label>
       </div>
       <label v-if="targetType === 'student'" class="flex flex-col gap-1 text-sm">
-        ID ученика
-        <input v-model="studentId" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
+        Ученик
+        <select v-model="studentId" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700">
+          <option value="" disabled>Выберите ученика</option>
+          <option v-for="student in students" :key="student.id" :value="student.id">{{ studentLabel(student) }}</option>
+        </select>
       </label>
       <label v-else class="flex flex-col gap-1 text-sm">
         Группа
         <select v-model="groupId" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700">
           <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option>
         </select>
+      </label>
+      <label class="flex flex-col gap-1 text-sm">
+        Название задания
+        <input v-model="title" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
       </label>
       <label class="flex flex-col gap-1 text-sm">
         Что должен сделать ученик
@@ -99,7 +115,11 @@ onMounted(load);
         Ссылка на материал (или прикрепите файл ниже)
         <input v-model="contentUrl" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
       </label>
-      <input type="file" @change="onFileChange" />
+      <input
+        type="file"
+        class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
+        @change="onFileChange"
+      />
       <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
       <button type="submit" class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900">Отправить</button>
     </form>

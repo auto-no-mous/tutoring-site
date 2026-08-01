@@ -1,4 +1,12 @@
+import datetime as dt
+
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import create_email_verification_token
+from app.models.user import User
+from app.services import telegram_service
 
 
 async def test_register_login_me_refresh(client: AsyncClient) -> None:
@@ -88,6 +96,36 @@ async def test_login_wrong_password_rejected(client: AsyncClient) -> None:
     assert resp.status_code == 401
 
 
+async def test_repeated_failed_logins_lock_account(client: AsyncClient) -> None:
+    payload = {
+        "email": "lockout@example.com",
+        "password": "supersecret1",
+        "first_name": "T",
+        "last_name": "T",
+        "role": "student",
+        "pd_consent": True,
+    }
+    await client.post("/api/v1/auth/register", json=payload)
+
+    for _ in range(5):
+        resp = await client.post("/api/v1/auth/login", json={"email": "lockout@example.com", "password": "nope"})
+        assert resp.status_code == 401
+
+    # 5th failure trips the lock - even the correct password is now rejected.
+    locked_resp = await client.post(
+        "/api/v1/auth/login", json={"email": "lockout@example.com", "password": "supersecret1"}
+    )
+    assert locked_resp.status_code == 429
+
+    # A fresh account with a different email is unaffected.
+    other_payload = {**payload, "email": "not-locked@example.com"}
+    await client.post("/api/v1/auth/register", json=other_payload)
+    other_resp = await client.post(
+        "/api/v1/auth/login", json={"email": "not-locked@example.com", "password": "supersecret1"}
+    )
+    assert other_resp.status_code == 200
+
+
 async def test_update_my_settings(client: AsyncClient) -> None:
     register_payload = {
         "email": "settings@example.com",
@@ -157,3 +195,104 @@ async def test_change_email_requires_reverification_and_rejects_duplicates(clien
     assert old_login.status_code == 401
     new_login = await client.post("/api/v1/auth/login", json={"email": "changed@example.com", "password": "supersecret1"})
     assert new_login.status_code == 200
+
+
+async def test_verify_email_flow(client: AsyncClient) -> None:
+    resp = await client.post("/api/v1/auth/register", json={
+        "email": "verifyme@example.com",
+        "password": "supersecret1",
+        "first_name": "T",
+        "last_name": "T",
+        "role": "student",
+        "pd_consent": True,
+    })
+    user_id = resp.json()["user"]["id"]
+    assert resp.json()["user"]["email_verified"] is False
+
+    # Registration itself already issued a token and "sent" it (logged, since email
+    # is disabled in tests) - a real user would click that link. We mint an
+    # equivalent one here since we don't have the mailbox.
+    token = create_email_verification_token(user_id)
+    verify_resp = await client.post("/api/v1/auth/verify-email", json={"token": token})
+    assert verify_resp.status_code == 200, verify_resp.text
+    assert verify_resp.json()["email_verified"] is True
+
+    bad_resp = await client.post("/api/v1/auth/verify-email", json={"token": "not-a-real-token"})
+    assert bad_resp.status_code == 400
+
+
+async def test_resend_verification_email(client: AsyncClient) -> None:
+    resp = await client.post("/api/v1/auth/register", json={
+        "email": "resend@example.com",
+        "password": "supersecret1",
+        "first_name": "T",
+        "last_name": "T",
+        "role": "student",
+        "pd_consent": True,
+    })
+    user_id = resp.json()["user"]["id"]
+    headers = {"Authorization": f"Bearer {resp.json()['tokens']['access_token']}"}
+
+    resend_resp = await client.post("/api/v1/auth/verify-email/resend", headers=headers)
+    assert resend_resp.status_code == 204
+
+    token = create_email_verification_token(user_id)
+    await client.post("/api/v1/auth/verify-email", json={"token": token})
+
+    already_verified_resp = await client.post("/api/v1/auth/verify-email/resend", headers=headers)
+    assert already_verified_resp.status_code == 409
+
+
+async def test_telegram_link_token_flow(client: AsyncClient, db_session: AsyncSession) -> None:
+    resp = await client.post("/api/v1/auth/register", json={
+        "email": "tglink@example.com",
+        "password": "supersecret1",
+        "first_name": "T",
+        "last_name": "T",
+        "role": "student",
+        "pd_consent": True,
+    })
+    headers = {"Authorization": f"Bearer {resp.json()['tokens']['access_token']}"}
+
+    issue_resp = await client.post("/api/v1/auth/me/telegram-link-token", headers=headers)
+    assert issue_resp.status_code == 200, issue_resp.text
+    body = issue_resp.json()
+    assert body["token"]
+    # No TELEGRAM_BOT_USERNAME configured in tests - link is None, not a dead URL.
+    assert body["deep_link"] is None
+
+    # This is what the bot's /start handler does once the user opens the deep link.
+    linked_user = await telegram_service.link_chat_by_token(db_session, body["token"], "555444333")
+    assert linked_user is not None
+    assert linked_user.telegram_chat_id == "555444333"
+
+    me_resp = await client.get("/api/v1/auth/me", headers=headers)
+    assert me_resp.json()["telegram_chat_id"] == "555444333"
+
+    # A used (now-cleared) token doesn't link a second time.
+    reused = await telegram_service.link_chat_by_token(db_session, body["token"], "999")
+    assert reused is None
+
+    unknown = await telegram_service.link_chat_by_token(db_session, "not-a-real-token", "123")
+    assert unknown is None
+
+
+async def test_telegram_link_token_expiry(client: AsyncClient, db_session: AsyncSession) -> None:
+    resp = await client.post("/api/v1/auth/register", json={
+        "email": "tgexpired@example.com",
+        "password": "supersecret1",
+        "first_name": "T",
+        "last_name": "T",
+        "role": "student",
+        "pd_consent": True,
+    })
+    headers = {"Authorization": f"Bearer {resp.json()['tokens']['access_token']}"}
+    token = (await client.post("/api/v1/auth/me/telegram-link-token", headers=headers)).json()["token"]
+
+    result = await db_session.execute(select(User).where(User.telegram_link_token == token))
+    user = result.scalar_one()
+    user.telegram_link_token_expires_at = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)
+    await db_session.commit()
+
+    linked = await telegram_service.link_chat_by_token(db_session, token, "111")
+    assert linked is None

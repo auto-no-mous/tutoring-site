@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 
 import { applyToGroup } from "@/api/groups";
 import { getPublicGroups, getPublicProfile, getReviews } from "@/api/tutors";
 import { useAuthStore } from "@/stores/auth";
+import { sanitizeRichText } from "@/utils/richText";
 import type { GroupPublic } from "@/types/group";
 import type { TutorPublicProfile } from "@/types/tutor";
 import type { Review } from "@/types/stats";
@@ -22,12 +23,12 @@ const isLoading = ref(true);
 async function load(): Promise<void> {
   isLoading.value = true;
   try {
-    const [profileData, groupsData, reviewsData] = await Promise.all([
-      getPublicProfile(tutorId),
-      getPublicGroups(tutorId),
-      getReviews(tutorId),
-    ]);
+    // route param may be a UUID or a slug (see backend's get_profile_by_id_or_slug) -
+    // resolve the profile first, then use its real id for the sub-resource calls
+    // below, which only accept a UUID.
+    const profileData = await getPublicProfile(tutorId);
     profile.value = profileData;
+    const [groupsData, reviewsData] = await Promise.all([getPublicGroups(profileData.id), getReviews(profileData.id)]);
     groups.value = groupsData;
     reviews.value = reviewsData;
   } finally {
@@ -42,6 +43,8 @@ async function apply(groupId: string): Promise<void> {
 
 const weekdayNames = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
+const aboutHtml = computed(() => (profile.value?.about ? sanitizeRichText(profile.value.about) : ""));
+
 onMounted(load);
 </script>
 
@@ -49,20 +52,21 @@ onMounted(load);
   <div class="mx-auto max-w-3xl px-4 py-10">
     <p v-if="isLoading" class="text-slate-400">Загрузка…</p>
     <template v-else-if="profile">
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div class="flex gap-4">
-          <img v-if="profile.photo_url" :src="profile.photo_url" alt="" class="h-24 w-24 rounded-full object-cover" />
-          <div v-else class="h-24 w-24 rounded-full bg-slate-200 dark:bg-slate-800"></div>
-          <div>
-            <h1 class="text-2xl font-semibold">{{ profile.display_name }}</h1>
-            <p v-if="profile.avg_rating != null" class="text-sm text-slate-500">
-              ★ {{ profile.avg_rating.toFixed(1) }} ({{ profile.reviews_count }} отзывов)
-            </p>
-          </div>
-        </div>
+      <div class="flex flex-col items-center text-center">
+        <img
+          v-if="profile.photo_url"
+          :src="profile.photo_url"
+          alt=""
+          class="aspect-[3/4] w-[30vw] min-w-40 max-w-sm rounded-lg object-cover"
+        />
+        <div v-else class="aspect-[3/4] w-[30vw] min-w-40 max-w-sm rounded-lg bg-slate-200 dark:bg-slate-800"></div>
+        <h1 class="mt-4 text-2xl font-semibold">{{ profile.display_name }}</h1>
+        <p v-if="profile.avg_rating != null" class="mt-1 text-sm text-slate-500">
+          ★ {{ profile.avg_rating.toFixed(1) }} ({{ profile.reviews_count }} отзывов)
+        </p>
         <RouterLink
-          :to="`/tutors/${tutorId}/book`"
-          class="shrink-0 rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900"
+          :to="`/tutors/${profile.id}/book`"
+          class="mt-4 rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900"
         >
           Записаться на занятие
         </RouterLink>
@@ -82,12 +86,8 @@ onMounted(load);
 
       <section class="mt-6">
         <h2 class="text-lg font-medium">О себе</h2>
-        <p class="mt-1 whitespace-pre-line text-sm text-slate-600 dark:text-slate-300">{{ profile.about || "—" }}</p>
-      </section>
-
-      <section v-if="profile.achievements" class="mt-6">
-        <h2 class="text-lg font-medium">Достижения</h2>
-        <p class="mt-1 whitespace-pre-line text-sm text-slate-600 dark:text-slate-300">{{ profile.achievements }}</p>
+        <div v-if="aboutHtml" class="mt-1 flow-root text-sm text-slate-600 dark:text-slate-300" v-html="aboutHtml"></div>
+        <p v-else class="mt-1 text-sm text-slate-600 dark:text-slate-300">—</p>
       </section>
 
       <section v-if="groups.length > 0" class="mt-8">

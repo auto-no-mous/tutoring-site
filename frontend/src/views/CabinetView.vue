@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 import ChatPanel from "@/components/ChatPanel.vue";
 import SettingsTab from "@/components/SettingsTab.vue";
@@ -17,6 +18,7 @@ import StatsTabTutor from "@/components/tutor/StatsTab.vue";
 import { useAuthStore } from "@/stores/auth";
 
 const auth = useAuthStore();
+const route = useRoute();
 
 const tutorTabs = [
   { key: "bookings", label: "Занятия" },
@@ -40,14 +42,44 @@ const studentTabs = [
 ];
 
 const tabs = computed(() => (auth.user?.role === "tutor" ? tutorTabs : studentTabs));
-const activeTab = ref(tabs.value[0]?.key ?? "bookings");
+
+function initialTab(): string {
+  const queryTab = route.query.tab;
+  if (typeof queryTab === "string" && tabs.value.some((t) => t.key === queryTab)) return queryTab;
+  return tabs.value[0]?.key ?? "bookings";
+}
+
+const activeTab = ref(initialTab());
+
+// Lets header links (components/UserMenu.vue) navigate straight to a tab via
+// /cabinet?tab=... even when already on this page (e.g. switching from "Занятия" to
+// "Настройки" through the menu, not just on first load).
+watch(
+  () => route.query.tab,
+  (queryTab) => {
+    if (typeof queryTab === "string" && tabs.value.some((t) => t.key === queryTab)) {
+      activeTab.value = queryTab;
+    }
+  },
+);
+
+// Section-specific short name format: students show Фамилия + Имя (no patronymic),
+// tutors show Имя + Отчество (no surname, matches the catalog card format).
+const shortName = computed(() => {
+  const user = auth.user;
+  if (!user) return "";
+  if (user.role === "tutor") {
+    return user.patronymic ? `${user.first_name} ${user.patronymic}` : user.first_name;
+  }
+  return `${user.last_name} ${user.first_name}`.trim();
+});
 </script>
 
 <template>
   <div class="mx-auto max-w-5xl px-4 py-10">
     <h1 class="text-2xl font-semibold">Личный кабинет</h1>
     <p class="mt-1 text-sm text-slate-500">
-      {{ auth.user?.display_name }} · {{ auth.user?.role === "tutor" ? "Репетитор" : "Ученик" }}
+      {{ shortName }} · {{ auth.user?.role === "tutor" ? "Репетитор" : "Ученик" }}
     </p>
 
     <nav class="mt-6 flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">

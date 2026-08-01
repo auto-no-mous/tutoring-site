@@ -113,6 +113,25 @@ async def delete_assignment(db: AsyncSession, assignment: HomeworkAssignment) ->
     await db.commit()
 
 
+def _to_student_homework_dict(submission: HomeworkSubmission, assignment: HomeworkAssignment) -> dict:
+    return {
+        "submission_id": submission.id,
+        "assignment_id": assignment.id,
+        "tutor_id": assignment.tutor_id,
+        "group_id": assignment.group_id,
+        "title": assignment.title,
+        "content_type": assignment.content_type,
+        "content_url": assignment.content_url,
+        "content_file_path": assignment.content_file_path,
+        "submission_mode": assignment.submission_mode,
+        "due_at": assignment.due_at,
+        "status": submission.status,
+        "file_path": submission.file_path,
+        "comment": submission.comment,
+        "submitted_at": submission.submitted_at,
+    }
+
+
 async def list_homework_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[dict]:
     result = await db.execute(
         select(HomeworkSubmission, HomeworkAssignment)
@@ -120,27 +139,41 @@ async def list_homework_for_student(db: AsyncSession, student_id: uuid.UUID) -> 
         .where(HomeworkSubmission.student_id == student_id)
         .order_by(HomeworkAssignment.created_at.desc())
     )
-    items = []
-    for submission, assignment in result.all():
-        items.append(
-            {
-                "submission_id": submission.id,
-                "assignment_id": assignment.id,
-                "tutor_id": assignment.tutor_id,
-                "group_id": assignment.group_id,
-                "title": assignment.title,
-                "content_type": assignment.content_type,
-                "content_url": assignment.content_url,
-                "content_file_path": assignment.content_file_path,
-                "submission_mode": assignment.submission_mode,
-                "due_at": assignment.due_at,
-                "status": submission.status,
-                "file_path": submission.file_path,
-                "comment": submission.comment,
-                "submitted_at": submission.submitted_at,
-            }
-        )
-    return items
+    return [_to_student_homework_dict(submission, assignment) for submission, assignment in result.all()]
+
+
+async def list_student_homework_for_tutor(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID
+) -> list[dict]:
+    """One tutor's view of a specific student's homework - powers the "ДЗ" button on
+    a booking card (section: tutor cabinet lesson cards)."""
+    result = await db.execute(
+        select(HomeworkSubmission, HomeworkAssignment)
+        .join(HomeworkAssignment, HomeworkAssignment.id == HomeworkSubmission.assignment_id)
+        .where(HomeworkSubmission.student_id == student_id, HomeworkAssignment.tutor_id == tutor_id)
+        .order_by(HomeworkAssignment.created_at.desc())
+    )
+    return [_to_student_homework_dict(submission, assignment) for submission, assignment in result.all()]
+
+
+async def get_student_status_map(db: AsyncSession, tutor_id: uuid.UUID) -> dict[uuid.UUID, str]:
+    """Per-student aggregate homework status for this tutor, used to color the "ДЗ"
+    button on each booking card: "pending" if any submission is still outstanding,
+    else "done". Students with no submissions at all from this tutor are simply
+    absent from the map (the card falls back to "none")."""
+    result = await db.execute(
+        select(HomeworkSubmission.student_id, HomeworkSubmission.status)
+        .join(HomeworkAssignment, HomeworkAssignment.id == HomeworkSubmission.assignment_id)
+        .where(HomeworkAssignment.tutor_id == tutor_id)
+    )
+    by_student: dict[uuid.UUID, list[str]] = {}
+    for student_id, submission_status in result.all():
+        by_student.setdefault(student_id, []).append(submission_status)
+
+    return {
+        student_id: "pending" if HomeworkSubmissionStatus.PENDING.value in statuses else "done"
+        for student_id, statuses in by_student.items()
+    }
 
 
 async def get_submission_or_404(db: AsyncSession, submission_id: uuid.UUID) -> HomeworkSubmission:
@@ -177,6 +210,24 @@ async def submit_file(
     submission.file_path = file_path
     submission.comment = comment
     submission.submitted_at = utcnow()
+    await db.commit()
+    await db.refresh(submission)
+    return submission
+
+
+async def set_submission_status(
+    db: AsyncSession, tutor: TutorProfile, submission: HomeworkSubmission, new_status: str
+) -> HomeworkSubmission:
+    """Lets the tutor manually override a submission's status - e.g. to close out a
+    month-old "pending" debt that's no longer relevant but the student never
+    completed. Only touches status; doesn't fabricate file_path/submitted_at, since
+    the tutor is asserting an outcome, not pretending the student actually submitted
+    something."""
+    assignment = await get_assignment_or_404(db, submission.assignment_id)
+    if assignment.tutor_id != tutor.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше задание")
+
+    submission.status = new_status
     await db.commit()
     await db.refresh(submission)
     return submission

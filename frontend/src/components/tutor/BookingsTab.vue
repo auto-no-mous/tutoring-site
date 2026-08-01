@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import { createManualBooking, deleteBooking, listTutorBookings, updateBooking } from "@/api/bookings";
+import { createManualBooking, listTutorBookings, setBookingOutcome } from "@/api/bookings";
+import { getMyStudentsHomeworkStatus } from "@/api/homework";
+import BookingCard from "@/components/BookingCard.vue";
 import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
+import RescheduleModal from "@/components/RescheduleModal.vue";
+import { useToastStore } from "@/stores/toast";
 import type { Booking } from "@/types/booking";
 import { formatDateTimeWithMsk } from "@/utils/time";
 import { groupByWeekAndDay } from "@/utils/scheduleGrouping";
 
+const toast = useToastStore();
+
 const bookings = ref<Booking[]>([]);
+const homeworkStatusByStudent = ref<Record<string, string>>({});
 const showForm = ref(false);
 const studentId = ref("");
 const date = ref("");
@@ -16,6 +23,27 @@ const durationMinutes = ref(60);
 const meetingLink = ref("");
 const notes = ref("");
 const error = ref("");
+const reschedulingBooking = ref<Booking | null>(null);
+
+const OUTCOME_OPTIONS = [
+  { value: "conducted", label: "Проведено успешно" },
+  { value: "student_no_show", label: "Ученик не явился" },
+  { value: "tutor_no_show", label: "Репетитор не явился" },
+];
+
+const STATUS_LABELS: Record<string, string> = {
+  cancelled_by_student: "Отменено учеником",
+  cancelled_by_tutor: "Отменено репетитором",
+  rescheduled: "Перенесено",
+};
+
+function isOutcomeEditable(booking: Booking): boolean {
+  return booking.status === "scheduled" && !!booking.student_id && new Date(booking.end_at) < new Date();
+}
+
+function pastStatusLabel(booking: Booking): string {
+  return STATUS_LABELS[booking.status] ?? booking.status;
+}
 
 // The tutor cabinet always shows MSK regardless of the tutor's own location
 // (project_description.md section 2.3), so "today"/week boundaries for grouping
@@ -36,8 +64,16 @@ const past = computed(() =>
 
 const weeks = computed(() => groupByWeekAndDay(upcoming.value, (b) => b.start_at, MSK));
 
+function homeworkStatusFor(booking: Booking): "none" | "pending" | "done" {
+  if (!booking.student_id) return "none";
+  return (homeworkStatusByStudent.value[booking.student_id] as "pending" | "done" | undefined) ?? "none";
+}
+
 async function load(): Promise<void> {
-  bookings.value = await listTutorBookings();
+  [bookings.value, homeworkStatusByStudent.value] = await Promise.all([
+    listTutorBookings(),
+    getMyStudentsHomeworkStatus(),
+  ]);
 }
 
 async function createBlock(): Promise<void> {
@@ -62,16 +98,19 @@ async function createBlock(): Promise<void> {
   }
 }
 
-async function setMeetingLink(booking: Booking): Promise<void> {
-  const link = window.prompt("Ссылка на занятие", booking.meeting_link ?? "");
-  if (link === null) return;
-  await updateBooking(booking.id, { meeting_link: link });
-  await load();
+function openReschedule(booking: Booking): void {
+  reschedulingBooking.value = booking;
 }
 
-async function remove(booking: Booking): Promise<void> {
-  if (!window.confirm("Удалить эту запись?")) return;
-  await deleteBooking(booking.id);
+async function onRescheduled(): Promise<void> {
+  reschedulingBooking.value = null;
+  await load();
+  toast.show("Занятие перенесено");
+}
+
+async function onOutcomeChange(booking: Booking, event: Event): Promise<void> {
+  const outcome = (event.target as HTMLSelectElement).value;
+  await setBookingOutcome(booking.id, outcome);
   await load();
 }
 
@@ -117,19 +156,13 @@ onMounted(load);
     <section>
       <BookingScheduleGroups :weeks="weeks">
         <template #default="{ item: booking }">
-          <div class="flex items-center justify-between">
-            <div>
-              <div class="font-medium">{{ formatDateTimeWithMsk(booking.start_at) }}</div>
-              <div class="text-slate-500">
-                {{ booking.student_display_name ?? (booking.is_manual_block ? "Личная блокировка" : "—") }}
-                <span v-if="booking.recurring_series_id"> · еженедельно</span>
-              </div>
-            </div>
-            <div class="flex gap-2">
-              <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="setMeetingLink(booking)">Ссылка</button>
-              <button type="button" class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 dark:border-red-800" @click="remove(booking)">Удалить</button>
-            </div>
-          </div>
+          <BookingCard
+            :booking="booking"
+            role="tutor"
+            :homework-status="homeworkStatusFor(booking)"
+            @changed="load"
+            @reschedule-requested="openReschedule"
+          />
         </template>
       </BookingScheduleGroups>
     </section>
@@ -138,8 +171,23 @@ onMounted(load);
       <h2 class="text-lg font-medium">История</h2>
       <div v-for="booking in past" :key="booking.id" class="mt-2 flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-500 dark:border-slate-800">
         <div>{{ formatDateTimeWithMsk(booking.start_at) }} · {{ booking.student_display_name ?? "—" }}</div>
-        <div>{{ booking.status }}</div>
+        <select
+          v-if="isOutcomeEditable(booking)"
+          :value="booking.outcome ?? 'conducted'"
+          class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
+          @change="onOutcomeChange(booking, $event)"
+        >
+          <option v-for="opt in OUTCOME_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+        </select>
+        <div v-else>{{ pastStatusLabel(booking) }}</div>
       </div>
     </section>
+
+    <RescheduleModal
+      v-if="reschedulingBooking"
+      :booking="reschedulingBooking"
+      @close="reschedulingBooking = null"
+      @rescheduled="onRescheduled"
+    />
   </div>
 </template>

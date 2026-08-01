@@ -1,11 +1,16 @@
 import uuid
 from datetime import datetime, time
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Time as SATime
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Time as SATime, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
-from app.models.enums import GroupApplicationStatus, GroupMembershipStatus, GroupOccurrenceStatus
+from app.models.enums import (
+    GroupApplicationStatus,
+    GroupAttendanceOutcome,
+    GroupMembershipStatus,
+    GroupOccurrenceStatus,
+)
 from app.utils.time import utcnow
 
 
@@ -80,6 +85,9 @@ class GroupMembership(UUIDPKMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(16), default=GroupMembershipStatus.ACTIVE.value)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=None, default=utcnow)
     left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Who ended the membership - BookedBy.STUDENT (left voluntarily) or .TUTOR
+    # (removed); see group_service._leave. None while still active.
+    left_by: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     group: Mapped["Group"] = relationship(back_populates="memberships")
 
@@ -98,3 +106,19 @@ class GroupOccurrence(UUIDPKMixin, TimestampMixin, Base):
     original_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     group: Mapped["Group"] = relationship(back_populates="occurrences")
+
+
+class GroupAttendance(UUIDPKMixin, TimestampMixin, Base):
+    """Per-student result of a past group occurrence, set by the tutor (activity
+    log). One row per (occurrence, student) who was an active member at the time -
+    only created once the tutor records something other than the implicit CONDUCTED
+    default, same lazy-write pattern as Booking.outcome."""
+
+    __tablename__ = "group_attendances"
+    __table_args__ = (UniqueConstraint("occurrence_id", "student_id", name="uq_group_attendance_occurrence_student"),)
+
+    occurrence_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("group_occurrences.id", ondelete="CASCADE"), index=True
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    outcome: Mapped[str] = mapped_column(String(32), default=GroupAttendanceOutcome.CONDUCTED.value)

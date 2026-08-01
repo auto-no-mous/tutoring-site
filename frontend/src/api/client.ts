@@ -23,6 +23,10 @@ export function clearTokens(): void {
 
 export const apiClient = axios.create({
   baseURL: "/api/v1",
+  // FastAPI's list[str] Query params expect repeated bare keys (?a=1&a=2), not the
+  // bracketed form (?a[]=1&a[]=2) axios uses by default - `indexes: null` switches
+  // array serialization to the repeated-key form.
+  paramsSerializer: { indexes: null },
 });
 
 apiClient.interceptors.request.use((config) => {

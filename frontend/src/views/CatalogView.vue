@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
 import { listSubjects } from "@/api/subjects";
 import { getCatalog } from "@/api/tutors";
 import type { Subject } from "@/types/subject";
 import type { TutorCatalogItem } from "@/types/tutor";
 
+const PAGE_SIZE = 20;
 const PRICE_STEPS = [500, 750, 1000, 1500, 2000, 2500, 3000];
 // "Цена от": каждый пункт, плюс верхний открытый порог.
 const MIN_OPTIONS = [...PRICE_STEPS.map((v) => ({ label: `${v} ₽`, value: v })), { label: "более 3000 ₽", value: 3000.01 }];
@@ -13,20 +14,51 @@ const MIN_OPTIONS = [...PRICE_STEPS.map((v) => ({ label: `${v} ₽`, value: v })
 const MAX_OPTIONS = [{ label: "менее 500 ₽", value: 499.99 }, ...PRICE_STEPS.map((v) => ({ label: `${v} ₽`, value: v }))];
 
 const tutors = ref<TutorCatalogItem[]>([]);
+const total = ref(0);
+const page = ref(0);
 const subjects = ref<Subject[]>([]);
 const subjectId = ref("");
 const priceMin = ref("");
 const priceMax = ref("");
 const isLoading = ref(false);
+const isLoadingMore = ref(false);
+const sentinel = ref<HTMLElement | null>(null);
 
-async function load(): Promise<void> {
-  isLoading.value = true;
+let observer: IntersectionObserver | null = null;
+
+function hasMore(): boolean {
+  // page 0 means we haven't fetched anything yet - always allow that first fetch,
+  // since tutors.length < total (0 < 0) would otherwise be false and loadMore()
+  // would exit before ever making a request.
+  return page.value === 0 || tutors.value.length < total.value;
+}
+
+async function loadMore(): Promise<void> {
+  if (isLoading.value || isLoadingMore.value || !hasMore()) return;
+  isLoadingMore.value = true;
   try {
-    tutors.value = await getCatalog({
+    const result = await getCatalog({
       subject_id: subjectId.value || undefined,
       price_min: priceMin.value ? Number(priceMin.value) : undefined,
       price_max: priceMax.value ? Number(priceMax.value) : undefined,
+      page: page.value + 1,
+      page_size: PAGE_SIZE,
     });
+    tutors.value.push(...result.items);
+    total.value = result.total;
+    page.value = result.page;
+  } finally {
+    isLoadingMore.value = false;
+  }
+}
+
+async function search(): Promise<void> {
+  isLoading.value = true;
+  tutors.value = [];
+  total.value = 0;
+  page.value = 0;
+  try {
+    await loadMore();
   } finally {
     isLoading.value = false;
   }
@@ -34,7 +66,16 @@ async function load(): Promise<void> {
 
 onMounted(async () => {
   subjects.value = await listSubjects();
-  await load();
+  await search();
+
+  observer = new IntersectionObserver((entries) => {
+    if (entries[0]?.isIntersecting) loadMore();
+  });
+  if (sentinel.value) observer.observe(sentinel.value);
+});
+
+onBeforeUnmount(() => {
+  observer?.disconnect();
 });
 </script>
 
@@ -42,7 +83,7 @@ onMounted(async () => {
   <div class="mx-auto max-w-3xl px-4 py-10">
     <h1 class="text-2xl font-semibold">Каталог репетиторов</h1>
 
-    <form class="mt-6 flex flex-wrap gap-3" @submit.prevent="load">
+    <form class="mt-6 flex flex-wrap gap-3" @submit.prevent="search">
       <select
         v-model="subjectId"
         class="min-w-48 flex-1 rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700"
@@ -70,11 +111,11 @@ onMounted(async () => {
       <RouterLink
         v-for="tutor in tutors"
         :key="tutor.id"
-        :to="`/tutors/${tutor.id}`"
+        :to="`/tutors/${tutor.slug ?? tutor.id}`"
         class="flex gap-5 rounded-lg border border-slate-200 p-5 hover:border-slate-400 dark:border-slate-800 dark:hover:border-slate-600"
       >
-        <img v-if="tutor.photo_url" :src="tutor.photo_url" alt="" class="h-28 w-28 shrink-0 rounded-full object-cover" />
-        <div v-else class="h-28 w-28 shrink-0 rounded-full bg-slate-200 dark:bg-slate-800"></div>
+        <img v-if="tutor.photo_url" :src="tutor.photo_url" alt="" class="h-28 w-28 shrink-0 rounded-md object-cover" />
+        <div v-else class="h-28 w-28 shrink-0 rounded-md bg-slate-200 dark:bg-slate-800"></div>
         <div class="flex-1">
           <div class="text-lg font-medium">{{ tutor.name_patronymic }}</div>
           <div v-if="tutor.hourly_price != null" class="mt-1 text-sm text-slate-500">
@@ -95,5 +136,12 @@ onMounted(async () => {
         </div>
       </RouterLink>
     </div>
+
+    <!-- Sentinel: as soon as this scrolls into view, the IntersectionObserver loads
+    the next page. Kept mounted (not v-if) even after everything's loaded so the
+    observer stays attached to a stable element - hasMore() inside loadMore() is what
+    actually stops further requests once total is reached. -->
+    <div ref="sentinel" class="mt-4 h-px"></div>
+    <p v-if="isLoadingMore" class="text-center text-sm text-slate-400">Загружаем ещё…</p>
   </div>
 </template>

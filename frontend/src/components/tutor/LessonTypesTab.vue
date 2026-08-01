@@ -17,15 +17,31 @@ const editDuration = ref(60);
 const editPrice = ref(0);
 const editError = ref("");
 
+const isAdding = ref(false);
+
 async function load(): Promise<void> {
   types.value = await getMyLessonTypes();
+}
+
+function openAdd(): void {
+  name.value = "";
+  format.value = "individual";
+  duration.value = 60;
+  price.value = 1000;
+  error.value = "";
+  isAdding.value = true;
+}
+
+function cancelAdd(): void {
+  isAdding.value = false;
+  error.value = "";
 }
 
 async function create(): Promise<void> {
   error.value = "";
   try {
     await createLessonType({ name: name.value, format: format.value, duration_minutes: duration.value, price: price.value });
-    name.value = "";
+    isAdding.value = false;
     await load();
   } catch {
     error.value = "Не удалось создать тип занятия (длительность должна быть кратна шагу сетки расписания).";
@@ -75,30 +91,6 @@ onMounted(load);
 
 <template>
   <div class="flex max-w-xl flex-col gap-6">
-    <form class="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-4 dark:border-slate-800" @submit.prevent="create">
-      <label class="flex flex-col gap-1 text-sm">
-        Название
-        <input v-model="name" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
-      </label>
-      <label class="flex flex-col gap-1 text-sm">
-        Формат
-        <select v-model="format" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700">
-          <option value="individual">Индивидуальное</option>
-          <option value="group">Групповое</option>
-        </select>
-      </label>
-      <label class="flex flex-col gap-1 text-sm">
-        Длительность, мин
-        <input v-model.number="duration" type="number" min="1" class="w-24 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
-      </label>
-      <label class="flex flex-col gap-1 text-sm">
-        Цена, ₽
-        <input v-model.number="price" type="number" min="0" class="w-24 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
-      </label>
-      <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-slate-900">Добавить</button>
-    </form>
-    <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-
     <div class="flex flex-col gap-2">
       <div v-for="type in types" :key="type.id" class="rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
         <template v-if="editingId === type.id">
@@ -143,5 +135,39 @@ onMounted(load);
         </div>
       </div>
     </div>
+
+    <button
+      v-if="!isAdding"
+      type="button"
+      class="w-fit rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+      @click="openAdd"
+    >
+      Добавить +
+    </button>
+
+    <form v-else class="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-4 dark:border-slate-800" @submit.prevent="create">
+      <label class="flex flex-col gap-1 text-sm">
+        Название
+        <input v-model="name" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
+      </label>
+      <label class="flex flex-col gap-1 text-sm">
+        Формат
+        <select v-model="format" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700">
+          <option value="individual">Индивидуальное</option>
+          <option value="group">Групповое</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-sm">
+        Длительность, мин
+        <input v-model.number="duration" type="number" min="1" class="w-24 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
+      </label>
+      <label class="flex flex-col gap-1 text-sm">
+        Цена, ₽
+        <input v-model.number="price" type="number" min="0" class="w-24 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
+      </label>
+      <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-slate-900">Сохранить</button>
+      <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700" @click="cancelAdd">Отмена</button>
+      <p v-if="error" class="w-full text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+    </form>
   </div>
 </template>

@@ -86,6 +86,7 @@ class GroupMembershipOut(BaseModel):
     status: str
     joined_at: UTCDateTime
     left_at: UTCDateTime | None
+    left_by: str | None = None
     group_name: str = ""
     tutor_display_name: str = ""
 
@@ -110,3 +111,18 @@ class GroupOccurrenceUpdate(BaseModel):
 class GroupOccurrenceCreate(BaseModel):
     start_at: UTCDateTime
     end_at: UTCDateTime
+
+
+class GroupAttendanceEntryOut(BaseModel):
+    student_id: uuid.UUID
+    student_display_name: str
+    outcome: str
+
+
+class GroupAttendanceEntryIn(BaseModel):
+    student_id: uuid.UUID
+    outcome: str
+
+
+class GroupAttendanceReplace(BaseModel):
+    entries: list[GroupAttendanceEntryIn]

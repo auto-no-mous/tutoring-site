@@ -61,6 +61,12 @@ class RegisterResponse(BaseModel):
     tokens: TokenPair
 
 
+class TelegramLinkTokenOut(BaseModel):
+    token: str
+    # None when the bot's @username isn't configured in settings yet.
+    deep_link: str | None
+
+
 class VKAuthRequest(BaseModel):
     code: str
     redirect_uri: str | None = None

@@ -193,15 +193,15 @@ async def test_catalog_filters_by_subject_and_normalizes_hourly_price(
 
     by_subject = await client.get("/api/v1/tutors", params={"subject_id": ids["math_id"]})
     assert by_subject.status_code == 200
-    ids_in_result = {t["id"] for t in by_subject.json()}
+    ids_in_result = {t["id"] for t in by_subject.json()["items"]}
     assert math_tutor_id in ids_in_result
     assert music_tutor_id not in ids_in_result
 
-    math_item = next(t for t in by_subject.json() if t["id"] == math_tutor_id)
+    math_item = next(t for t in by_subject.json()["items"] if t["id"] == math_tutor_id)
     assert math_item["hourly_price"] == 2000.0
     assert math_item["subjects"] == ["Математика"]
 
     price_filtered = await client.get("/api/v1/tutors", params={"price_min": 1900, "price_max": 2100})
-    price_filtered_ids = {t["id"] for t in price_filtered.json()}
+    price_filtered_ids = {t["id"] for t in price_filtered.json()["items"]}
     assert math_tutor_id in price_filtered_ids
     assert music_tutor_id not in price_filtered_ids

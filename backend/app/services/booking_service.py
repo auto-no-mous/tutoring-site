@@ -2,16 +2,17 @@ import datetime as dt
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.booking import Booking, RecurringSeries
-from app.models.enums import BookedBy, BookingStatus, NotificationEvent
+from app.models.enums import BookedBy, BookingStatus, NotificationEvent, UserRole
 from app.models.lesson_type import LessonType
+from app.models.subject import TutorSubject, TutorSubjectDirection
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.schemas.booking import BookingTutorUpdate, ManualBookingCreate
-from app.services import notification_service, schedule_service
+from app.services import notification_service, schedule_service, tutor_service
 from app.services.schedule_service import MSK
 from app.utils.time import ensure_aware, utcnow
 
@@ -61,6 +62,32 @@ async def get_student_names(db: AsyncSession, student_ids: list[uuid.UUID]) -> d
     return dict(result.all())
 
 
+async def list_students_for_tutor(db: AsyncSession, tutor_id: uuid.UUID) -> list[dict]:
+    """Distinct students who have (or had) a booking with this tutor, most recently
+    taught first - powers the student picker in the homework-assignment form."""
+    last_lesson = (
+        select(Booking.student_id, func.max(Booking.start_at).label("last_start_at"))
+        .where(Booking.tutor_id == tutor_id, Booking.student_id.is_not(None))
+        .group_by(Booking.student_id)
+        .subquery()
+    )
+    result = await db.execute(
+        select(User.id, User.first_name, User.last_name, User.grade, last_lesson.c.last_start_at)
+        .join(last_lesson, last_lesson.c.student_id == User.id)
+        .order_by(last_lesson.c.last_start_at.desc())
+    )
+    return [
+        {
+            "id": student_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "grade": grade,
+            "last_lesson_at": last_start_at,
+        }
+        for student_id, first_name, last_name, grade, last_start_at in result.all()
+    ]
+
+
 async def get_series_active_map(db: AsyncSession, series_ids: list[uuid.UUID | None]) -> dict[uuid.UUID, bool]:
     ids = {sid for sid in series_ids if sid is not None}
     if not ids:
@@ -95,15 +122,64 @@ async def get_tutor_name_patronymic_map(db: AsyncSession, tutor_ids: list[uuid.U
 
 
 async def list_all_bookings(
-    db: AsyncSession, tutor_id: uuid.UUID | None = None, student_id: uuid.UUID | None = None
-) -> list[Booking]:
+    db: AsyncSession,
+    tutor_id: uuid.UUID | None = None,
+    student_id: uuid.UUID | None = None,
+    date_from: dt.datetime | None = None,
+    date_to: dt.datetime | None = None,
+    subject_id: uuid.UUID | None = None,
+    direction_id: uuid.UUID | None = None,
+    grade: int | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Booking], int]:
+    """Admin bookings list (see api/v1/admin.py). subject_id/direction_id/grade filter
+    by attributes of the tutor/student rather than the booking itself - a booking
+    doesn't record which subject was taught, so this narrows to "tutor teaches this
+    subject/direction" and "student is in this grade" respectively, mirroring the
+    subquery-based filtering tutor_service.search_catalog already uses for the public
+    catalog's subject filter."""
     query = select(Booking)
     if tutor_id is not None:
         query = query.where(Booking.tutor_id == tutor_id)
     if student_id is not None:
         query = query.where(Booking.student_id == student_id)
-    result = await db.execute(query.order_by(Booking.start_at))
-    return list(result.scalars().all())
+    if date_from is not None:
+        query = query.where(Booking.start_at >= date_from)
+    if date_to is not None:
+        query = query.where(Booking.start_at < date_to)
+    if subject_id is not None:
+        query = query.where(
+            Booking.tutor_id.in_(select(TutorSubject.tutor_id).where(TutorSubject.subject_id == subject_id))
+        )
+    if direction_id is not None:
+        query = query.where(
+            Booking.tutor_id.in_(
+                select(TutorSubject.tutor_id)
+                .join(TutorSubjectDirection, TutorSubjectDirection.tutor_subject_id == TutorSubject.id)
+                .where(TutorSubjectDirection.direction_id == direction_id)
+            )
+        )
+    if grade is not None:
+        query = query.where(Booking.student_id.in_(select(User.id).where(User.grade == grade)))
+
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+    query = query.order_by(Booking.start_at).offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    return list(result.scalars().all()), total
+
+
+async def get_tutor_display_names(db: AsyncSession, tutor_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Full "Фамилия Имя Отчество" tutor names, keyed by TutorProfile.id - used by the
+    admin bookings list (unlike get_tutor_name_patronymic_map's "Имя Отчество"-only
+    student-facing format)."""
+    ids = {i for i in tutor_ids if i is not None}
+    if not ids:
+        return {}
+    result = await db.execute(
+        select(TutorProfile.id, User.display_name).join(User, User.id == TutorProfile.user_id).where(TutorProfile.id.in_(ids))
+    )
+    return dict(result.all())
 
 
 async def generate_recurring_occurrences(
@@ -313,6 +389,23 @@ async def delete_booking(db: AsyncSession, booking: Booking) -> None:
     await db.commit()
 
 
+async def set_booking_outcome(db: AsyncSession, tutor: TutorProfile, booking: Booking, outcome: str) -> Booking:
+    """Tutor-recorded result of a past individual lesson (activity log). Only valid
+    for a booking that actually took place as scheduled - a cancelled/rescheduled
+    booking never "happens", so it has no outcome to record."""
+    if booking.tutor_id != tutor.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше занятие")
+    if booking.status != BookingStatus.SCHEDULED.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, "У отменённого или перенесённого занятия нет результата")
+    if ensure_aware(booking.end_at) > utcnow():
+        raise HTTPException(status.HTTP_409_CONFLICT, "Занятие ещё не состоялось")
+
+    booking.outcome = outcome
+    await db.commit()
+    await db.refresh(booking)
+    return booking
+
+
 async def _count_since(db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID, status_value: str, since: dt.datetime) -> int:
     result = await db.execute(
         select(Booking).where(
@@ -330,49 +423,77 @@ def _start_of_month(now: dt.datetime) -> dt.datetime:
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-async def cancel_booking_by_student(db: AsyncSession, booking: Booking, student: User, reason: str | None) -> Booking:
-    if booking.student_id != student.id:
+async def _check_booking_actor(db: AsyncSession, booking: Booking, actor: User) -> bool:
+    """Ownership check shared by cancel/reschedule - `actor` may be either the
+    student on the booking or the tutor who owns it. Returns whether the actor is
+    the tutor, which callers use to decide whether the cancellation/reschedule
+    policy (hours-before/per-month limits) applies - that policy only exists to
+    bound student-initiated changes; a tutor managing their own schedule isn't
+    subject to it - and who to notify afterwards."""
+    if actor.role == UserRole.TUTOR.value:
+        profile = await tutor_service.get_profile_by_user_id(db, actor.id)
+        if booking.tutor_id != profile.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше занятие")
+        return True
+    if booking.student_id != actor.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше занятие")
+    return False
+
+
+async def cancel_booking(db: AsyncSession, booking: Booking, actor: User, reason: str | None) -> Booking:
+    is_tutor = await _check_booking_actor(db, booking, actor)
     if booking.status != BookingStatus.SCHEDULED.value:
         raise HTTPException(status.HTTP_409_CONFLICT, "Занятие уже отменено, перенесено или завершено")
 
-    tutor = await db.get(TutorProfile, booking.tutor_id)
     now = utcnow()
     start_at = ensure_aware(booking.start_at)
-    if start_at - now < dt.timedelta(hours=tutor.cancel_min_hours_before):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Отменить можно не позднее чем за {tutor.cancel_min_hours_before} ч. до занятия",
+
+    if not is_tutor:
+        tutor = await db.get(TutorProfile, booking.tutor_id)
+        if start_at - now < dt.timedelta(hours=tutor.cancel_min_hours_before):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Отменить можно не позднее чем за {tutor.cancel_min_hours_before} ч. до занятия",
+            )
+
+        cancels_this_month = await _count_since(
+            db, booking.tutor_id, actor.id, BookingStatus.CANCELLED_BY_STUDENT.value, _start_of_month(now)
         )
+        if cancels_this_month >= tutor.cancel_max_per_month:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Превышен лимит отмен занятий в этом месяце")
 
-    cancels_this_month = await _count_since(
-        db, booking.tutor_id, student.id, BookingStatus.CANCELLED_BY_STUDENT.value, _start_of_month(now)
-    )
-    if cancels_this_month >= tutor.cancel_max_per_month:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Превышен лимит отмен занятий в этом месяце")
-
-    booking.status = BookingStatus.CANCELLED_BY_STUDENT.value
-    booking.cancelled_by = BookedBy.STUDENT.value
+    booking.status = BookingStatus.CANCELLED_BY_TUTOR.value if is_tutor else BookingStatus.CANCELLED_BY_STUDENT.value
+    booking.cancelled_by = BookedBy.TUTOR.value if is_tutor else BookedBy.STUDENT.value
     booking.cancelled_at = now
     booking.cancel_reason = reason
     await db.commit()
     await db.refresh(booking)
 
-    await notification_service.notify_tutor(
-        db,
-        booking.tutor_id,
-        NotificationEvent.SCHEDULE_CHANGE,
-        "Ученик отменил занятие",
-        f"{student.display_name} отменил(а) занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
-    )
+    if is_tutor:
+        if booking.student_id is not None:
+            await notification_service.notify(
+                db,
+                booking.student_id,
+                NotificationEvent.SCHEDULE_CHANGE,
+                "Репетитор отменил занятие",
+                f"Занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК) отменено репетитором.",
+            )
+    else:
+        await notification_service.notify_tutor(
+            db,
+            booking.tutor_id,
+            NotificationEvent.SCHEDULE_CHANGE,
+            "Ученик отменил занятие",
+            f"{actor.display_name} отменил(а) занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
+        )
     return booking
 
 
-async def get_reschedule_context(db: AsyncSession, booking: Booking, student: User) -> tuple[TutorProfile, LessonType]:
+async def get_reschedule_context(db: AsyncSession, booking: Booking, actor: User) -> tuple[TutorProfile, LessonType]:
     """Ownership/eligibility checks shared by the reschedule-availability browsing
-    endpoints and the actual reschedule action - see api/v1/bookings.py."""
-    if booking.student_id != student.id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше занятие")
+    endpoints and the actual reschedule action - see api/v1/bookings.py. `actor` may
+    be either the student on the booking or the tutor who owns it."""
+    await _check_booking_actor(db, booking, actor)
     if booking.status != BookingStatus.SCHEDULED.value:
         raise HTTPException(status.HTTP_409_CONFLICT, "Занятие уже отменено, перенесено или завершено")
     if booking.lesson_type_id is None:
@@ -385,23 +506,24 @@ async def get_reschedule_context(db: AsyncSession, booking: Booking, student: Us
     return tutor, lesson_type
 
 
-async def reschedule_booking_by_student(
-    db: AsyncSession, booking: Booking, student: User, new_start_at: dt.datetime
-) -> Booking:
-    tutor, lesson_type = await get_reschedule_context(db, booking, student)
+async def reschedule_booking(db: AsyncSession, booking: Booking, actor: User, new_start_at: dt.datetime) -> Booking:
+    tutor, lesson_type = await get_reschedule_context(db, booking, actor)
+    is_tutor = actor.role == UserRole.TUTOR.value
     now = utcnow()
     start_at = ensure_aware(booking.start_at)
-    if start_at - now < dt.timedelta(hours=tutor.reschedule_min_hours_before):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Перенести можно не позднее чем за {tutor.reschedule_min_hours_before} ч. до занятия",
-        )
 
-    reschedules_this_month = await _count_since(
-        db, booking.tutor_id, student.id, BookingStatus.RESCHEDULED.value, _start_of_month(now)
-    )
-    if reschedules_this_month >= tutor.reschedule_max_per_month:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Превышен лимит переносов занятий в этом месяце")
+    if not is_tutor:
+        if start_at - now < dt.timedelta(hours=tutor.reschedule_min_hours_before):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Перенести можно не позднее чем за {tutor.reschedule_min_hours_before} ч. до занятия",
+            )
+
+        reschedules_this_month = await _count_since(
+            db, booking.tutor_id, actor.id, BookingStatus.RESCHEDULED.value, _start_of_month(now)
+        )
+        if reschedules_this_month >= tutor.reschedule_max_per_month:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Превышен лимит переносов занятий в этом месяце")
 
     if not await schedule_service.is_slot_available(
         db, tutor, lesson_type, new_start_at, exclude_booking_id=booking.id
@@ -416,7 +538,7 @@ async def reschedule_booking_by_student(
         start_at=new_start_at,
         end_at=new_end_at,
         status=BookingStatus.SCHEDULED.value,
-        booked_by=BookedBy.STUDENT.value,
+        booked_by=BookedBy.TUTOR.value if is_tutor else BookedBy.STUDENT.value,
         meeting_link=booking.meeting_link,
         recurring_series_id=booking.recurring_series_id,
         rescheduled_from_id=booking.id,
@@ -424,18 +546,118 @@ async def reschedule_booking_by_student(
     db.add(new_booking)
 
     booking.status = BookingStatus.RESCHEDULED.value
-    booking.cancelled_by = BookedBy.STUDENT.value
+    booking.cancelled_by = BookedBy.TUTOR.value if is_tutor else BookedBy.STUDENT.value
     booking.cancelled_at = now
 
     await db.commit()
     await db.refresh(new_booking)
 
+    if is_tutor:
+        if booking.student_id is not None:
+            await notification_service.notify(
+                db,
+                booking.student_id,
+                NotificationEvent.SCHEDULE_CHANGE,
+                "Репетитор перенёс занятие",
+                f"Занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК) перенесено репетитором "
+                f"на {new_start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
+            )
+    else:
+        await notification_service.notify_tutor(
+            db,
+            booking.tutor_id,
+            NotificationEvent.SCHEDULE_CHANGE,
+            "Ученик перенёс занятие",
+            f"{actor.display_name} перенёс(ла) занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} "
+            f"на {new_start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
+        )
+    return new_booking
+
+
+async def get_admin_reschedule_context(db: AsyncSession, booking: Booking) -> tuple[TutorProfile, int]:
+    """Like get_reschedule_context, but for the admin path: no ownership check, and
+    works for bookings without a lesson_type (manual blocks) by deriving a default
+    duration from the booking itself instead of requiring a LessonType row."""
+    if booking.status != BookingStatus.SCHEDULED.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Занятие уже отменено, перенесено или завершено")
+    tutor = await db.get(TutorProfile, booking.tutor_id)
+    if tutor is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Репетитор не найден")
+    duration_minutes = int((ensure_aware(booking.end_at) - ensure_aware(booking.start_at)).total_seconds() // 60)
+    return tutor, duration_minutes
+
+
+async def admin_reschedule_booking(
+    db: AsyncSession, booking: Booking, new_start_at: dt.datetime, duration_minutes: int | None = None
+) -> Booking:
+    """Admin override: moves any scheduled booking (typed or a manual block) to a
+    new time, by default preserving its original duration (or a caller-supplied
+    override). Unlike the tutor/student paths this has no policy limits and doesn't
+    require a lesson_type - only a basic double-booking check, since admin has full
+    override authority (AdminView's own "Полный доступ ко всей системе")."""
+    if booking.status != BookingStatus.SCHEDULED.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Занятие уже отменено, перенесено или завершено")
+
+    tutor = await db.get(TutorProfile, booking.tutor_id)
+    if tutor is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Репетитор не найден")
+
+    now = utcnow()
+    start_at = ensure_aware(booking.start_at)
+    duration = (
+        dt.timedelta(minutes=duration_minutes) if duration_minutes else ensure_aware(booking.end_at) - start_at
+    )
+    new_end_at = new_start_at + duration
+
+    reserved_zones = await schedule_service.get_reserved_zones(
+        db,
+        tutor.id,
+        new_start_at - dt.timedelta(days=1),
+        new_end_at + dt.timedelta(days=1),
+        tutor.break_between_lessons_minutes,
+        exclude_booking_id=booking.id,
+    )
+    if schedule_service.slot_conflicts(new_start_at, new_end_at, tutor.break_between_lessons_minutes, reserved_zones):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Выбранное время уже недоступно")
+
+    new_booking = Booking(
+        tutor_id=booking.tutor_id,
+        student_id=booking.student_id,
+        lesson_type_id=booking.lesson_type_id,
+        start_at=new_start_at,
+        end_at=new_end_at,
+        status=BookingStatus.SCHEDULED.value,
+        booked_by=BookedBy.ADMIN.value,
+        is_manual_block=booking.is_manual_block,
+        meeting_link=booking.meeting_link,
+        notes=booking.notes,
+        recurring_series_id=booking.recurring_series_id,
+        rescheduled_from_id=booking.id,
+    )
+    db.add(new_booking)
+
+    booking.status = BookingStatus.RESCHEDULED.value
+    booking.cancelled_by = BookedBy.ADMIN.value
+    booking.cancelled_at = now
+
+    await db.commit()
+    await db.refresh(new_booking)
+
+    if booking.student_id is not None:
+        await notification_service.notify(
+            db,
+            booking.student_id,
+            NotificationEvent.SCHEDULE_CHANGE,
+            "Занятие перенесено администрацией",
+            f"Занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК) перенесено "
+            f"на {new_start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
+        )
     await notification_service.notify_tutor(
         db,
         booking.tutor_id,
         NotificationEvent.SCHEDULE_CHANGE,
-        "Ученик перенёс занятие",
-        f"{student.display_name} перенёс(ла) занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} "
+        "Занятие перенесено администрацией",
+        f"Занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК) перенесено "
         f"на {new_start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
     )
     return new_booking

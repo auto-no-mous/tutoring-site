@@ -338,6 +338,75 @@ async def test_tutor_manual_block_and_crud(client: AsyncClient) -> None:
     assert all(b["id"] != block["id"] for b in tutor_list)
 
 
+async def test_tutor_can_cancel_and_reschedule_without_policy_limits(client: AsyncClient) -> None:
+    # High policy thresholds that would block a student outright - a tutor managing
+    # their own schedule isn't subject to them.
+    tutor = await _setup_tutor(
+        client,
+        "book-tutor8@example.com",
+        cancel_min_hours_before=48,
+        reschedule_min_hours_before=48,
+    )
+    student = await _register(client, "book-student8@example.com", "student")
+
+    start_at = _next_weekday_datetime(0, 10)
+    create_resp = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={"tutor_id": tutor["id"], "lesson_type_id": tutor["lesson_type_id"], "start_at": start_at.isoformat()},
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    booking_id = create_resp.json()["id"]
+
+    new_start = _next_weekday_datetime(0, 15)
+    resched_resp = await client.post(
+        f"/api/v1/bookings/{booking_id}/reschedule",
+        headers=tutor["headers"],
+        json={"new_start_at": new_start.isoformat()},
+    )
+    assert resched_resp.status_code == 200, resched_resp.text
+    new_booking = resched_resp.json()
+    assert new_booking["status"] == "scheduled"
+    assert new_booking["student_display_name"] is not None  # tutor-facing shape, not student-facing
+
+    tutor_list = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    by_id = {b["id"]: b for b in tutor_list}
+    assert by_id[booking_id]["status"] == "rescheduled"
+    assert by_id[booking_id]["cancelled_by"] == "tutor"
+
+    cancel_resp = await client.post(
+        f"/api/v1/bookings/{new_booking['id']}/cancel", headers=tutor["headers"], json={"reason": None}
+    )
+    assert cancel_resp.status_code == 200, cancel_resp.text
+    assert cancel_resp.json()["status"] == "cancelled_by_tutor"
+
+
+async def test_tutor_cannot_cancel_or_reschedule_other_tutors_booking(client: AsyncClient) -> None:
+    tutor_a = await _setup_tutor(client, "book-tutorC@example.com")
+    tutor_b = await _setup_tutor(client, "book-tutorD@example.com")
+    student = await _register(client, "book-student9@example.com", "student")
+
+    start_at = _next_weekday_datetime(0, 10)
+    create_resp = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={"tutor_id": tutor_a["id"], "lesson_type_id": tutor_a["lesson_type_id"], "start_at": start_at.isoformat()},
+    )
+    booking_id = create_resp.json()["id"]
+
+    cancel_resp = await client.post(
+        f"/api/v1/bookings/{booking_id}/cancel", headers=tutor_b["headers"], json={"reason": None}
+    )
+    assert cancel_resp.status_code == 403
+
+    reschedule_resp = await client.post(
+        f"/api/v1/bookings/{booking_id}/reschedule",
+        headers=tutor_b["headers"],
+        json={"new_start_at": (start_at + dt.timedelta(hours=2)).isoformat()},
+    )
+    assert reschedule_resp.status_code == 403
+
+
 async def test_tutor_cannot_modify_other_tutors_booking(client: AsyncClient) -> None:
     tutor_a = await _setup_tutor(client, "book-tutorA@example.com")
     tutor_b = await _setup_tutor(client, "book-tutorB@example.com")

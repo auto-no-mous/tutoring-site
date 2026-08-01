@@ -5,11 +5,12 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.booking import RecurringSeries
-from app.models.enums import UserRole
+from app.models.enums import BookingOutcome, UserRole
 from app.schemas.booking import (
     BookingCancelRequest,
     BookingCreate,
     BookingOut,
+    BookingOutcomeUpdate,
     BookingRescheduleRequest,
     BookingTutorUpdate,
     ManualBookingCreate,
@@ -30,6 +31,11 @@ def _require_student(user: CurrentUser) -> None:
 def _require_tutor(user: CurrentUser) -> None:
     if user.role != UserRole.TUTOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Доступно только репетиторам")
+
+
+def _require_student_or_tutor(user: CurrentUser) -> None:
+    if user.role not in (UserRole.STUDENT, UserRole.TUTOR):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недоступно")
 
 
 def _to_booking_out(
@@ -63,6 +69,20 @@ async def _to_student_booking_out(db: DbSession, booking) -> BookingOut:
     )
 
 
+async def _to_role_aware_booking_out(db: DbSession, booking, current_user: CurrentUser) -> BookingOut:
+    """Cancel/reschedule are now available to both roles - render the response shape
+    each side's UI actually expects (see the two builders above)."""
+    if current_user.role == UserRole.TUTOR:
+        names = await booking_service.get_student_names(db, [booking.student_id] if booking.student_id else [])
+        series_map = await booking_service.get_series_active_map(db, [booking.recurring_series_id])
+        return _to_booking_out(
+            booking,
+            names.get(booking.student_id) if booking.student_id else None,
+            series_map.get(booking.recurring_series_id),
+        )
+    return await _to_student_booking_out(db, booking)
+
+
 @router.post("", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
 async def create_booking(payload: BookingCreate, current_user: CurrentUser, db: DbSession) -> BookingOut:
     _require_student(current_user)
@@ -94,17 +114,17 @@ async def list_my_bookings(current_user: CurrentUser, db: DbSession) -> list[Boo
 async def cancel_booking(
     booking_id: uuid.UUID, payload: BookingCancelRequest, current_user: CurrentUser, db: DbSession
 ) -> BookingOut:
-    _require_student(current_user)
+    _require_student_or_tutor(current_user)
     booking = await booking_service.get_booking_or_404(db, booking_id)
-    booking = await booking_service.cancel_booking_by_student(db, booking, current_user, payload.reason)
-    return await _to_student_booking_out(db, booking)
+    booking = await booking_service.cancel_booking(db, booking, current_user, payload.reason)
+    return await _to_role_aware_booking_out(db, booking, current_user)
 
 
 @router.get("/{booking_id}/reschedule/dates", response_model=list[dt.date])
 async def get_reschedule_dates(
     booking_id: uuid.UUID, date_from: dt.date, date_to: dt.date, current_user: CurrentUser, db: DbSession
 ) -> list[dt.date]:
-    _require_student(current_user)
+    _require_student_or_tutor(current_user)
     if (date_to - date_from).days > 60:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Слишком большой диапазон дат")
     booking = await booking_service.get_booking_or_404(db, booking_id)
@@ -118,7 +138,7 @@ async def get_reschedule_dates(
 async def get_reschedule_slots(
     booking_id: uuid.UUID, date: dt.date, current_user: CurrentUser, db: DbSession
 ) -> list[SlotOut]:
-    _require_student(current_user)
+    _require_student_or_tutor(current_user)
     booking = await booking_service.get_booking_or_404(db, booking_id)
     tutor, lesson_type = await booking_service.get_reschedule_context(db, booking, current_user)
     return await schedule_service.compute_day_slots(db, tutor, lesson_type, date, exclude_booking_id=booking.id)
@@ -128,12 +148,10 @@ async def get_reschedule_slots(
 async def reschedule_booking(
     booking_id: uuid.UUID, payload: BookingRescheduleRequest, current_user: CurrentUser, db: DbSession
 ) -> BookingOut:
-    _require_student(current_user)
+    _require_student_or_tutor(current_user)
     booking = await booking_service.get_booking_or_404(db, booking_id)
-    new_booking = await booking_service.reschedule_booking_by_student(
-        db, booking, current_user, payload.new_start_at
-    )
-    return await _to_student_booking_out(db, new_booking)
+    new_booking = await booking_service.reschedule_booking(db, booking, current_user, payload.new_start_at)
+    return await _to_role_aware_booking_out(db, new_booking, current_user)
 
 
 @router.get("/series/me", response_model=list[RecurringSeriesDetailOut])
@@ -207,3 +225,22 @@ async def delete_booking(booking_id: uuid.UUID, current_user: CurrentUser, db: D
     if booking.tutor_id != profile.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше занятие")
     await booking_service.delete_booking(db, booking)
+
+
+@router.patch("/{booking_id}/outcome", response_model=BookingOut)
+async def set_booking_outcome(
+    booking_id: uuid.UUID, payload: BookingOutcomeUpdate, current_user: CurrentUser, db: DbSession
+) -> BookingOut:
+    _require_tutor(current_user)
+    if payload.outcome not in (o.value for o in BookingOutcome):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Некорректный статус занятия")
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    booking = await booking_service.get_booking_or_404(db, booking_id)
+    booking = await booking_service.set_booking_outcome(db, profile, booking, payload.outcome)
+    names = await booking_service.get_student_names(db, [booking.student_id] if booking.student_id else [])
+    series_map = await booking_service.get_series_active_map(db, [booking.recurring_series_id])
+    return _to_booking_out(
+        booking,
+        names.get(booking.student_id) if booking.student_id else None,
+        series_map.get(booking.recurring_series_id),
+    )

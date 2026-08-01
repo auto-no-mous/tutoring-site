@@ -7,6 +7,7 @@ export interface User {
   first_name: string;
   last_name: string;
   patronymic: string | null;
+  grade: number | null;
   role: UserRole;
   email_verified: boolean;
   is_active: boolean;

@@ -65,12 +65,87 @@ async def test_update_profile_and_hide_from_catalog(client: AsyncClient) -> None
 
     # Hidden profiles are excluded from the public catalog...
     catalog_resp = await client.get("/api/v1/tutors")
-    assert all(item["id"] != tutor_id for item in catalog_resp.json())
+    assert all(item["id"] != tutor_id for item in catalog_resp.json()["items"])
 
     # ...but remain reachable by direct link.
     direct_resp = await client.get(f"/api/v1/tutors/{tutor_id}")
     assert direct_resp.status_code == 200
     assert direct_resp.json()["about"] == "10 лет опыта"
+
+
+async def test_tutor_slug_set_and_resolve(client: AsyncClient) -> None:
+    tutor = await _register_tutor(client, "slug-tutor@example.com")
+
+    set_resp = await client.patch("/api/v1/tutors/me", headers=tutor["headers"], json={"slug": "smoke-tutor"})
+    assert set_resp.status_code == 200, set_resp.text
+    assert set_resp.json()["slug"] == "smoke-tutor"
+    tutor_id = set_resp.json()["id"]
+
+    by_slug = await client.get("/api/v1/tutors/smoke-tutor")
+    assert by_slug.status_code == 200
+    assert by_slug.json()["id"] == tutor_id
+
+    by_id = await client.get(f"/api/v1/tutors/{tutor_id}")
+    assert by_id.status_code == 200
+    assert by_id.json()["id"] == tutor_id
+
+    missing = await client.get("/api/v1/tutors/no-such-slug")
+    assert missing.status_code == 404
+
+
+async def test_tutor_slug_uniqueness_and_reserved_word(client: AsyncClient) -> None:
+    tutor_a = await _register_tutor(client, "slug-a@example.com")
+    tutor_b = await _register_tutor(client, "slug-b@example.com")
+
+    first = await client.patch("/api/v1/tutors/me", headers=tutor_a["headers"], json={"slug": "taken-nick"})
+    assert first.status_code == 200, first.text
+
+    dup = await client.patch("/api/v1/tutors/me", headers=tutor_b["headers"], json={"slug": "taken-nick"})
+    assert dup.status_code == 409
+
+    # Re-setting your own current slug to itself is not a conflict.
+    same = await client.patch("/api/v1/tutors/me", headers=tutor_a["headers"], json={"slug": "taken-nick"})
+    assert same.status_code == 200
+
+    reserved = await client.patch("/api/v1/tutors/me", headers=tutor_b["headers"], json={"slug": "me"})
+    assert reserved.status_code == 422
+
+    bad_format = await client.patch("/api/v1/tutors/me", headers=tutor_b["headers"], json={"slug": "Not Valid!"})
+    assert bad_format.status_code == 422
+
+    # Clearing the slug (explicit null) goes back to no nickname.
+    cleared = await client.patch("/api/v1/tutors/me", headers=tutor_a["headers"], json={"slug": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["slug"] is None
+
+
+async def test_catalog_pagination(client: AsyncClient) -> None:
+    for i in range(3):
+        tutor = await _register_tutor(client, f"page-tutor{i}@example.com")
+        await client.post(
+            "/api/v1/tutors/me/lesson-types",
+            headers=tutor["headers"],
+            json={"name": "Занятие", "format": "individual", "duration_minutes": 60, "price": 1000},
+        )
+
+    page1 = await client.get("/api/v1/tutors", params={"page": 1, "page_size": 2})
+    assert page1.status_code == 200
+    body1 = page1.json()
+    assert body1["page"] == 1
+    assert body1["page_size"] == 2
+    assert len(body1["items"]) == 2
+    assert body1["total"] >= 3
+
+    page2 = await client.get("/api/v1/tutors", params={"page": 2, "page_size": 2})
+    body2 = page2.json()
+    assert len(body2["items"]) >= 1
+    # No overlap between pages.
+    ids1 = {t["id"] for t in body1["items"]}
+    ids2 = {t["id"] for t in body2["items"]}
+    assert ids1.isdisjoint(ids2)
+
+    bad_resp = await client.get("/api/v1/tutors", params={"page": 0})
+    assert bad_resp.status_code == 422
 
 
 async def test_lesson_type_duration_must_match_granularity(client: AsyncClient) -> None:
@@ -95,10 +170,10 @@ async def test_catalog_price_filter_and_public_lesson_types(client: AsyncClient)
     tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
 
     in_range = await client.get("/api/v1/tutors", params={"price_min": 1000, "price_max": 3000})
-    assert any(item["id"] == tutor_id for item in in_range.json())
+    assert any(item["id"] == tutor_id for item in in_range.json()["items"])
 
     out_of_range = await client.get("/api/v1/tutors", params={"price_min": 5000})
-    assert all(item["id"] != tutor_id for item in out_of_range.json())
+    assert all(item["id"] != tutor_id for item in out_of_range.json()["items"])
 
     public_types = await client.get(f"/api/v1/tutors/{tutor_id}/lesson-types")
     assert public_types.status_code == 200

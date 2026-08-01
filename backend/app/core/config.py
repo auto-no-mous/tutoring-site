@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str | None = None
     telegram_enabled: bool = False
+    # Bot's @username (without the @), used to build the t.me deep link shown in
+    # Settings for the "Подключить Telegram" flow - see app.services.telegram_service.
+    telegram_bot_username: str | None = None
 
     # VK OAuth
     vk_client_id: str | None = None
@@ -60,6 +63,14 @@ class Settings(BaseSettings):
     # scripts/create_admin.py - never read at request time.
     admin_email: str | None = None
     admin_password: str | None = None
+
+    # Rate limiting (app.core.rate_limit) - on by default, disabled by the test suite
+    # (see tests/conftest.py) since a shared in-memory limiter would otherwise trip
+    # across unrelated tests hitting /auth/* from the same client IP.
+    rate_limit_enabled: bool = True
+
+    # Optional error tracking (app.core.logging) - inert unless a DSN is configured.
+    sentry_dsn: str | None = None
 
 
 @lru_cache

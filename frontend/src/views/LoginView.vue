@@ -55,6 +55,7 @@ async function onSubmit(): Promise<void> {
         Войти
       </button>
     </form>
+    <RouterLink to="/forgot-password" class="text-sm text-slate-500 hover:underline">Забыли пароль?</RouterLink>
     <RouterLink to="/register" class="text-sm text-slate-500 hover:underline">
       Нет аккаунта? Зарегистрироваться
     </RouterLink>

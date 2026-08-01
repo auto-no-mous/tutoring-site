@@ -15,10 +15,18 @@ class TutorProfile(UUIDPKMixin, TimestampMixin, Base):
     )
 
     photo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Optional custom nickname for a pretty public profile URL
+    # (it-tutor.pro/tutors/<slug>), settable after registration - see
+    # tutor_service.update_profile for format/uniqueness validation and
+    # get_profile_by_id_or_slug for the lookup side.
+    slug: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
     # What the tutor prepares for is now structured (Subject/Direction, see
     # app.models.subject) rather than free text - see TutorSubject/TutorSubjectDirection.
+    # Rich text (bold/italic/underline/links), sanitized on the frontend before render.
+    # Used to have a separate `achievements` field; merged into `about` (see migration
+    # add_grade_to_users_merge_achievements_into_about) since both were free-form text
+    # about the tutor and having two boxes was confusing.
     about: Mapped[str] = mapped_column(Text, default="")
-    achievements: Mapped[str] = mapped_column(Text, default="")
 
     # Hidden from the public catalog, still reachable via direct link (section 2.1)
     is_hidden: Mapped[bool] = mapped_column(Boolean, default=False)

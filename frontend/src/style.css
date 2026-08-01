@@ -11,3 +11,32 @@ body,
 body {
   @apply bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100;
 }
+
+/* Rich text image alignment (see utils/richText.ts's IMG_ALIGN_CLASSES) - shared by
+   the RichTextEditor's own contenteditable area and the sanitized public render. */
+.rt-img-left,
+.rt-img-right,
+.rt-img-center,
+.rt-img-full {
+  border-radius: 0.375rem;
+}
+.rt-img-left {
+  float: left;
+  max-width: 50%;
+  margin: 0 1rem 0.5rem 0;
+}
+.rt-img-right {
+  float: right;
+  max-width: 50%;
+  margin: 0 0 0.5rem 1rem;
+}
+.rt-img-center {
+  display: block;
+  max-width: 100%;
+  margin: 0.5rem auto;
+}
+.rt-img-full {
+  display: block;
+  width: 100%;
+  margin: 0.5rem 0;
+}

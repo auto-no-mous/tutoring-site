@@ -1,12 +1,18 @@
 <script setup lang="ts">
+import { useRouter } from "vue-router";
+
+import ToastContainer from "@/components/ToastContainer.vue";
+import UserMenu from "@/components/UserMenu.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useThemeStore } from "@/stores/theme";
 
 const auth = useAuthStore();
 const themeStore = useThemeStore();
+const router = useRouter();
 
 async function onLogout(): Promise<void> {
   await auth.logout();
+  await router.push({ name: "catalog" });
 }
 </script>
 
@@ -15,11 +21,12 @@ async function onLogout(): Promise<void> {
     <header class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
       <RouterLink to="/" class="text-lg font-semibold">it-tutor.pro</RouterLink>
       <nav class="flex items-center gap-4 text-sm">
-        <RouterLink to="/">Каталог</RouterLink>
         <template v-if="auth.isAuthenticated">
-          <RouterLink v-if="auth.user?.role === 'admin'" to="/admin">Админка</RouterLink>
-          <RouterLink v-else to="/cabinet">Кабинет</RouterLink>
-          <button type="button" @click="onLogout">Выйти</button>
+          <template v-if="auth.user?.role === 'admin'">
+            <RouterLink to="/admin">Админка</RouterLink>
+            <button type="button" @click="onLogout">Выйти</button>
+          </template>
+          <UserMenu v-else />
         </template>
         <template v-else>
           <RouterLink to="/login">Войти</RouterLink>
@@ -43,5 +50,6 @@ async function onLogout(): Promise<void> {
         <RouterLink to="/legal/agreement">Пользовательское соглашение</RouterLink>
       </div>
     </footer>
+    <ToastContainer />
   </div>
 </template>

@@ -1,4 +1,10 @@
+import os
 from collections.abc import AsyncGenerator
+
+# Must run before `app.main` (and therefore `app.core.rate_limit`) is imported: a
+# shared in-memory limiter would otherwise trip across unrelated tests hitting
+# /auth/* from the same client IP, since httpx's ASGITransport doesn't vary it.
+os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

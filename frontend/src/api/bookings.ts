@@ -75,3 +75,8 @@ export async function updateBooking(id: string, payload: Partial<Booking>) {
 export async function deleteBooking(id: string) {
   await apiClient.delete(`/bookings/${id}`);
 }
+
+export async function setBookingOutcome(id: string, outcome: string) {
+  const { data } = await apiClient.patch<Booking>(`/bookings/${id}/outcome`, { outcome });
+  return data;
+}

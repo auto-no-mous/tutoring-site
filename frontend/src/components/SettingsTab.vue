@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import axios from "axios";
 import { onMounted, ref } from "vue";
 
 import { listMyRecurringSeries, stopSeries } from "@/api/bookings";
 import { getMyProfile, updateMyProfile } from "@/api/tutors";
-import { updateMySettings } from "@/api/users";
+import { getTelegramLinkToken, resendVerificationEmail, updateMySettings } from "@/api/users";
 import { useAuthStore } from "@/stores/auth";
 import type { RecurringSeriesDetail } from "@/types/booking";
 import type { TutorProfile } from "@/types/tutor";
@@ -14,12 +15,19 @@ const auth = useAuthStore();
 const firstName = ref(auth.user?.first_name ?? "");
 const lastName = ref(auth.user?.last_name ?? "");
 const patronymic = ref(auth.user?.patronymic ?? "");
+const grade = ref<number | null>(auth.user?.grade ?? null);
 const email = ref(auth.user?.email ?? "");
 const timezone = ref(auth.user?.timezone ?? "Europe/Moscow");
-const telegramChatId = ref(auth.user?.telegram_chat_id ?? "");
 const emailNotifications = ref(auth.user?.email_notifications_enabled ?? true);
 const savedMessage = ref("");
 const emailError = ref("");
+const resendMessage = ref("");
+const isResending = ref(false);
+
+const telegramDeepLink = ref<string | null>(null);
+const telegramLinkError = ref("");
+const isLinkingTelegram = ref(false);
+const isCheckingTelegram = ref(false);
 
 const tutorProfile = ref<TutorProfile | null>(null);
 const policySavedMessage = ref("");
@@ -50,20 +58,66 @@ async function save(): Promise<void> {
       first_name: firstName.value,
       last_name: lastName.value,
       patronymic: patronymic.value || null,
+      grade: grade.value,
       email: email.value || undefined,
       timezone: timezone.value,
-      telegram_chat_id: telegramChatId.value || null,
       email_notifications_enabled: emailNotifications.value,
     });
     auth.user = updated;
     savedMessage.value = "Сохранено";
-  } catch (err: any) {
-    if (err?.response?.status === 409) {
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 409) {
       emailError.value = "Эта почта уже используется другим аккаунтом";
     } else {
       emailError.value = "Не удалось сохранить";
     }
   }
+}
+
+async function resendVerification(): Promise<void> {
+  isResending.value = true;
+  resendMessage.value = "";
+  try {
+    await resendVerificationEmail();
+    resendMessage.value = "Письмо отправлено";
+  } catch {
+    resendMessage.value = "Не удалось отправить письмо";
+  } finally {
+    isResending.value = false;
+  }
+}
+
+async function connectTelegram(): Promise<void> {
+  isLinkingTelegram.value = true;
+  telegramLinkError.value = "";
+  try {
+    const { deep_link } = await getTelegramLinkToken();
+    if (!deep_link) {
+      telegramLinkError.value = "Бот пока не настроен на сервере — обратитесь к администратору.";
+      return;
+    }
+    telegramDeepLink.value = deep_link;
+    window.open(deep_link, "_blank");
+  } finally {
+    isLinkingTelegram.value = false;
+  }
+}
+
+async function checkTelegramLinked(): Promise<void> {
+  isCheckingTelegram.value = true;
+  try {
+    await auth.fetchCurrentUser();
+    if (auth.user?.telegram_chat_id) {
+      telegramDeepLink.value = null;
+    }
+  } finally {
+    isCheckingTelegram.value = false;
+  }
+}
+
+async function disconnectTelegram(): Promise<void> {
+  const updated = await updateMySettings({ telegram_chat_id: null });
+  auth.user = updated;
 }
 
 async function savePolicy(): Promise<void> {
@@ -105,12 +159,24 @@ onMounted(load);
         <input v-model="patronymic" class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" />
       </label>
 
+      <label v-if="auth.user?.role === 'student'" class="flex flex-col gap-1 text-sm">
+        Класс
+        <select v-model.number="grade" class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700">
+          <option :value="null">—</option>
+          <option v-for="n in 11" :key="n" :value="n">{{ n }}-й класс</option>
+        </select>
+      </label>
+
       <label class="flex flex-col gap-1 text-sm">
         Почта
         <input v-model="email" type="email" class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" />
-        <span v-if="auth.user?.email && !auth.user?.email_verified" class="text-xs text-amber-600 dark:text-amber-400">
-          Почта не подтверждена
-        </span>
+        <div v-if="auth.user?.email && !auth.user?.email_verified" class="flex items-center gap-2 text-xs">
+          <span class="text-amber-600 dark:text-amber-400">Почта не подтверждена</span>
+          <button type="button" :disabled="isResending" class="text-slate-500 underline disabled:opacity-50" @click="resendVerification">
+            Отправить письмо ещё раз
+          </button>
+          <span v-if="resendMessage" class="text-slate-400">{{ resendMessage }}</span>
+        </div>
         <span class="text-xs text-slate-400">При смене почты потребуется подтвердить её заново.</span>
         <span v-if="emailError" class="text-xs text-red-600 dark:text-red-400">{{ emailError }}</span>
       </label>
@@ -121,10 +187,30 @@ onMounted(load);
         <span class="text-xs text-slate-400">Определяется автоматически, можно скорректировать вручную.</span>
       </label>
 
-      <label class="flex flex-col gap-1 text-sm">
-        Telegram chat ID (для уведомлений)
-        <input v-model="telegramChatId" placeholder="напишите боту, чтобы узнать свой ID" class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" />
-      </label>
+      <div class="flex flex-col gap-1 text-sm">
+        Telegram (для уведомлений)
+        <div v-if="auth.user?.telegram_chat_id" class="flex items-center gap-2">
+          <span class="text-green-600 dark:text-green-400">Подключён</span>
+          <button type="button" class="text-xs text-slate-500 underline" @click="disconnectTelegram">Отключить</button>
+        </div>
+        <div v-else class="flex flex-col gap-1">
+          <button
+            type="button"
+            :disabled="isLinkingTelegram"
+            class="w-fit rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-700"
+            @click="connectTelegram"
+          >
+            Подключить Telegram
+          </button>
+          <div v-if="telegramDeepLink" class="flex items-center gap-2 text-xs">
+            <span class="text-slate-400">Откройте бота, нажмите «Запустить», затем вернитесь сюда.</span>
+            <button type="button" :disabled="isCheckingTelegram" class="text-slate-500 underline disabled:opacity-50" @click="checkTelegramLinked">
+              Проверить
+            </button>
+          </div>
+          <span v-if="telegramLinkError" class="text-xs text-red-600 dark:text-red-400">{{ telegramLinkError }}</span>
+        </div>
+      </div>
 
       <label class="flex items-center gap-2 text-sm">
         <input v-model="emailNotifications" type="checkbox" />
