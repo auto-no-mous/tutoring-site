@@ -52,7 +52,7 @@ async def create_homework(
 
     content_file_path = None
     if has_file:
-        content_file_path = await file_service.save_upload(file, "homework")
+        content_file_path = await file_service.save_upload(file, "homework", file_service.ALLOWED_ATTACHMENT_TYPES)
 
     due_at_parsed = to_utc(datetime.fromisoformat(due_at)) if due_at else None
 
@@ -155,6 +155,6 @@ async def upload_submission(
 ) -> HomeworkSubmissionOut:
     _require_student(current_user)
     submission = await homework_service.get_submission_or_404(db, submission_id)
-    file_path = await file_service.save_upload(file, "homework-submissions")
+    file_path = await file_service.save_upload(file, "homework-submissions", file_service.ALLOWED_ATTACHMENT_TYPES)
     submission = await homework_service.submit_file(db, submission, current_user, file_path, comment)
     return HomeworkSubmissionOut.model_validate(submission, from_attributes=True)

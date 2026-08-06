@@ -81,8 +81,13 @@ async function onImageSelected(event: Event): Promise<void> {
   }
 }
 
+// Sanitize on the way IN too, not just on the way out via emitSanitized() - the
+// incoming modelValue could be HTML nobody in this session ever ran through the
+// sanitizer (e.g. written directly via the API, or loaded by an admin editing
+// someone else's saved content), and assigning it straight to innerHTML would
+// execute any script/event-handler payload it contains.
 onMounted(() => {
-  if (editorRef.value) editorRef.value.innerHTML = props.modelValue;
+  if (editorRef.value) editorRef.value.innerHTML = sanitizeRichText(props.modelValue);
 });
 
 watch(
@@ -92,8 +97,9 @@ watch(
       skipNextExternalSync = false;
       return;
     }
-    if (editorRef.value && editorRef.value.innerHTML !== value) {
-      editorRef.value.innerHTML = value;
+    const clean = sanitizeRichText(value);
+    if (editorRef.value && editorRef.value.innerHTML !== clean) {
+      editorRef.value.innerHTML = clean;
     }
   },
 );

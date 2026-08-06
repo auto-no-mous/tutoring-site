@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -291,4 +291,12 @@ async def confirm_password_reset(db: AsyncSession, payload: PasswordResetConfirm
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
 
     user.password_hash = hash_password(payload.new_password)
+    # A password reset is often a compromise response - any refresh token issued
+    # before it (e.g. to an attacker who had one) must stop working immediately,
+    # rather than staying valid until its own expiry.
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked.is_(False))
+        .values(revoked=True)
+    )
     await db.commit()

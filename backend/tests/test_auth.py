@@ -4,7 +4,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import create_email_verification_token
+from app.core.security import create_email_verification_token, create_password_reset_token
 from app.models.user import User
 from app.services import telegram_service
 
@@ -296,3 +296,47 @@ async def test_telegram_link_token_expiry(client: AsyncClient, db_session: Async
 
     linked = await telegram_service.link_chat_by_token(db_session, token, "111")
     assert linked is None
+
+
+async def test_password_reset_revokes_existing_refresh_tokens(client: AsyncClient) -> None:
+    register_resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "resetflow@example.com",
+            "password": "supersecret1",
+            "first_name": "R",
+            "last_name": "R",
+            "role": "student",
+            "pd_consent": True,
+        },
+    )
+    body = register_resp.json()
+    user_id = body["user"]["id"]
+    old_refresh_token = body["tokens"]["refresh_token"]
+
+    # Confirm the token works before the reset.
+    pre_reset_refresh = await client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh_token})
+    assert pre_reset_refresh.status_code == 200, pre_reset_refresh.text
+    old_refresh_token = pre_reset_refresh.json()["refresh_token"]
+
+    reset_token = create_password_reset_token(user_id)
+    confirm_resp = await client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": reset_token, "new_password": "brandnewpassword1"},
+    )
+    assert confirm_resp.status_code == 204, confirm_resp.text
+
+    # The refresh token issued before the reset must now be rejected, even though it
+    # had not expired and was never itself used again after the pre-reset check above.
+    post_reset_refresh = await client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh_token})
+    assert post_reset_refresh.status_code == 401
+
+    # The new password works; the old one no longer does.
+    old_login = await client.post(
+        "/api/v1/auth/login", json={"email": "resetflow@example.com", "password": "supersecret1"}
+    )
+    assert old_login.status_code == 401
+    new_login = await client.post(
+        "/api/v1/auth/login", json={"email": "resetflow@example.com", "password": "brandnewpassword1"}
+    )
+    assert new_login.status_code == 200

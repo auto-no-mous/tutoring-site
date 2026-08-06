@@ -282,3 +282,40 @@ async def test_empty_message_rejected(client: AsyncClient) -> None:
 
     resp = await client.post(f"/api/v1/chat/threads/{thread_id}/messages", headers=student["headers"], data={})
     assert resp.status_code == 422
+
+
+async def test_attachment_upload_rejects_disallowed_content_type(client: AsyncClient) -> None:
+    """Regression test: chat/homework uploads used to have no content-type
+    restriction at all, meaning an .html attachment would be stored and served
+    same-origin as the SPA (stored XSS) - see file_service.save_upload."""
+    tutor = await _register(client, "chat-tutor8@example.com", "tutor")
+    student = await _register(client, "chat-student8@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+    thread_id = (
+        await client.post(f"/api/v1/chat/threads/with-tutor/{tutor_id}", headers=student["headers"])
+    ).json()["id"]
+
+    files = {"file": ("xss.html", b"<script>alert(1)</script>", "text/html")}
+    resp = await client.post(f"/api/v1/chat/threads/{thread_id}/messages", headers=student["headers"], files=files)
+    assert resp.status_code == 400
+
+
+async def test_attachment_upload_ignores_client_supplied_extension(client: AsyncClient) -> None:
+    """Regression test: the stored file's extension used to come straight from the
+    client-supplied filename, so a request claiming an allowed content-type (e.g.
+    text/plain) with a filename like xss.html would still get stored AND SERVED as
+    .html - see file_service._CONTENT_TYPE_EXTENSIONS. The extension must instead be
+    derived from the validated content-type, never the filename."""
+    tutor = await _register(client, "chat-tutor9@example.com", "tutor")
+    student = await _register(client, "chat-student9@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+    thread_id = (
+        await client.post(f"/api/v1/chat/threads/with-tutor/{tutor_id}", headers=student["headers"])
+    ).json()["id"]
+
+    files = {"file": ("xss.html", b"<script>alert(1)</script>", "text/plain")}
+    resp = await client.post(f"/api/v1/chat/threads/{thread_id}/messages", headers=student["headers"], files=files)
+    assert resp.status_code == 201, resp.text
+    file_path = resp.json()["file_path"]
+    assert file_path.endswith(".txt")
+    assert not file_path.endswith(".html")

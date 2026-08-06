@@ -159,7 +159,7 @@ async def send_message(
 
     file_path = None
     if file is not None and file.filename:
-        file_path = await file_service.save_upload(file, "chat")
+        file_path = await file_service.save_upload(file, "chat", file_service.ALLOWED_ATTACHMENT_TYPES)
 
     message = await chat_service.send_message(db, thread, current_user, content, file_path)
     return ChatMessageOut.model_validate(message, from_attributes=True).model_copy(

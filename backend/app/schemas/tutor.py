@@ -2,7 +2,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.common import UTCDateTime
+from app.schemas.common import SanitizedHtml, UTCDateTime
 from app.schemas.subject import TutorSubjectOut
 
 # Lowercase letters/digits, hyphens allowed in the middle only, 3-64 chars total -
@@ -21,7 +21,7 @@ class TutorScheduleSettings(BaseModel):
 
 
 class TutorProfileUpdate(BaseModel):
-    about: str | None = None
+    about: SanitizedHtml | None = None
     is_hidden: bool | None = None
     slug: str | None = Field(default=None, pattern=SLUG_PATTERN)
     slot_granularity_minutes: int | None = None

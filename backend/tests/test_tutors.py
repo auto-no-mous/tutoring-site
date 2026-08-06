@@ -73,6 +73,22 @@ async def test_update_profile_and_hide_from_catalog(client: AsyncClient) -> None
     assert direct_resp.json()["about"] == "10 лет опыта"
 
 
+async def test_about_field_sanitized_server_side(client: AsyncClient) -> None:
+    """Regression test: 'about' used to be trusted verbatim from the client, relying
+    entirely on the frontend editor to sanitize before ever saving it - a direct API
+    call (bypassing the editor) could store a script/event-handler payload that would
+    later execute wherever 'about' gets rendered (e.g. an admin editing that tutor).
+    See app.utils.html_sanitize."""
+    tutor = await _register_tutor(client, "xss-about-tutor@example.com")
+    payload = '<img src="x" onerror="alert(1)"><script>evil()</script><p>Опытный репетитор</p>'
+    resp = await client.patch("/api/v1/tutors/me", headers=tutor["headers"], json={"about": payload})
+    assert resp.status_code == 200, resp.text
+    saved_about = resp.json()["about"]
+    assert "onerror" not in saved_about
+    assert "<script" not in saved_about
+    assert "Опытный репетитор" in saved_about
+
+
 async def test_tutor_slug_set_and_resolve(client: AsyncClient) -> None:
     tutor = await _register_tutor(client, "slug-tutor@example.com")
 
