@@ -40,6 +40,13 @@ async def _get_group_lesson_type(db: AsyncSession, tutor_id: uuid.UUID, lesson_t
     return lesson_type
 
 
+async def get_lesson_type_duration(db: AsyncSession, lesson_type_id: uuid.UUID) -> int:
+    """Powers GroupOut.duration_minutes, so the frontend can render periodicity like
+    "Среда 14:00, 90 мин" without a second round-trip per group."""
+    lesson_type = await db.get(LessonType, lesson_type_id)
+    return lesson_type.duration_minutes if lesson_type else 0
+
+
 async def get_group_or_404(db: AsyncSession, group_id: uuid.UUID) -> Group:
     result = await db.execute(
         select(Group).options(selectinload(Group.schedule_slots)).where(Group.id == group_id)
@@ -108,14 +115,27 @@ async def replace_schedule(db: AsyncSession, group: Group, slots: list[GroupSche
         db.add(GroupSchedule(group_id=group.id, weekday=slot.weekday, start_time=slot.start_time))
     await db.commit()
 
-    group = await get_group_or_404(db, group.id)
+    # populate_existing is required here: the session's identity map still holds
+    # `group` (and its now-stale schedule_slots collection) from before this
+    # function ran, and a plain selectinload query would otherwise silently return
+    # that cached state instead of the rows just committed above.
+    result = await db.execute(
+        select(Group)
+        .options(selectinload(Group.schedule_slots))
+        .where(Group.id == group.id)
+        .execution_options(populate_existing=True)
+    )
+    group = result.scalar_one()
     await generate_occurrences(db, group)
     return group
 
 
 async def list_groups_for_tutor(db: AsyncSession, tutor_id: uuid.UUID) -> list[Group]:
     result = await db.execute(
-        select(Group).options(selectinload(Group.schedule_slots)).where(Group.tutor_id == tutor_id)
+        select(Group)
+        .options(selectinload(Group.schedule_slots))
+        .where(Group.tutor_id == tutor_id)
+        .order_by(Group.created_at.desc())
     )
     return list(result.scalars().all())
 
@@ -453,17 +473,44 @@ async def admin_add_member(db: AsyncSession, group: Group, student_id: uuid.UUID
 
 
 async def list_memberships_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[GroupMembership]:
-    result = await db.execute(
-        select(GroupMembership).where(
-            GroupMembership.student_id == student_id, GroupMembership.status == GroupMembershipStatus.ACTIVE.value
-        )
-    )
+    """All of a student's memberships regardless of status - the frontend filters to
+    active-only for the "my groups" display, but also uses the unfiltered list to
+    decide whether the "Группы" cabinet tab should show at all (visible if the
+    student is or ever was a member of some group, not just currently active)."""
+    result = await db.execute(select(GroupMembership).where(GroupMembership.student_id == student_id))
     return list(result.scalars().all())
 
 
 async def list_applications_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[GroupApplication]:
     result = await db.execute(select(GroupApplication).where(GroupApplication.student_id == student_id))
     return list(result.scalars().all())
+
+
+async def has_group_membership_with_tutor(db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID) -> bool:
+    """One half of the access check for GET /tutors/me/students/{id} (see
+    api/v1/tutors.py::get_my_student) - a tutor may view a student's detail page if
+    they share (or shared) a group, regardless of booking history."""
+    result = await db.execute(
+        select(GroupMembership.id)
+        .join(Group, Group.id == GroupMembership.group_id)
+        .where(Group.tutor_id == tutor_id, GroupMembership.student_id == student_id)
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def list_student_group_memberships_for_tutor(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID
+) -> list[tuple[Group, GroupMembership]]:
+    """This student's memberships (any status) across the given tutor's own groups -
+    powers the "groups" section of GET /tutors/me/students/{id}."""
+    result = await db.execute(
+        select(Group, GroupMembership)
+        .join(GroupMembership, GroupMembership.group_id == Group.id)
+        .where(Group.tutor_id == tutor_id, GroupMembership.student_id == student_id)
+        .order_by(GroupMembership.joined_at.desc())
+    )
+    return [(row[0], row[1]) for row in result.all()]
 
 
 async def list_active_member_ids_at(db: AsyncSession, group_id: uuid.UUID, at: dt.datetime) -> list[uuid.UUID]:

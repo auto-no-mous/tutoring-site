@@ -54,6 +54,17 @@ async def list_bookings_for_tutor(db: AsyncSession, tutor_id: uuid.UUID) -> list
     return list(result.scalars().all())
 
 
+async def has_had_booking(db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID) -> bool:
+    """One half of the access check for GET /tutors/me/students/{id} (see
+    app/services/group_service.has_group_membership_with_tutor for the other half) -
+    a tutor may view a student's detail page if they've ever had a booking together,
+    regardless of current group membership."""
+    result = await db.execute(
+        select(Booking.id).where(Booking.tutor_id == tutor_id, Booking.student_id == student_id).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def get_student_names(db: AsyncSession, student_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
     ids = {sid for sid in student_ids if sid is not None}
     if not ids:
@@ -374,13 +385,27 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
 
 
 async def update_booking_by_tutor(db: AsyncSession, booking: Booking, payload: BookingTutorUpdate) -> Booking:
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude={"apply_link_to_student"})
     for field, value in data.items():
         setattr(booking, field, value)
     if booking.student_id is not None:
         booking.is_manual_block = False
     await db.commit()
     await db.refresh(booking)
+
+    if payload.apply_link_to_student and booking.student_id is not None and "meeting_link" in data:
+        result = await db.execute(
+            select(Booking).where(
+                Booking.tutor_id == booking.tutor_id,
+                Booking.student_id == booking.student_id,
+                Booking.status == BookingStatus.SCHEDULED.value,
+                Booking.id != booking.id,
+            )
+        )
+        for other in result.scalars().all():
+            other.meeting_link = booking.meeting_link
+        await db.commit()
+
     return booking
 
 

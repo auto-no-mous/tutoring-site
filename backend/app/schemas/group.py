@@ -44,6 +44,10 @@ class GroupOut(BaseModel):
     is_active: bool
     schedule_slots: list[GroupScheduleSlotOut] = Field(default_factory=list)
     member_count: int = 0
+    created_at: UTCDateTime
+    # From the group's own lesson type - lets the frontend render periodicity like
+    # "Среда 14:00, 90 мин" without a second round-trip (see app/api/v1/groups.py::_to_group_out).
+    duration_minutes: int = 0
 
 
 class GroupPublicOut(BaseModel):
@@ -75,6 +79,8 @@ class GroupApplicationOut(BaseModel):
     # request (e.g. a student's own "my applications" list) - see app/api/v1/groups.py.
     group_name: str = ""
     tutor_display_name: str = ""
+    # Populated on the tutor-facing applicant list (see app/api/v1/groups.py::list_applications).
+    student_display_name: str = ""
 
 
 class GroupMembershipOut(BaseModel):
@@ -89,6 +95,8 @@ class GroupMembershipOut(BaseModel):
     left_by: str | None = None
     group_name: str = ""
     tutor_display_name: str = ""
+    # Populated on the tutor-facing member list (see app/api/v1/groups.py::list_members).
+    student_display_name: str = ""
 
 
 class GroupOccurrenceOut(BaseModel):

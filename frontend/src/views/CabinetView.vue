@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
+import { myMemberships } from "@/api/groups";
 import ChatPanel from "@/components/ChatPanel.vue";
 import SettingsTab from "@/components/SettingsTab.vue";
 import BookingsTabStudent from "@/components/student/BookingsTab.vue";
@@ -11,7 +12,6 @@ import StatsTabStudent from "@/components/student/StatsTab.vue";
 import BookingsTabTutor from "@/components/tutor/BookingsTab.vue";
 import GroupsTabTutor from "@/components/tutor/GroupsTab.vue";
 import HomeworkTabTutor from "@/components/tutor/HomeworkTab.vue";
-import LessonTypesTab from "@/components/tutor/LessonTypesTab.vue";
 import ProfileTab from "@/components/tutor/ProfileTab.vue";
 import ScheduleTab from "@/components/tutor/ScheduleTab.vue";
 import StatsTabTutor from "@/components/tutor/StatsTab.vue";
@@ -23,7 +23,6 @@ const route = useRoute();
 const tutorTabs = [
   { key: "bookings", label: "Занятия" },
   { key: "profile", label: "Профиль" },
-  { key: "lesson-types", label: "Типы занятий" },
   { key: "schedule", label: "Расписание" },
   { key: "groups", label: "Группы" },
   { key: "homework", label: "Домашние задания" },
@@ -32,16 +31,20 @@ const tutorTabs = [
   { key: "settings", label: "Настройки" },
 ];
 
-const studentTabs = [
+// A student's "Группы" tab only makes sense once they're (or were) actually in a
+// group - see loadGroupHistory below. Hidden by default until that check resolves.
+const hasGroupHistory = ref(false);
+
+const studentTabs = computed(() => [
   { key: "bookings", label: "Занятия" },
-  { key: "groups", label: "Группы" },
+  ...(hasGroupHistory.value ? [{ key: "groups", label: "Группы" }] : []),
   { key: "homework", label: "Домашние задания" },
   { key: "chat", label: "Чат" },
   { key: "stats", label: "Статистика" },
   { key: "settings", label: "Настройки" },
-];
+]);
 
-const tabs = computed(() => (auth.user?.role === "tutor" ? tutorTabs : studentTabs));
+const tabs = computed(() => (auth.user?.role === "tutor" ? tutorTabs : studentTabs.value));
 
 function initialTab(): string {
   const queryTab = route.query.tab;
@@ -73,6 +76,23 @@ const shortName = computed(() => {
   }
   return `${user.last_name} ${user.first_name}`.trim();
 });
+
+async function loadGroupHistory(): Promise<void> {
+  if (auth.user?.role !== "student") return;
+  const memberships = await myMemberships();
+  hasGroupHistory.value = memberships.length > 0;
+  // A ?tab=groups deep link may only become valid once history is known - re-resolve
+  // it now that the tab list can include "groups".
+  if (route.query.tab === "groups" && hasGroupHistory.value) {
+    activeTab.value = "groups";
+  }
+}
+
+// Lets other tabs (tutor/GroupsTab.vue's "написать" / "чат группы" buttons) deep-link
+// straight into a specific chat thread - see ChatPanel.vue's initialThreadId prop.
+const chatThreadId = computed(() => (typeof route.query.thread === "string" ? route.query.thread : null));
+
+onMounted(loadGroupHistory);
 </script>
 
 <template>
@@ -98,12 +118,11 @@ const shortName = computed(() => {
     <div class="mt-6">
       <template v-if="auth.user?.role === 'tutor'">
         <ProfileTab v-if="activeTab === 'profile'" />
-        <LessonTypesTab v-else-if="activeTab === 'lesson-types'" />
         <ScheduleTab v-else-if="activeTab === 'schedule'" />
         <BookingsTabTutor v-else-if="activeTab === 'bookings'" />
         <GroupsTabTutor v-else-if="activeTab === 'groups'" />
         <HomeworkTabTutor v-else-if="activeTab === 'homework'" />
-        <ChatPanel v-else-if="activeTab === 'chat'" />
+        <ChatPanel v-else-if="activeTab === 'chat'" :initial-thread-id="chatThreadId" />
         <StatsTabTutor v-else-if="activeTab === 'stats'" />
         <SettingsTab v-else-if="activeTab === 'settings'" />
       </template>
@@ -111,7 +130,7 @@ const shortName = computed(() => {
         <BookingsTabStudent v-if="activeTab === 'bookings'" />
         <GroupsTabStudent v-else-if="activeTab === 'groups'" />
         <HomeworkTabStudent v-else-if="activeTab === 'homework'" />
-        <ChatPanel v-else-if="activeTab === 'chat'" />
+        <ChatPanel v-else-if="activeTab === 'chat'" :initial-thread-id="chatThreadId" />
         <StatsTabStudent v-else-if="activeTab === 'stats'" />
         <SettingsTab v-else-if="activeTab === 'settings'" />
       </template>

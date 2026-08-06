@@ -12,10 +12,10 @@ const containerRef = ref<HTMLElement | null>(null);
 
 const firstName = computed(() => auth.user?.first_name ?? "");
 const initial = computed(() => firstName.value.charAt(0).toUpperCase());
-// Students have no dedicated "Профиль" tab - their own data lives under "Настройки"
-// (see CabinetView.vue's studentTabs) - so both the avatar link and the dropdown
-// point there for students instead of duplicating/faking a profile tab.
-const primaryTabKey = computed(() => (auth.user?.role === "tutor" ? "profile" : "settings"));
+// Tutors land on their "Профиль" tab; students have no such tab, so clicking the
+// avatar/name takes them to their lesson list instead ("Настройки", where a student's
+// own data actually lives, is still one click away via the dropdown below).
+const primaryTabKey = computed(() => (auth.user?.role === "tutor" ? "profile" : "bookings"));
 
 const menuItems = computed(() => {
   const items = [{ key: "bookings", label: "Занятия" }];

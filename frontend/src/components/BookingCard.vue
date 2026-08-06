@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 
 import { cancelBooking, deleteBooking, updateBooking } from "@/api/bookings";
+import MeetingLinkModal from "@/components/MeetingLinkModal.vue";
 import StudentHomeworkModal from "@/components/StudentHomeworkModal.vue";
 import { useToastStore } from "@/stores/toast";
 import type { Booking } from "@/types/booking";
@@ -15,6 +16,7 @@ const toast = useToastStore();
 const showActions = ref(false);
 const isEditingDuration = ref(false);
 const showHomeworkModal = ref(false);
+const showMeetingLinkModal = ref(false);
 const durationMinutes = ref(
   Math.round((new Date(props.booking.end_at).getTime() - new Date(props.booking.start_at).getTime()) / 60000),
 );
@@ -32,12 +34,11 @@ function onHomeworkChanged(): void {
   emit("changed");
 }
 
-async function setMeetingLink(): Promise<void> {
-  const link = window.prompt("Ссылка на занятие", props.booking.meeting_link ?? "");
-  if (link === null) return;
+async function saveMeetingLink(link: string, applyToStudent: boolean): Promise<void> {
+  showMeetingLinkModal.value = false;
   isBusy.value = true;
   try {
-    await updateBooking(props.booking.id, { meeting_link: link });
+    await updateBooking(props.booking.id, { meeting_link: link, apply_link_to_student: applyToStudent });
     emit("changed");
   } finally {
     isBusy.value = false;
@@ -116,7 +117,7 @@ async function saveDuration(): Promise<void> {
           type="button"
           class="text-xs text-slate-400 underline"
           :disabled="isBusy"
-          @click="setMeetingLink"
+          @click="showMeetingLinkModal = true"
         >
           Изменить
         </button>
@@ -125,7 +126,7 @@ async function saveDuration(): Promise<void> {
           type="button"
           class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
           :disabled="isBusy"
-          @click="setMeetingLink"
+          @click="showMeetingLinkModal = true"
         >
           Указать ссылку
         </button>
@@ -212,6 +213,13 @@ async function saveDuration(): Promise<void> {
       :student-name="booking.student_display_name ?? '—'"
       @close="showHomeworkModal = false"
       @changed="onHomeworkChanged"
+    />
+
+    <MeetingLinkModal
+      v-if="showMeetingLinkModal"
+      :booking="booking"
+      @close="showMeetingLinkModal = false"
+      @save="saveMeetingLink"
     />
   </div>
 </template>

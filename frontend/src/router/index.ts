@@ -52,6 +52,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAdmin: true },
     },
     {
+      path: "/students/:id",
+      name: "student-profile",
+      component: () => import("@/views/StudentProfileView.vue"),
+      meta: { requiresAuth: true, requiresTutor: true },
+    },
+    {
       path: "/tutors/:id",
       name: "tutor-profile",
       component: () => import("@/views/TutorProfileView.vue"),
@@ -60,6 +66,11 @@ const router = createRouter({
       path: "/tutors/:id/book",
       name: "tutor-booking",
       component: () => import("@/views/TutorBookingView.vue"),
+    },
+    {
+      path: "/tutors/:id/groups",
+      name: "tutor-group-booking",
+      component: () => import("@/views/TutorGroupBookingView.vue"),
     },
     {
       path: "/legal/privacy",
@@ -93,6 +104,9 @@ router.beforeEach(async (to) => {
     return { name: isAdmin ? "admin" : "cabinet" };
   }
   if (to.meta.requiresAdmin && !isAdmin) {
+    return { name: "cabinet" };
+  }
+  if (to.meta.requiresTutor && auth.user?.role !== "tutor") {
     return { name: "cabinet" };
   }
   // Admin has no ordinary tutor/student cabinet - keep it out of their way.

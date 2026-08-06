@@ -1,8 +1,16 @@
 import { apiClient } from "@/api/client";
 import type { ChatMessage, ChatThread } from "@/types/chat";
+import type { TutorStudent } from "@/types/tutor";
 
 export async function listThreads() {
   const { data } = await apiClient.get<ChatThread[]>("/chat/threads");
+  return data;
+}
+
+// Tutor-only: anyone they've booked with, or who already has an individual thread
+// with them - powers the "Новый чат" recipient picker (components/ChatPanel.vue).
+export async function listMessageableStudents() {
+  const { data } = await apiClient.get<TutorStudent[]>("/chat/students");
   return data;
 }
 

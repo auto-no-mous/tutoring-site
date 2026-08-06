@@ -50,6 +50,15 @@ class TutorProfile(UUIDPKMixin, TimestampMixin, Base):
     reschedule_min_hours_before: Mapped[int] = mapped_column(Integer, default=24)
     reschedule_max_per_month: Mapped[int] = mapped_column(Integer, default=4)
 
+    # Whether each booking channel is open on the public profile - see
+    # api/v1/tutors.py::get_public_profile, which additionally requires at least one
+    # active lesson type of the matching format before actually showing the booking
+    # button (a tutor can't turn a channel on if they have nothing to book there - see
+    # the disabled-toggle logic in components/tutor/ScheduleTab.vue). Default true so
+    # existing tutors keep today's unrestricted behavior until they opt out.
+    allow_individual_bookings: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_group_bookings: Mapped[bool] = mapped_column(Boolean, default=True)
+
     user: Mapped["User"] = relationship(back_populates="tutor_profile")  # noqa: F821
     lesson_types: Mapped[list["LessonType"]] = relationship(  # noqa: F821
         back_populates="tutor", cascade="all, delete-orphan"

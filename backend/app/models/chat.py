@@ -52,3 +52,17 @@ class ChatMessage(UUIDPKMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=None, default=utcnow, index=True)
 
     thread: Mapped["ChatThread"] = relationship(back_populates="messages")
+
+
+class ChatThreadRead(UUIDPKMixin, Base):
+    """Per-user last-read marker for a thread - powers unread badges/counts (see
+    chat_service.get_unread_counts). Deliberately just one timestamp per (thread,
+    user) pair rather than per-message read receipts - refreshed whenever that user
+    fetches the thread's messages (chat_service.mark_thread_read)."""
+
+    __tablename__ = "chat_thread_reads"
+    __table_args__ = (UniqueConstraint("thread_id", "user_id", name="uq_chat_thread_read"),)
+
+    thread_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chat_threads.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    last_read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=None, default=utcnow)

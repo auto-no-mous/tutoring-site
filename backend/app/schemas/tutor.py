@@ -31,6 +31,8 @@ class TutorProfileUpdate(BaseModel):
     cancel_max_per_month: int | None = Field(default=None, ge=0)
     reschedule_min_hours_before: int | None = Field(default=None, ge=0)
     reschedule_max_per_month: int | None = Field(default=None, ge=0)
+    allow_individual_bookings: bool | None = None
+    allow_group_bookings: bool | None = None
 
 
 class TutorProfileOut(BaseModel):
@@ -49,6 +51,8 @@ class TutorProfileOut(BaseModel):
     cancel_max_per_month: int
     reschedule_min_hours_before: int
     reschedule_max_per_month: int
+    allow_individual_bookings: bool = True
+    allow_group_bookings: bool = True
     display_name: str | None = None
     is_active: bool | None = None
     # Populated only where the caller already has the linked User at hand (own
@@ -98,6 +102,13 @@ class TutorPublicProfile(BaseModel):
     subjects: list[TutorSubjectOut] = Field(default_factory=list)
     avg_rating: float | None = None
     reviews_count: int = 0
+    # Already combines the tutor's own toggle (TutorProfile.allow_*_bookings) with
+    # whether they actually have an active lesson type of that format - see
+    # api/v1/tutors.py::get_public_profile. The frontend just checks these two
+    # booleans, it doesn't need to know about lesson types to decide which of the two
+    # "Запись на ..." buttons to show.
+    show_individual_booking: bool = False
+    show_group_booking: bool = False
 
 
 class UploadedImageOut(BaseModel):
@@ -116,3 +127,25 @@ class TutorStudentOut(BaseModel):
     last_name: str
     grade: int | None
     last_lesson_at: UTCDateTime | None
+
+
+class StudentGroupMembershipOut(BaseModel):
+    group_id: uuid.UUID
+    group_name: str
+    status: str
+    joined_at: UTCDateTime
+    left_at: UTCDateTime | None
+
+
+class TutorStudentDetailOut(BaseModel):
+    """Powers the tutor-facing student profile page (GET /tutors/me/students/{id}) -
+    only reachable for students the tutor has actually worked with, see
+    api/v1/tutors.py::get_my_student."""
+
+    id: uuid.UUID
+    first_name: str
+    last_name: str
+    patronymic: str | None
+    grade: int | None
+    email: str | None
+    groups: list[StudentGroupMembershipOut] = Field(default_factory=list)

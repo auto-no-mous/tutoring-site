@@ -26,6 +26,7 @@ from app.schemas.group import (
     GroupUpdate,
 )
 from app.services import group_service, tutor_service
+from app.services.booking_service import get_student_names
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 public_router = APIRouter(tags=["groups"])
@@ -41,7 +42,7 @@ def _require_student(user: CurrentUser) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Доступно только ученикам")
 
 
-def _to_group_out(group: Group, member_count: int) -> GroupOut:
+def _to_group_out(group: Group, member_count: int, duration_minutes: int) -> GroupOut:
     return GroupOut(
         id=group.id,
         tutor_id=group.tutor_id,
@@ -52,6 +53,8 @@ def _to_group_out(group: Group, member_count: int) -> GroupOut:
         is_active=group.is_active,
         schedule_slots=[GroupScheduleSlotOut.model_validate(s, from_attributes=True) for s in group.schedule_slots],
         member_count=member_count,
+        created_at=group.created_at,
+        duration_minutes=duration_minutes,
     )
 
 
@@ -91,7 +94,8 @@ async def create_group(payload: GroupCreate, current_user: CurrentUser, db: DbSe
     _require_tutor(current_user)
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     group = await group_service.create_group(db, profile, payload)
-    return _to_group_out(group, 0)
+    duration = await group_service.get_lesson_type_duration(db, group.lesson_type_id)
+    return _to_group_out(group, 0, duration)
 
 
 @router.get("/tutor/me", response_model=list[GroupOut])
@@ -102,7 +106,8 @@ async def list_my_groups(current_user: CurrentUser, db: DbSession) -> list[Group
     out = []
     for group in groups:
         count = await group_service.count_active_members(db, group.id)
-        out.append(_to_group_out(group, count))
+        duration = await group_service.get_lesson_type_duration(db, group.lesson_type_id)
+        out.append(_to_group_out(group, count, duration))
     return out
 
 
@@ -147,7 +152,8 @@ async def update_group(group_id: uuid.UUID, payload: GroupUpdate, current_user: 
     group = await _owned_group(db, current_user, group_id)
     group = await group_service.update_group(db, group, payload)
     count = await group_service.count_active_members(db, group.id)
-    return _to_group_out(group, count)
+    duration = await group_service.get_lesson_type_duration(db, group.lesson_type_id)
+    return _to_group_out(group, count, duration)
 
 
 @router.put("/{group_id}/schedule", response_model=GroupOut)
@@ -158,7 +164,8 @@ async def replace_group_schedule(
     group = await _owned_group(db, current_user, group_id)
     group = await group_service.replace_schedule(db, group, payload)
     count = await group_service.count_active_members(db, group.id)
-    return _to_group_out(group, count)
+    duration = await group_service.get_lesson_type_duration(db, group.lesson_type_id)
+    return _to_group_out(group, count, duration)
 
 
 @router.get("/{group_id}/applications", response_model=list[GroupApplicationOut])
@@ -166,7 +173,13 @@ async def list_applications(group_id: uuid.UUID, current_user: CurrentUser, db: 
     _require_tutor(current_user)
     await _owned_group(db, current_user, group_id)
     rows = await group_service.list_applications(db, group_id, status_filter)
-    return [GroupApplicationOut.model_validate(r, from_attributes=True) for r in rows]
+    names = await get_student_names(db, [r.student_id for r in rows])
+    return [
+        GroupApplicationOut.model_validate(r, from_attributes=True).model_copy(
+            update={"student_display_name": names.get(r.student_id, "")}
+        )
+        for r in rows
+    ]
 
 
 @router.post("/{group_id}/applications/{application_id}/accept", response_model=GroupMembershipOut)
@@ -196,7 +209,13 @@ async def list_members(group_id: uuid.UUID, current_user: CurrentUser, db: DbSes
     _require_tutor(current_user)
     await _owned_group(db, current_user, group_id)
     rows = await group_service.list_members(db, group_id)
-    return [GroupMembershipOut.model_validate(r, from_attributes=True) for r in rows]
+    names = await get_student_names(db, [r.student_id for r in rows])
+    return [
+        GroupMembershipOut.model_validate(r, from_attributes=True).model_copy(
+            update={"student_display_name": names.get(r.student_id, "")}
+        )
+        for r in rows
+    ]
 
 
 @router.delete("/{group_id}/members/{student_id}", response_model=GroupMembershipOut)

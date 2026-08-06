@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { addDaysIso, formatDate, formatDateTimeWithMsk, todayIso } from "@/utils/time";
+import { addDaysIso, formatDate, formatDateTimeWithMsk, formatDayLabel, formatThreadTimestamp, todayIso } from "@/utils/time";
 
 describe("formatDate", () => {
   it("renders as DD.MM.YYYY", () => {
@@ -30,5 +30,31 @@ describe("addDaysIso", () => {
 describe("todayIso", () => {
   it("returns a YYYY-MM-DD string", () => {
     expect(todayIso()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("formatDayLabel", () => {
+  it("returns 'Сегодня' for today", () => {
+    expect(formatDayLabel(new Date().toISOString())).toBe("Сегодня");
+  });
+
+  it("returns 'Вчера' for yesterday", () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    expect(formatDayLabel(yesterday.toISOString())).toBe("Вчера");
+  });
+
+  it("returns a formatted date for older days", () => {
+    expect(formatDayLabel("2020-01-01T12:00:00Z")).toBe(formatDate("2020-01-01T12:00:00Z"));
+  });
+});
+
+describe("formatThreadTimestamp", () => {
+  it("returns just the time for today", () => {
+    expect(formatThreadTimestamp(new Date().toISOString())).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  it("returns a short date for older messages", () => {
+    expect(formatThreadTimestamp("2020-01-01T12:00:00Z")).toMatch(/^\d{2}\.\d{2}$/);
   });
 });

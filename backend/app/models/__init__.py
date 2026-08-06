@@ -1,5 +1,5 @@
 from app.models.booking import Booking, RecurringSeries
-from app.models.chat import ChatMessage, ChatThread
+from app.models.chat import ChatMessage, ChatThread, ChatThreadRead
 from app.models.group import Group, GroupApplication, GroupMembership, GroupOccurrence, GroupSchedule
 from app.models.homework import HomeworkAssignment, HomeworkSubmission
 from app.models.lesson_type import LessonType
@@ -15,6 +15,7 @@ __all__ = [
     "RecurringSeries",
     "ChatMessage",
     "ChatThread",
+    "ChatThreadRead",
     "Group",
     "GroupApplication",
     "GroupMembership",

@@ -1,6 +1,11 @@
 import datetime as dt
+import uuid
 
 from httpx import AsyncClient
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.group import Group
 
 
 async def _register(client: AsyncClient, email: str, role: str) -> dict:
@@ -154,6 +159,66 @@ async def test_student_leave_and_tutor_remove(client: AsyncClient) -> None:
     remaining = (await client.get(f"/api/v1/groups/{group_id}/members", headers=tutor["headers"])).json()
     assert remaining == []
 
+    # Left (not just active) memberships must still show up on the student's own list
+    # (see group_service.list_memberships_for_student) so the CabinetView "Группы" tab
+    # visibility check treats past membership the same as current.
+    student1_memberships = (await client.get("/api/v1/groups/me", headers=student1["headers"])).json()
+    assert len(student1_memberships) == 1
+    assert student1_memberships[0]["status"] == "left"
+
+
+async def test_group_out_has_duration_and_names_on_members_applications(client: AsyncClient) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-tutor6@example.com", capacity=2)
+    group_id = tutor["group"]["id"]
+    assert tutor["group"]["duration_minutes"] == 90
+
+    student = await _register(client, "group-student6@example.com", "student")
+    app_resp = await client.post(f"/api/v1/groups/{group_id}/apply", headers=student["headers"], json={})
+    assert app_resp.status_code == 201
+
+    applications = (await client.get(f"/api/v1/groups/{group_id}/applications", headers=tutor["headers"])).json()
+    assert applications[0]["student_display_name"] == student["user"]["display_name"]
+
+    await client.post(f"/api/v1/groups/{group_id}/applications/{app_resp.json()['id']}/accept", headers=tutor["headers"])
+    members = (await client.get(f"/api/v1/groups/{group_id}/members", headers=tutor["headers"])).json()
+    assert members[0]["student_display_name"] == student["user"]["display_name"]
+
+
+async def test_student_detail_for_tutor_requires_shared_history(client: AsyncClient) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-tutor7@example.com", capacity=2)
+    group_id = tutor["group"]["id"]
+    other_tutor = await _register(client, "group-tutor7b@example.com", "tutor")
+    member_student = await _register(client, "group-student7a@example.com", "student")
+    stranger_student = await _register(client, "group-student7b@example.com", "student")
+
+    app_resp = await client.post(f"/api/v1/groups/{group_id}/apply", headers=member_student["headers"], json={})
+    await client.post(
+        f"/api/v1/groups/{group_id}/applications/{app_resp.json()['id']}/accept", headers=tutor["headers"]
+    )
+
+    # Owning tutor can see the member's detail, including the shared group.
+    detail_resp = await client.get(
+        f"/api/v1/tutors/me/students/{member_student['user']['id']}", headers=tutor["headers"]
+    )
+    assert detail_resp.status_code == 200, detail_resp.text
+    detail = detail_resp.json()
+    assert detail["first_name"] == member_student["user"]["first_name"]
+    assert len(detail["groups"]) == 1
+    assert detail["groups"][0]["group_id"] == group_id
+    assert detail["groups"][0]["status"] == "active"
+
+    # A student with no shared booking/group is not visible to this tutor.
+    denied_resp = await client.get(
+        f"/api/v1/tutors/me/students/{stranger_student['user']['id']}", headers=tutor["headers"]
+    )
+    assert denied_resp.status_code == 404
+
+    # Nor is the member visible to an unrelated tutor.
+    other_tutor_resp = await client.get(
+        f"/api/v1/tutors/me/students/{member_student['user']['id']}", headers=other_tutor["headers"]
+    )
+    assert other_tutor_resp.status_code == 404
+
 
 async def test_tutor_occurrence_crud(client: AsyncClient) -> None:
     tutor = await _setup_tutor_with_group(client, "group-tutor5@example.com")
@@ -191,3 +256,70 @@ async def test_tutor_occurrence_crud(client: AsyncClient) -> None:
     remaining = (await client.get(f"/api/v1/groups/{group_id}/occurrences")).json()
     assert occurrences[2]["id"] not in [o["id"] for o in remaining]
     assert original_start == occurrences[0]["start_at"]  # sanity: unchanged before our patch above
+
+
+async def test_my_groups_exposes_created_at_and_orders_by_recency(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    tutor = await _register(client, "group-tutor6@example.com", "tutor")
+    lesson_type_resp = await client.post(
+        "/api/v1/tutors/me/lesson-types",
+        headers=tutor["headers"],
+        json={"name": "Группа подготовки", "format": "group", "duration_minutes": 90, "price": 500},
+    )
+    lesson_type_id = lesson_type_resp.json()["id"]
+
+    async def _create_group(name: str) -> str:
+        resp = await client.post(
+            "/api/v1/groups",
+            headers=tutor["headers"],
+            json={
+                "name": name,
+                "lesson_type_id": lesson_type_id,
+                "capacity": 3,
+                "schedule_slots": [{"weekday": 1, "start_time": "18:00:00"}],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()["id"]
+
+    first_id = await _create_group("Первая группа")
+    second_id = await _create_group("Вторая группа")
+
+    # SQLite's CURRENT_TIMESTAMP is second-precision, so two groups created in the
+    # same request could tie - backdate the first one explicitly to make the recency
+    # ordering assertion below deterministic rather than timing-dependent.
+    await db_session.execute(
+        update(Group).where(Group.id == uuid.UUID(first_id)).values(created_at=dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc))
+    )
+    await db_session.commit()
+
+    my_groups_resp = await client.get("/api/v1/groups/tutor/me", headers=tutor["headers"])
+    assert my_groups_resp.status_code == 200, my_groups_resp.text
+    my_groups = my_groups_resp.json()
+    assert [g["id"] for g in my_groups] == [second_id, first_id]
+
+
+async def test_replace_schedule_response_reflects_the_update(client: AsyncClient) -> None:
+    """Regression test: PUT .../schedule used to return the pre-update
+    schedule_slots (stale SQLAlchemy identity-map state) even though the write
+    itself succeeded - see group_service.replace_schedule's populate_existing fix."""
+    tutor = await _setup_tutor_with_group(client, "group-tutor8@example.com")
+    group_id = tutor["group"]["id"]
+    original_slot_ids = {s["id"] for s in tutor["group"]["schedule_slots"]}
+
+    put_resp = await client.put(
+        f"/api/v1/groups/{group_id}/schedule",
+        headers=tutor["headers"],
+        json=[{"weekday": 4, "start_time": "16:45:00"}],
+    )
+    assert put_resp.status_code == 200, put_resp.text
+    put_slots = put_resp.json()["schedule_slots"]
+    assert len(put_slots) == 1
+    assert put_slots[0]["weekday"] == 4
+    assert put_slots[0]["start_time"] == "16:45:00"
+    assert put_slots[0]["id"] not in original_slot_ids
+
+    my_groups = (await client.get("/api/v1/groups/tutor/me", headers=tutor["headers"])).json()
+    assert my_groups[0]["schedule_slots"] == put_slots
+    assert all(g["created_at"] for g in my_groups)

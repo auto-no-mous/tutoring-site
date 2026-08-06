@@ -29,6 +29,12 @@ class BookingTutorUpdate(BaseModel):
     end_at: UTCDateTime | None = None
     meeting_link: str | None = None
     notes: str | None = None
+    # When true and meeting_link is being set, also applies it to every other of this
+    # tutor's scheduled bookings with the same student (see
+    # booking_service.update_booking_by_tutor) - powers the "Постоянная ссылка на
+    # занятие с этим учеником" checkbox in components/MeetingLinkModal.vue. Not a real
+    # Booking column, just a one-shot instruction for this request.
+    apply_link_to_student: bool = False
 
 
 class BookingCancelRequest(BaseModel):

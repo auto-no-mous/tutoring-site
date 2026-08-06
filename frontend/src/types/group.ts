@@ -14,6 +14,8 @@ export interface Group {
   is_active: boolean;
   schedule_slots: GroupScheduleSlot[];
   member_count: number;
+  created_at: string;
+  duration_minutes: number;
 }
 
 export interface GroupPublic {
@@ -37,6 +39,7 @@ export interface GroupApplication {
   decided_at: string | null;
   group_name: string;
   tutor_display_name: string;
+  student_display_name: string;
 }
 
 export interface GroupMembership {
@@ -49,6 +52,7 @@ export interface GroupMembership {
   left_by: string | null;
   group_name: string;
   tutor_display_name: string;
+  student_display_name: string;
 }
 
 export interface GroupOccurrence {

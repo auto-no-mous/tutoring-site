@@ -14,6 +14,8 @@ export interface TutorProfile {
   cancel_max_per_month: number;
   reschedule_min_hours_before: number;
   reschedule_max_per_month: number;
+  allow_individual_bookings: boolean;
+  allow_group_bookings: boolean;
   display_name: string | null;
   is_active: boolean | null;
   // Populated only for own profile / admin contexts - see backend
@@ -49,6 +51,10 @@ export interface TutorPublicProfile {
   subjects: TutorSubject[];
   avg_rating: number | null;
   reviews_count: number;
+  // Already combine the tutor's toggle with whether they have an active lesson type
+  // of that format - see backend api/v1/tutors.py::get_public_profile.
+  show_individual_booking: boolean;
+  show_group_booking: boolean;
 }
 
 export interface TutorStudent {
@@ -57,6 +63,24 @@ export interface TutorStudent {
   last_name: string;
   grade: number | null;
   last_lesson_at: string | null;
+}
+
+export interface StudentGroupMembership {
+  group_id: string;
+  group_name: string;
+  status: string;
+  joined_at: string;
+  left_at: string | null;
+}
+
+export interface TutorStudentDetail {
+  id: string;
+  first_name: string;
+  last_name: string;
+  patronymic: string | null;
+  grade: number | null;
+  email: string | null;
+  groups: StudentGroupMembership[];
 }
 
 export interface LessonType {

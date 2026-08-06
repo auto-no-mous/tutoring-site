@@ -119,6 +119,50 @@ async def test_tutor_slug_uniqueness_and_reserved_word(client: AsyncClient) -> N
     assert cleared.json()["slug"] is None
 
 
+async def test_public_profile_booking_buttons_reflect_toggles_and_lesson_types(client: AsyncClient) -> None:
+    tutor = await _register_tutor(client, "toggle-tutor@example.com")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+
+    # No lesson types yet at all - both buttons should be hidden even though the
+    # toggles themselves default to true.
+    no_types = await client.get(f"/api/v1/tutors/{tutor_id}")
+    assert no_types.json()["show_individual_booking"] is False
+    assert no_types.json()["show_group_booking"] is False
+
+    await client.post(
+        "/api/v1/tutors/me/lesson-types",
+        headers=tutor["headers"],
+        json={"name": "Индивидуальное", "format": "individual", "duration_minutes": 60, "price": 1000},
+    )
+    group_type_resp = await client.post(
+        "/api/v1/tutors/me/lesson-types",
+        headers=tutor["headers"],
+        json={"name": "Групповое", "format": "group", "duration_minutes": 90, "price": 500},
+    )
+    group_type_id = group_type_resp.json()["id"]
+
+    # Both toggles default to true, and lesson types now exist for both formats.
+    both_resp = await client.get(f"/api/v1/tutors/{tutor_id}")
+    assert both_resp.json()["show_individual_booking"] is True
+    assert both_resp.json()["show_group_booking"] is True
+
+    # Turning the group toggle off hides only the group button.
+    off_resp = await client.patch("/api/v1/tutors/me", headers=tutor["headers"], json={"allow_group_bookings": False})
+    assert off_resp.status_code == 200
+    after_toggle = await client.get(f"/api/v1/tutors/{tutor_id}")
+    assert after_toggle.json()["show_individual_booking"] is True
+    assert after_toggle.json()["show_group_booking"] is False
+
+    # Turning it back on but deactivating the only group lesson type still hides it -
+    # the toggle alone isn't enough, there has to be something bookable.
+    await client.patch("/api/v1/tutors/me", headers=tutor["headers"], json={"allow_group_bookings": True})
+    await client.patch(
+        f"/api/v1/tutors/me/lesson-types/{group_type_id}", headers=tutor["headers"], json={"is_active": False}
+    )
+    after_deactivate = await client.get(f"/api/v1/tutors/{tutor_id}")
+    assert after_deactivate.json()["show_group_booking"] is False
+
+
 async def test_catalog_pagination(client: AsyncClient) -> None:
     for i in range(3):
         tutor = await _register_tutor(client, f"page-tutor{i}@example.com")
@@ -265,7 +309,9 @@ async def test_available_dates_skip_days_without_capacity(client: AsyncClient) -
         json={"intervals": [{"weekday": 2, "start_time": "10:00:00", "end_time": "11:00:00"}]},
     )
 
-    date_from = dt.date.today() + dt.timedelta(days=1)
+    # +2 days (not +1) so the window comfortably clears the tutor's default 24h
+    # min_lead_time_hours regardless of what time of day the suite happens to run at.
+    date_from = dt.date.today() + dt.timedelta(days=2)
     date_to = date_from + dt.timedelta(days=13)
     resp = await client.get(
         f"/api/v1/tutors/{tutor_id}/availability/dates",
@@ -279,3 +325,96 @@ async def test_available_dates_skip_days_without_capacity(client: AsyncClient) -
     returned_dates = [dt.date.fromisoformat(d) for d in resp.json()]
     assert all(d.weekday() == 2 for d in returned_dates)
     assert len(returned_dates) == 2  # two Wednesdays in a 14-day window
+
+
+async def test_manual_booking_dates_and_slots_ignore_lead_time(client: AsyncClient) -> None:
+    tutor = await _register_tutor(client, "manual-booking-tutor@example.com")
+    # A 5h lead time would normally hide "today", but the tutor's own manual-booking
+    # browser should bypass it entirely (same reasoning as admin reschedule).
+    await client.patch(
+        "/api/v1/tutors/me",
+        headers=tutor["headers"],
+        json={"min_lead_time_hours": 5},
+    )
+    target_date = _next_weekday(weekday=0)
+    await client.put(
+        "/api/v1/tutors/me/availability",
+        headers=tutor["headers"],
+        json={"intervals": [{"weekday": 0, "start_time": "09:00:00", "end_time": "11:00:00"}]},
+    )
+
+    date_from = dt.date.today()
+    date_to = target_date
+    dates_resp = await client.get(
+        "/api/v1/tutors/me/manual-booking/dates",
+        headers=tutor["headers"],
+        params={"duration_minutes": 60, "date_from": date_from.isoformat(), "date_to": date_to.isoformat()},
+    )
+    assert dates_resp.status_code == 200, dates_resp.text
+    assert target_date.isoformat() in dates_resp.json()
+
+    slots_resp = await client.get(
+        "/api/v1/tutors/me/manual-booking/slots",
+        headers=tutor["headers"],
+        params={"duration_minutes": 60, "date": target_date.isoformat()},
+    )
+    assert slots_resp.status_code == 200, slots_resp.text
+    slots = _slots_by_start(slots_resp.json())
+    nine_am_utc = dt.datetime.combine(target_date, dt.time(9, 0), tzinfo=MSK).astimezone(dt.timezone.utc)
+    assert slots[nine_am_utc] is True
+
+
+async def test_manual_booking_availability_requires_tutor_role(client: AsyncClient) -> None:
+    student_resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "manual-booking-student@example.com",
+            "password": "supersecret1",
+            "first_name": "Уч",
+            "last_name": "Еник",
+            "role": "student",
+            "pd_consent": True,
+        },
+    )
+    headers = {"Authorization": f"Bearer {student_resp.json()['tokens']['access_token']}"}
+    resp = await client.get(
+        "/api/v1/tutors/me/manual-booking/dates",
+        headers=headers,
+        params={"duration_minutes": 60, "date_from": dt.date.today().isoformat(), "date_to": dt.date.today().isoformat()},
+    )
+    assert resp.status_code == 403
+
+
+async def test_student_detail_reachable_via_booking_alone(client: AsyncClient) -> None:
+    tutor = await _register_tutor(client, "student-detail-tutor@example.com")
+    student_resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "student-detail-student@example.com",
+            "password": "supersecret1",
+            "first_name": "Оля",
+            "last_name": "Петрова",
+            "role": "student",
+            "pd_consent": True,
+        },
+    )
+    student_body = student_resp.json()
+    student_id = student_body["user"]["id"]
+    student_headers = {"Authorization": f"Bearer {student_body['tokens']['access_token']}"}
+    await client.patch("/api/v1/auth/me", headers=student_headers, json={"grade": 9})
+
+    start = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=10)
+    end = start + dt.timedelta(minutes=60)
+    booking_resp = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={"student_id": student_id, "start_at": start.isoformat(), "end_at": end.isoformat()},
+    )
+    assert booking_resp.status_code == 201, booking_resp.text
+
+    detail_resp = await client.get(f"/api/v1/tutors/me/students/{student_id}", headers=tutor["headers"])
+    assert detail_resp.status_code == 200, detail_resp.text
+    detail = detail_resp.json()
+    assert detail["last_name"] == "Петрова"
+    assert detail["grade"] == 9
+    assert detail["groups"] == []

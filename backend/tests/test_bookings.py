@@ -338,6 +338,77 @@ async def test_tutor_manual_block_and_crud(client: AsyncClient) -> None:
     assert all(b["id"] != block["id"] for b in tutor_list)
 
 
+async def test_apply_link_to_student_propagates_to_other_scheduled_bookings(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "book-tutor8@example.com")
+    student = await _register(client, "book-student8@example.com", "student")
+    other_student = await _register(client, "book-student8b@example.com", "student")
+
+    async def _create_block(weekday: int, student_id: str | None) -> dict:
+        start_at = _next_weekday_datetime(weekday, 10)
+        end_at = start_at + dt.timedelta(hours=1)
+        resp = await client.post(
+            "/api/v1/bookings/manual",
+            headers=tutor["headers"],
+            json={"student_id": student_id, "start_at": start_at.isoformat(), "end_at": end_at.isoformat()},
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    booking1 = await _create_block(0, student["user"]["id"])
+    booking2 = await _create_block(1, student["user"]["id"])
+    booking3 = await _create_block(2, student["user"]["id"])
+    other_students_booking = await _create_block(3, other_student["user"]["id"])
+
+    # Cancel booking3 first - a cancelled booking must NOT receive the propagated link.
+    await client.post(f"/api/v1/bookings/{booking3['id']}/cancel", headers=tutor["headers"], json={})
+
+    patch_resp = await client.patch(
+        f"/api/v1/bookings/{booking1['id']}",
+        headers=tutor["headers"],
+        json={"meeting_link": "https://meet.example.com/permanent", "apply_link_to_student": True},
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+    assert patch_resp.json()["meeting_link"] == "https://meet.example.com/permanent"
+
+    updated_booking2 = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    by_id = {b["id"]: b for b in updated_booking2}
+    assert by_id[booking2["id"]]["meeting_link"] == "https://meet.example.com/permanent"
+    # Cancelled sibling is untouched.
+    assert by_id[booking3["id"]]["meeting_link"] is None
+    # A different student's booking is untouched.
+    assert by_id[other_students_booking["id"]]["meeting_link"] is None
+
+
+async def test_meeting_link_update_without_apply_flag_stays_scoped_to_one_booking(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "book-tutor9@example.com")
+    student = await _register(client, "book-student9@example.com", "student")
+
+    async def _create_block(weekday: int) -> dict:
+        start_at = _next_weekday_datetime(weekday, 10)
+        end_at = start_at + dt.timedelta(hours=1)
+        resp = await client.post(
+            "/api/v1/bookings/manual",
+            headers=tutor["headers"],
+            json={"student_id": student["user"]["id"], "start_at": start_at.isoformat(), "end_at": end_at.isoformat()},
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    booking1 = await _create_block(0)
+    booking2 = await _create_block(1)
+
+    await client.patch(
+        f"/api/v1/bookings/{booking1['id']}",
+        headers=tutor["headers"],
+        json={"meeting_link": "https://meet.example.com/one-off"},
+    )
+
+    tutor_list = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    by_id = {b["id"]: b for b in tutor_list}
+    assert by_id[booking1["id"]]["meeting_link"] == "https://meet.example.com/one-off"
+    assert by_id[booking2["id"]]["meeting_link"] is None
+
+
 async def test_tutor_can_cancel_and_reschedule_without_policy_limits(client: AsyncClient) -> None:
     # High policy thresholds that would block a student outright - a tutor managing
     # their own schedule isn't subject to them.

@@ -67,7 +67,7 @@ export async function listTutorBookings() {
   return data;
 }
 
-export async function updateBooking(id: string, payload: Partial<Booking>) {
+export async function updateBooking(id: string, payload: Partial<Booking> & { apply_link_to_student?: boolean }) {
   const { data } = await apiClient.patch<Booking>(`/bookings/${id}`, payload);
   return data;
 }

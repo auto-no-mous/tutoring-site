@@ -34,8 +34,10 @@ export async function replaceSchedule(id: string, slots: GroupScheduleSlot[]) {
   return data;
 }
 
-export async function listApplications(groupId: string) {
-  const { data } = await apiClient.get<GroupApplication[]>(`/groups/${groupId}/applications`);
+export async function listApplications(groupId: string, statusFilter?: string) {
+  const { data } = await apiClient.get<GroupApplication[]>(`/groups/${groupId}/applications`, {
+    params: statusFilter ? { status_filter: statusFilter } : undefined,
+  });
   return data;
 }
 

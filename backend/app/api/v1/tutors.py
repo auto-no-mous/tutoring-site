@@ -4,17 +4,19 @@ import uuid
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.enums import UserRole
+from app.models.enums import LessonFormat, UserRole
 from app.models.user import User
 from app.schemas.lesson_type import LessonTypeCreate, LessonTypeOut, LessonTypeUpdate
 from app.schemas.schedule import AvailabilityIntervalOut, SlotOut, WeeklyAvailabilityReplace
 from app.schemas.subject import TutorSubjectOut, TutorSubjectsReplace
 from app.schemas.tutor import (
+    StudentGroupMembershipOut,
     TutorCatalogItem,
     TutorCatalogPageOut,
     TutorProfileOut,
     TutorProfileUpdate,
     TutorPublicProfile,
+    TutorStudentDetailOut,
     TutorStudentOut,
     UploadedImageOut,
 )
@@ -22,6 +24,7 @@ from app.services import (
     availability_service,
     booking_service,
     file_service,
+    group_service,
     lesson_type_service,
     review_service,
     schedule_service,
@@ -187,12 +190,82 @@ async def get_my_students(current_user: CurrentUser, db: DbSession) -> list[Tuto
     return [TutorStudentOut(**row) for row in rows]
 
 
+@router.get("/me/students/{student_id}", response_model=TutorStudentDetailOut)
+async def get_my_student(student_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> TutorStudentDetailOut:
+    """Tutor-facing student profile page (see GroupsTab.vue's member list "профиль"
+    link) - only reachable for students the tutor has actually worked with, via a
+    booking or a shared group, current or past."""
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    student = await db.get(User, student_id)
+    if student is None or student.role != UserRole.STUDENT.value:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не найден")
+
+    has_booking = await booking_service.has_had_booking(db, profile.id, student_id)
+    has_membership = await group_service.has_group_membership_with_tutor(db, profile.id, student_id)
+    if not has_booking and not has_membership:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не найден")
+
+    memberships = await group_service.list_student_group_memberships_for_tutor(db, profile.id, student_id)
+    groups = [
+        StudentGroupMembershipOut(
+            group_id=group.id,
+            group_name=group.name,
+            status=membership.status,
+            joined_at=membership.joined_at,
+            left_at=membership.left_at,
+        )
+        for group, membership in memberships
+    ]
+
+    return TutorStudentDetailOut(
+        id=student.id,
+        first_name=student.first_name,
+        last_name=student.last_name,
+        patronymic=student.patronymic,
+        grade=student.grade,
+        email=student.email,
+        groups=groups,
+    )
+
+
+@router.get("/me/manual-booking/dates", response_model=list[dt.date])
+async def get_manual_booking_dates(
+    current_user: CurrentUser, db: DbSession, duration_minutes: int, date_from: dt.date, date_to: dt.date
+) -> list[dt.date]:
+    """Powers the date panel in the tutor's own manual-booking form
+    (components/tutor/BookingsTab.vue) - unlike the reschedule endpoints this has no
+    booking to exclude, and skips min_lead_time_hours since the tutor is booking their
+    own calendar directly (same reasoning as admin_reschedule_booking)."""
+    _require_tutor(current_user)
+    if (date_to - date_from).days > 60:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Слишком большой диапазон дат")
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    return await schedule_service.compute_available_dates_by_duration(
+        db, profile, duration_minutes, date_from, date_to, ignore_lead_time=True
+    )
+
+
+@router.get("/me/manual-booking/slots", response_model=list[SlotOut])
+async def get_manual_booking_slots(
+    current_user: CurrentUser, db: DbSession, duration_minutes: int, date: dt.date
+) -> list[SlotOut]:
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    return await schedule_service.compute_day_slots_by_duration(
+        db, profile, duration_minutes, date, ignore_lead_time=True
+    )
+
+
 @router.get("/{tutor_id}", response_model=TutorPublicProfile)
 async def get_public_profile(tutor_id: str, db: DbSession) -> TutorPublicProfile:
     profile = await tutor_service.get_profile_by_id_or_slug(db, tutor_id)
     user = await db.get(User, profile.user_id)
     avg_rating, reviews_count = await review_service.get_rating_summary(db, profile.id)
     subject_rows = await subject_service.get_tutor_subjects(db, profile.id)
+    active_types = await lesson_type_service.list_lesson_types(db, profile.id, active_only=True)
+    has_individual = any(t.format == LessonFormat.INDIVIDUAL.value for t in active_types)
+    has_group = any(t.format == LessonFormat.GROUP.value for t in active_types)
     return TutorPublicProfile(
         id=profile.id,
         user_id=profile.user_id,
@@ -202,6 +275,8 @@ async def get_public_profile(tutor_id: str, db: DbSession) -> TutorPublicProfile
         subjects=subject_service.to_tutor_subject_out(subject_rows),
         avg_rating=avg_rating,
         reviews_count=reviews_count,
+        show_individual_booking=profile.allow_individual_bookings and has_individual,
+        show_group_booking=profile.allow_group_bookings and has_group,
     )
 
 

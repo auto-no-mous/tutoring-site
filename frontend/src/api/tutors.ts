@@ -1,5 +1,14 @@
 import { apiClient } from "@/api/client";
-import type { AvailabilityInterval, LessonType, Slot, TutorCatalogItem, TutorProfile, TutorPublicProfile, TutorStudent } from "@/types/tutor";
+import type {
+  AvailabilityInterval,
+  LessonType,
+  Slot,
+  TutorCatalogItem,
+  TutorProfile,
+  TutorPublicProfile,
+  TutorStudent,
+  TutorStudentDetail,
+} from "@/types/tutor";
 import type { GroupPublic } from "@/types/group";
 import type { RatingSummary, Review } from "@/types/stats";
 import type { TutorSubject, TutorSubjectSelection } from "@/types/subject";
@@ -126,6 +135,25 @@ export async function deleteLessonType(id: string) {
 
 export async function getMyStudents() {
   const { data } = await apiClient.get<TutorStudent[]>("/tutors/me/students");
+  return data;
+}
+
+export async function getMyStudentDetail(studentId: string) {
+  const { data } = await apiClient.get<TutorStudentDetail>(`/tutors/me/students/${studentId}`);
+  return data;
+}
+
+export async function getManualBookingDates(durationMinutes: number, dateFrom: string, dateTo: string) {
+  const { data } = await apiClient.get<string[]>("/tutors/me/manual-booking/dates", {
+    params: { duration_minutes: durationMinutes, date_from: dateFrom, date_to: dateTo },
+  });
+  return data;
+}
+
+export async function getManualBookingSlots(durationMinutes: number, date: string) {
+  const { data } = await apiClient.get<Slot[]>("/tutors/me/manual-booking/slots", {
+    params: { duration_minutes: durationMinutes, date },
+  });
   return data;
 }
 

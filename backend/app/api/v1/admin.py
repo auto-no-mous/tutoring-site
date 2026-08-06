@@ -41,7 +41,7 @@ router = APIRouter(
 )
 
 
-def _to_group_out(group: Group, member_count: int) -> GroupOut:
+def _to_group_out(group: Group, member_count: int, duration_minutes: int) -> GroupOut:
     return GroupOut(
         id=group.id,
         tutor_id=group.tutor_id,
@@ -52,6 +52,8 @@ def _to_group_out(group: Group, member_count: int) -> GroupOut:
         is_active=group.is_active,
         schedule_slots=[GroupScheduleSlotOut.model_validate(s, from_attributes=True) for s in group.schedule_slots],
         member_count=member_count,
+        created_at=group.created_at,
+        duration_minutes=duration_minutes,
     )
 
 
@@ -256,7 +258,8 @@ async def list_groups(db: DbSession) -> list[GroupOut]:
     out = []
     for group in groups:
         count = await group_service.count_active_members(db, group.id)
-        out.append(_to_group_out(group, count))
+        duration = await group_service.get_lesson_type_duration(db, group.lesson_type_id)
+        out.append(_to_group_out(group, count, duration))
     return out
 
 
@@ -265,7 +268,8 @@ async def update_group(group_id: uuid.UUID, payload: GroupUpdate, db: DbSession)
     group = await group_service.get_group_or_404(db, group_id)
     group = await group_service.update_group(db, group, payload)
     count = await group_service.count_active_members(db, group.id)
-    return _to_group_out(group, count)
+    duration = await group_service.get_lesson_type_duration(db, group.lesson_type_id)
+    return _to_group_out(group, count, duration)
 
 
 @router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -281,7 +285,8 @@ async def reassign_group_tutor(group_id: uuid.UUID, payload: AdminGroupTutorReas
     await admin_service.get_tutor_or_404(db, payload.tutor_id)
     group = await group_service.admin_reassign_tutor(db, group, payload.tutor_id, payload.lesson_type_id)
     count = await group_service.count_active_members(db, group.id)
-    return _to_group_out(group, count)
+    duration = await group_service.get_lesson_type_duration(db, group.lesson_type_id)
+    return _to_group_out(group, count, duration)
 
 
 @router.get("/groups/{group_id}/applications", response_model=list[GroupApplicationOut])

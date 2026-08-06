@@ -1,3 +1,5 @@
+import datetime as dt
+
 from httpx import AsyncClient
 
 
@@ -49,6 +51,9 @@ async def test_individual_chat_flow_and_isolation(client: AsyncClient) -> None:
 
     messages = (await client.get(f"/api/v1/chat/threads/{thread_id}/messages", headers=student["headers"])).json()
     assert [m["content"] for m in messages] == ["Здравствуйте!", "Добрый день"]
+    assert send1.json()["sender_display_name"] == "student Test"
+    assert send2.json()["sender_display_name"] == "tutor Test"
+    assert [m["sender_display_name"] for m in messages] == ["student Test", "tutor Test"]
 
     # A third party has no access.
     forbidden_list = await client.get(f"/api/v1/chat/threads/{thread_id}/messages", headers=outsider["headers"])
@@ -117,6 +122,154 @@ async def test_group_chat_created_with_group_and_membership_gated(client: AsyncC
     await client.post(f"/api/v1/groups/{group_id}/leave", headers=member["headers"])
     revoked = await client.get(f"/api/v1/chat/threads/{thread_id}/messages", headers=member["headers"])
     assert revoked.status_code == 403
+
+
+async def test_unread_count_and_last_message_preview(client: AsyncClient) -> None:
+    tutor = await _register(client, "chat-tutor4@example.com", "tutor")
+    student = await _register(client, "chat-student4@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+    thread_id = (
+        await client.post(f"/api/v1/chat/threads/with-tutor/{tutor_id}", headers=student["headers"])
+    ).json()["id"]
+
+    # No messages yet: both sides see zero unread and no preview.
+    tutor_threads = (await client.get("/api/v1/chat/threads", headers=tutor["headers"])).json()
+    thread = next(t for t in tutor_threads if t["id"] == thread_id)
+    assert thread["unread_count"] == 0
+    assert thread["last_message_preview"] is None
+
+    await client.post(
+        f"/api/v1/chat/threads/{thread_id}/messages", headers=student["headers"], data={"content": "Здравствуйте!"}
+    )
+
+    # The tutor has one unread message from the student; the student's own view
+    # shows zero unread (they sent it themselves) and the same preview text.
+    tutor_threads = (await client.get("/api/v1/chat/threads", headers=tutor["headers"])).json()
+    thread = next(t for t in tutor_threads if t["id"] == thread_id)
+    assert thread["unread_count"] == 1
+    assert thread["last_message_preview"] == "Здравствуйте!"
+    assert thread["last_message_at"] is not None
+
+    student_threads = (await client.get("/api/v1/chat/threads", headers=student["headers"])).json()
+    student_view = next(t for t in student_threads if t["id"] == thread_id)
+    assert student_view["unread_count"] == 0
+    assert student_view["last_message_preview"] == "Здравствуйте!"
+
+    # Fetching messages marks the thread as read.
+    await client.get(f"/api/v1/chat/threads/{thread_id}/messages", headers=tutor["headers"])
+    tutor_threads = (await client.get("/api/v1/chat/threads", headers=tutor["headers"])).json()
+    thread = next(t for t in tutor_threads if t["id"] == thread_id)
+    assert thread["unread_count"] == 0
+
+    # A file-only message (no text content) gets a generic preview.
+    files = {"file": ("note.txt", b"hello", "text/plain")}
+    await client.post(f"/api/v1/chat/threads/{thread_id}/messages", headers=student["headers"], files=files)
+    tutor_threads = (await client.get("/api/v1/chat/threads", headers=tutor["headers"])).json()
+    thread = next(t for t in tutor_threads if t["id"] == thread_id)
+    assert thread["unread_count"] == 1
+    assert thread["last_message_preview"] == "📎 Файл"
+
+
+async def test_threads_sorted_by_most_recent_activity(client: AsyncClient) -> None:
+    tutor = await _register(client, "chat-tutor5@example.com", "tutor")
+    student_a = await _register(client, "chat-student5a@example.com", "student")
+    student_b = await _register(client, "chat-student5b@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+
+    thread_a = (
+        await client.post(f"/api/v1/chat/threads/with-tutor/{tutor_id}", headers=student_a["headers"])
+    ).json()["id"]
+    thread_b = (
+        await client.post(f"/api/v1/chat/threads/with-tutor/{tutor_id}", headers=student_b["headers"])
+    ).json()["id"]
+
+    # Message thread A first, then B - B should now sort above A.
+    await client.post(f"/api/v1/chat/threads/{thread_a}/messages", headers=student_a["headers"], data={"content": "A"})
+    await client.post(f"/api/v1/chat/threads/{thread_b}/messages", headers=student_b["headers"], data={"content": "B"})
+
+    tutor_threads = (await client.get("/api/v1/chat/threads", headers=tutor["headers"])).json()
+    ids_in_order = [t["id"] for t in tutor_threads if t["id"] in (thread_a, thread_b)]
+    assert ids_in_order == [thread_b, thread_a]
+
+    # Messaging A again brings it back to the top.
+    await client.post(f"/api/v1/chat/threads/{thread_a}/messages", headers=student_a["headers"], data={"content": "A again"})
+    tutor_threads = (await client.get("/api/v1/chat/threads", headers=tutor["headers"])).json()
+    ids_in_order = [t["id"] for t in tutor_threads if t["id"] in (thread_a, thread_b)]
+    assert ids_in_order == [thread_a, thread_b]
+
+
+async def test_list_threads_survives_mix_of_empty_and_active_threads(client: AsyncClient) -> None:
+    """Regression test: a real account had a thread with messages and a thread with
+    none (e.g. a freshly opened chat, or a group nobody has messaged yet) - sorting
+    by last_message_at used to crash comparing a naive datetime (read straight off a
+    SQLite row via model_copy, which skips the UTCDateTime validator) against the
+    timezone-aware "no messages" fallback, making GET /chat/threads 500 and the
+    thread list look empty, even though the threads themselves still existed and
+    were individually reachable (e.g. via GET /chat/threads/group/{id})."""
+    tutor = await _register(client, "chat-tutor6@example.com", "tutor")
+    student_with_messages = await _register(client, "chat-student6a@example.com", "student")
+    student_no_messages = await _register(client, "chat-student6b@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+
+    thread_with_messages = (
+        await client.post(f"/api/v1/chat/threads/with-tutor/{tutor_id}", headers=student_with_messages["headers"])
+    ).json()["id"]
+    thread_no_messages = (
+        await client.post(f"/api/v1/chat/threads/with-tutor/{tutor_id}", headers=student_no_messages["headers"])
+    ).json()["id"]
+
+    await client.post(
+        f"/api/v1/chat/threads/{thread_with_messages}/messages",
+        headers=student_with_messages["headers"],
+        data={"content": "Hello"},
+    )
+
+    tutor_threads_resp = await client.get("/api/v1/chat/threads", headers=tutor["headers"])
+    assert tutor_threads_resp.status_code == 200, tutor_threads_resp.text
+    tutor_threads = tutor_threads_resp.json()
+    ids_in_order = [t["id"] for t in tutor_threads if t["id"] in (thread_with_messages, thread_no_messages)]
+    assert ids_in_order == [thread_with_messages, thread_no_messages]
+    empty_thread = next(t for t in tutor_threads if t["id"] == thread_no_messages)
+    assert empty_thread["last_message_at"] is None
+    assert empty_thread["last_message_preview"] is None
+
+    student_no_messages_resp = await client.get("/api/v1/chat/threads", headers=student_no_messages["headers"])
+    assert student_no_messages_resp.status_code == 200, student_no_messages_resp.text
+
+
+async def test_messageable_students_excludes_already_threaded(client: AsyncClient) -> None:
+    """GET /chat/students powers "Новый чат" - it must only offer booked students who
+    don't already have an individual thread (once a thread exists, the tutor reaches
+    that student through the ordinary thread list instead, see components/ChatPanel.vue)."""
+    tutor = await _register(client, "chat-tutor7@example.com", "tutor")
+    fresh_student = await _register(client, "chat-student7a@example.com", "student")
+    already_threaded_student = await _register(client, "chat-student7b@example.com", "student")
+    unrelated_student = await _register(client, "chat-student7c@example.com", "student")
+
+    start = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=5)
+    end = start + dt.timedelta(minutes=60)
+    for student in (fresh_student, already_threaded_student):
+        booking_resp = await client.post(
+            "/api/v1/bookings/manual",
+            headers=tutor["headers"],
+            json={"student_id": student["user"]["id"], "start_at": start.isoformat(), "end_at": end.isoformat()},
+        )
+        assert booking_resp.status_code == 201, booking_resp.text
+        start += dt.timedelta(hours=2)
+        end += dt.timedelta(hours=2)
+
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+    await client.post(f"/api/v1/chat/threads/with-tutor/{tutor_id}", headers=already_threaded_student["headers"])
+
+    resp = await client.get("/api/v1/chat/students", headers=tutor["headers"])
+    assert resp.status_code == 200, resp.text
+    ids = {s["id"] for s in resp.json()}
+    assert fresh_student["user"]["id"] in ids
+    assert already_threaded_student["user"]["id"] not in ids
+    assert unrelated_student["user"]["id"] not in ids
+
+    denied = await client.get("/api/v1/chat/students", headers=fresh_student["headers"])
+    assert denied.status_code == 403
 
 
 async def test_empty_message_rejected(client: AsyncClient) -> None:
