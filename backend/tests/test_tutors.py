@@ -241,6 +241,35 @@ async def test_catalog_price_filter_and_public_lesson_types(client: AsyncClient)
     assert public_types.json()[0]["price"] == 2000
 
 
+async def test_catalog_item_has_about_snippet_and_booking_flag(client: AsyncClient) -> None:
+    tutor = await _register_tutor(client, "catalog-about-tutor@example.com")
+    long_about = "Опытный репетитор. " * 20  # comfortably over the 140-char snippet cutoff
+    await client.patch(
+        "/api/v1/tutors/me",
+        headers=tutor["headers"],
+        json={"about": f"<p>{long_about}</p><script>evil()</script>"},
+    )
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+
+    # No active individual lesson type yet: no booking button, even though "about" is set.
+    no_lesson_type = await client.get("/api/v1/tutors", params={"page_size": 100})
+    item = next(i for i in no_lesson_type.json()["items"] if i["id"] == tutor_id)
+    assert item["show_individual_booking"] is False
+    assert item["about_snippet"] is not None
+    assert "evil()" not in item["about_snippet"]
+    assert item["about_snippet"].endswith("…")
+    assert len(item["about_snippet"]) <= 141  # 140 chars + ellipsis
+
+    await client.post(
+        "/api/v1/tutors/me/lesson-types",
+        headers=tutor["headers"],
+        json={"name": "Занятие", "format": "individual", "duration_minutes": 60, "price": 1500},
+    )
+    with_lesson_type = await client.get("/api/v1/tutors", params={"page_size": 100})
+    item = next(i for i in with_lesson_type.json()["items"] if i["id"] == tutor_id)
+    assert item["show_individual_booking"] is True
+
+
 async def test_slot_computation_respects_break_and_conflicts(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

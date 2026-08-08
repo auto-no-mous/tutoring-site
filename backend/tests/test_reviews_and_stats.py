@@ -138,7 +138,7 @@ async def test_tutor_and_student_stats(client: AsyncClient, db_session: AsyncSes
         "/api/v1/homework",
         headers=tutor["headers"],
         data={
-            "title": "ДЗ 1", "submission_mode": "mark_done", "student_id": student1["user"]["id"],
+            "title": "ДЗ 1", "submission_mode": "mark_done", "student_ids": [student1["user"]["id"]],
             "content_url": "https://example.com/1",
         },
     )
@@ -149,7 +149,7 @@ async def test_tutor_and_student_stats(client: AsyncClient, db_session: AsyncSes
         "/api/v1/homework",
         headers=tutor["headers"],
         data={
-            "title": "ДЗ 2", "submission_mode": "mark_done", "student_id": student1["user"]["id"],
+            "title": "ДЗ 2", "submission_mode": "mark_done", "student_ids": [student1["user"]["id"]],
             "content_url": "https://example.com/2",
         },
     )

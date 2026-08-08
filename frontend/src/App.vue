@@ -1,19 +1,35 @@
 <script setup lang="ts">
+import { onBeforeUnmount, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import ToastContainer from "@/components/ToastContainer.vue";
 import UserMenu from "@/components/UserMenu.vue";
 import { useAuthStore } from "@/stores/auth";
+import { useNotificationsStore } from "@/stores/notifications";
 import { useThemeStore } from "@/stores/theme";
 
 const auth = useAuthStore();
 const themeStore = useThemeStore();
+const notifications = useNotificationsStore();
 const router = useRouter();
 
 async function onLogout(): Promise<void> {
   await auth.logout();
   await router.push({ name: "catalog" });
 }
+
+// Only tutors/students see UserMenu's badge (admin gets its own nav, see below) -
+// poll only while logged in as one of those roles.
+watch(
+  () => (auth.isAuthenticated && auth.user?.role !== "admin" ? auth.user?.id : null),
+  (id) => {
+    if (id) notifications.startPolling();
+    else notifications.stopPolling();
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => notifications.stopPolling());
 </script>
 
 <template>

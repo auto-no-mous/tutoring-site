@@ -84,6 +84,14 @@ class TutorCatalogItem(BaseModel):
     hourly_price: float | None = None
     avg_rating: float | None = None
     reviews_count: int = 0
+    # Plain-text (HTML stripped), truncated preview of "about" - see
+    # tutor_service.search_catalog and app.utils.html_sanitize.strip_html_to_text.
+    about_snippet: str | None = None
+    # Same "toggle AND has an active individual lesson type" logic as the public
+    # profile's show_individual_booking (api/v1/tutors.py::get_public_profile) -
+    # hourly_price is only non-null when such a lesson type exists, so it doubles as
+    # that check here without a second query.
+    show_individual_booking: bool = False
 
 
 class TutorCatalogPageOut(BaseModel):

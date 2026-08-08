@@ -20,6 +20,7 @@ export interface DayGroup<T> {
 
 export interface WeekGroup<T> {
   label: string;
+  isCurrentWeek: boolean;
   days: DayGroup<T>[];
 }
 
@@ -110,10 +111,14 @@ export function groupByWeekAndDay<T>(
   let currentWeekLabel: string | null = null;
   let currentWeekDays: DayGroup<T>[] = [];
 
+  const CURRENT_WEEK_LABEL = "Текущая неделя";
+
   for (const dateIso of sortedDates) {
     const label = weekLabelFor(dateIso);
     if (label !== currentWeekLabel) {
-      if (currentWeekLabel !== null) weeks.push({ label: currentWeekLabel, days: currentWeekDays });
+      if (currentWeekLabel !== null) {
+        weeks.push({ label: currentWeekLabel, isCurrentWeek: currentWeekLabel === CURRENT_WEEK_LABEL, days: currentWeekDays });
+      }
       currentWeekLabel = label;
       currentWeekDays = [];
     }
@@ -125,7 +130,9 @@ export function groupByWeekAndDay<T>(
       isToday: dateIso === todayIso,
     });
   }
-  if (currentWeekLabel !== null) weeks.push({ label: currentWeekLabel, days: currentWeekDays });
+  if (currentWeekLabel !== null) {
+    weeks.push({ label: currentWeekLabel, isCurrentWeek: currentWeekLabel === CURRENT_WEEK_LABEL, days: currentWeekDays });
+  }
 
   return weeks;
 }

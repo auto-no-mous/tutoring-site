@@ -2,17 +2,24 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 
 import { listMessageableStudents, listMessages, listThreads, openThreadWithStudent, sendMessage } from "@/api/chat";
+import { listSystemNotifications, markSystemNotificationsRead } from "@/api/notifications";
 import { useAuthStore } from "@/stores/auth";
+import { useNotificationsStore } from "@/stores/notifications";
 import type { ChatMessage, ChatThread } from "@/types/chat";
+import type { SystemNotification } from "@/types/notification";
 import type { TutorStudent } from "@/types/tutor";
 import { formatDayLabel, formatThreadTimestamp, formatTime } from "@/utils/time";
 
 // Lets other tabs (e.g. tutor/GroupsTab.vue's "написать" / "чат группы" buttons) deep-
 // link straight into a specific thread instead of always landing on the first one -
-// see CabinetView.vue, which resolves this from the ?thread= query param.
+// see CabinetView.vue, which resolves this from the ?thread= query param. "system" is
+// a reserved id for the pseudo-thread below, not a real ChatThread.
 const props = defineProps<{ initialThreadId?: string | null }>();
 
+const SYSTEM_THREAD_ID = "system";
+
 const auth = useAuthStore();
+const notifications = useNotificationsStore();
 const threads = ref<ChatThread[]>([]);
 const activeThread = ref<ChatThread | null>(null);
 const messages = ref<ChatMessage[]>([]);
@@ -22,6 +29,14 @@ const isSending = ref(false);
 const sendError = ref("");
 const fileInputEl = ref<HTMLInputElement | null>(null);
 const messagesEl = ref<HTMLElement | null>(null);
+
+// "Системные уведомления" - a read-only pseudo-thread (not backed by ChatThread/
+// ChatMessage) rendered as if it were an ordinary chat, per the product requirement
+// that schedule-change/login/homework etc. notifications look like messages from a
+// "Системные уведомления" sender. The user can never reply to it.
+const isSystemThreadActive = ref(false);
+const systemNotifications = ref<SystemNotification[]>([]);
+const systemUnreadCount = computed(() => systemNotifications.value.filter((n) => !n.read_at).length);
 
 // Tutor-only "start a new chat" picker (there's no equivalent for students - they
 // reach a tutor via the "Написать сообщение" button on the tutor's public profile).
@@ -53,6 +68,27 @@ const messageGroups = computed<MessageGroup[]>(() => {
       last.messages.push(message);
     } else {
       groups.push({ dayLabel: label, messages: [message] });
+    }
+  }
+  return groups;
+});
+
+interface SystemNotificationGroup {
+  dayLabel: string;
+  notifications: SystemNotification[];
+}
+
+const systemMessageGroups = computed<SystemNotificationGroup[]>(() => {
+  const groups: SystemNotificationGroup[] = [];
+  // Oldest first, same convention as messageGroups above - list_for_user returns
+  // newest-first for the list view, so reverse for chronological chat rendering.
+  for (const item of [...systemNotifications.value].reverse()) {
+    const label = formatDayLabel(item.created_at);
+    const last = groups[groups.length - 1];
+    if (last && last.dayLabel === label) {
+      last.notifications.push(item);
+    } else {
+      groups.push({ dayLabel: label, notifications: [item] });
     }
   }
   return groups;
@@ -104,11 +140,23 @@ function scrollToBottom(): void {
 async function loadThreads(): Promise<void> {
   const data = await listThreads();
   threads.value = data;
-  if (activeThread.value) {
+  // Read-only refresh for the sidebar preview/badge - marking notifications as read
+  // only happens while the pseudo-thread is actually open (see loadSystemNotifications,
+  // only called from openSystemThread/startMessagePolling below).
+  if (!isSystemThreadActive.value) {
+    systemNotifications.value = await listSystemNotifications();
+  }
+  if (activeThread.value || isSystemThreadActive.value) {
     // Keep the open thread's own metadata (title, unread_count) in sync with the
     // list poll, without disturbing which thread is currently open.
-    const refreshed = data.find((t) => t.id === activeThread.value?.id);
-    if (refreshed) activeThread.value = refreshed;
+    if (activeThread.value) {
+      const refreshed = data.find((t) => t.id === activeThread.value?.id);
+      if (refreshed) activeThread.value = refreshed;
+    }
+    return;
+  }
+  if (props.initialThreadId === SYSTEM_THREAD_ID) {
+    await openSystemThread();
     return;
   }
   const target = props.initialThreadId ? data.find((t) => t.id === props.initialThreadId) : null;
@@ -116,6 +164,8 @@ async function loadThreads(): Promise<void> {
     await openThread(target);
   } else if (data.length > 0) {
     await openThread(data[0]);
+  } else {
+    await openSystemThread();
   }
 }
 
@@ -136,6 +186,23 @@ async function loadMessages(): Promise<void> {
   }
 }
 
+async function loadSystemNotifications(): Promise<void> {
+  const wasNearBottom = isNearBottom();
+  const hadItems = systemNotifications.value.length;
+  const data = await listSystemNotifications();
+  const grew = data.length > hadItems;
+  systemNotifications.value = data;
+  if (systemUnreadCount.value > 0) {
+    await markSystemNotificationsRead();
+    systemNotifications.value = systemNotifications.value.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() }));
+    await notifications.refresh();
+  }
+  if (grew && (wasNearBottom || hadItems === 0)) {
+    await nextTick();
+    scrollToBottom();
+  }
+}
+
 function stopMessagePolling(): void {
   if (messagesPollId) clearInterval(messagesPollId);
   messagesPollId = null;
@@ -144,12 +211,23 @@ function stopMessagePolling(): void {
 function startMessagePolling(): void {
   stopMessagePolling();
   messagesPollId = setInterval(() => {
-    if (document.visibilityState === "visible") loadMessages();
+    if (document.visibilityState !== "visible") return;
+    if (isSystemThreadActive.value) loadSystemNotifications();
+    else loadMessages();
   }, MESSAGES_POLL_MS);
+}
+
+async function openSystemThread(): Promise<void> {
+  activeThread.value = null;
+  isSystemThreadActive.value = true;
+  systemNotifications.value = [];
+  await loadSystemNotifications();
+  startMessagePolling();
 }
 
 async function openThread(thread: ChatThread): Promise<void> {
   activeThread.value = thread;
+  isSystemThreadActive.value = false;
   messages.value = [];
   await loadMessages();
   startMessagePolling();
@@ -228,6 +306,34 @@ defineExpose({ loadThreads });
           </button>
         </div>
       </div>
+      <button
+        type="button"
+        class="flex w-full items-center gap-2.5 border-b border-slate-200 px-3 py-2.5 text-left hover:bg-slate-100 dark:border-slate-800 dark:hover:bg-slate-800"
+        :class="isSystemThreadActive ? 'bg-slate-100 dark:bg-slate-800' : ''"
+        @click="openSystemThread"
+      >
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+          🔔
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="flex items-center justify-between gap-1">
+            <span class="truncate text-sm" :class="systemUnreadCount > 0 ? 'font-semibold' : 'font-medium'">
+              Системные уведомления
+            </span>
+          </span>
+          <span class="flex items-center justify-between gap-1">
+            <span class="truncate text-xs text-slate-500">
+              {{ systemNotifications[0]?.title ?? "Нет уведомлений" }}
+            </span>
+            <span
+              v-if="systemUnreadCount > 0"
+              class="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-slate-900 px-1 text-[10px] font-medium text-white dark:bg-white dark:text-slate-900"
+            >
+              {{ systemUnreadCount }}
+            </span>
+          </span>
+        </span>
+      </button>
       <p v-if="threads.length === 0" class="p-3 text-xs text-slate-400">Чатов пока нет.</p>
       <button
         v-for="thread in threads"
@@ -263,7 +369,35 @@ defineExpose({ loadThreads });
     </aside>
 
     <div class="flex flex-1 flex-col p-3">
-      <template v-if="activeThread">
+      <template v-if="isSystemThreadActive">
+        <div class="border-b border-slate-200 pb-2 text-sm font-medium dark:border-slate-800">
+          Системные уведомления
+        </div>
+
+        <div ref="messagesEl" class="mt-2 flex-1 overflow-y-auto">
+          <p v-if="systemNotifications.length === 0" class="m-auto text-sm text-slate-400">Уведомлений пока нет.</p>
+          <template v-for="group in systemMessageGroups" :key="group.dayLabel + group.notifications[0].id">
+            <div class="my-2 flex justify-center">
+              <span class="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                {{ group.dayLabel }}
+              </span>
+            </div>
+            <div v-for="item in group.notifications" :key="item.id" class="mb-2 flex flex-col items-start">
+              <span class="mb-0.5 px-1 text-[11px] font-medium text-slate-500">Системные уведомления</span>
+              <div class="max-w-[80%] rounded-md bg-slate-100 px-3 py-1.5 text-sm dark:bg-slate-800">
+                <p class="font-medium">{{ item.title }}</p>
+                <p class="whitespace-pre-wrap">{{ item.body }}</p>
+                <div class="mt-1 text-[10px] opacity-70">{{ formatTime(item.created_at) }}</div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <p class="mt-2 text-center text-xs text-slate-400">
+          Это системные уведомления - ответить на них нельзя.
+        </p>
+      </template>
+      <template v-else-if="activeThread">
         <div class="border-b border-slate-200 pb-2 text-sm font-medium dark:border-slate-800">
           {{ activeThread.display_title || (activeThread.type === "group" ? "Группа" : "Личный чат") }}
         </div>

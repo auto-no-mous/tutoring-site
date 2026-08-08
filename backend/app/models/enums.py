@@ -110,6 +110,29 @@ class NotificationStatus(StrEnum):
     FAILED = "failed"
 
 
+class SystemNotificationEvent(StrEnum):
+    """In-app "Системные уведомления" thread events - see
+    app.services.system_notification_service. Distinct from NotificationEvent (email/
+    Telegram dispatch categories, section 2.7): those are coarser (e.g. one
+    SCHEDULE_CHANGE covers every cancel/reschedule direction) while admin-editable
+    in-app templates need one entry per actor+action so the wording can differ
+    ("вы отменили" vs "ученик отменил")."""
+
+    LOGIN_SUCCESS = "login_success"
+    LOGIN_FAILED = "login_failed"
+    WELCOME = "welcome"
+    BOOKING_CANCELLED_BY_STUDENT = "booking_cancelled_by_student"
+    BOOKING_RESCHEDULED_BY_STUDENT = "booking_rescheduled_by_student"
+    GROUP_APPLICATION_RECEIVED = "group_application_received"
+    GROUP_MEMBER_LEFT = "group_member_left"
+    BOOKING_CANCELLED_BY_TUTOR = "booking_cancelled_by_tutor"
+    BOOKING_RESCHEDULED_BY_TUTOR = "booking_rescheduled_by_tutor"
+    GROUP_SCHEDULE_CHANGED = "group_schedule_changed"
+    GROUP_APPLICATION_ACCEPTED = "group_application_accepted"
+    GROUP_APPLICATION_REJECTED = "group_application_rejected"
+    HOMEWORK_ASSIGNED = "homework_assigned"
+
+
 class ActivityEventType(StrEnum):
     """Filterable categories in the tutor/student activity log (Статистика page).
     Purely a read-model classification - see app.services.activity_log_service -

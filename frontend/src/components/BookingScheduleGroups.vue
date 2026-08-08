@@ -19,9 +19,27 @@ onBeforeUnmount(() => {
   if (timer) window.clearInterval(timer);
 });
 
+const IMMINENT_WINDOW_MS = 15 * 60 * 1000;
+
 function isHappeningNow(item: Booking): boolean {
   const t = now.value.getTime();
   return t >= new Date(item.start_at).getTime() && t < new Date(item.end_at).getTime();
+}
+
+// Starts within the next 15 minutes (but hasn't started yet - once it has, it's
+// "happening now" instead).
+function isStartingSoon(item: Booking): boolean {
+  const t = now.value.getTime();
+  const start = new Date(item.start_at).getTime();
+  return t < start && start - t <= IMMINENT_WINDOW_MS;
+}
+
+function isImminent(item: Booking): boolean {
+  return isHappeningNow(item) || isStartingSoon(item);
+}
+
+function minutesUntilStart(item: Booking): number {
+  return Math.max(0, Math.round((new Date(item.start_at).getTime() - now.value.getTime()) / 60000));
 }
 </script>
 
@@ -47,16 +65,18 @@ function isHappeningNow(item: Booking): boolean {
               :key="(item as Booking).id"
               class="rounded-md border px-3 py-2 transition-colors"
               :class="
-                isHappeningNow(item)
+                isImminent(item)
                   ? 'border-blue-500 bg-blue-100 ring-1 ring-blue-400 dark:border-blue-500 dark:bg-blue-950 dark:ring-blue-600'
                   : day.isToday
                     ? 'border-blue-200 bg-blue-50/70 dark:border-blue-900 dark:bg-blue-950/30'
-                    : 'border-slate-200 dark:border-slate-800'
+                    : week.isCurrentWeek
+                      ? 'border-blue-100 bg-blue-50/30 dark:border-blue-950/60 dark:bg-blue-950/10'
+                      : 'border-slate-200 dark:border-slate-800'
               "
             >
-              <div v-if="isHappeningNow(item)" class="mb-1 flex items-center gap-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
+              <div v-if="isImminent(item)" class="mb-1 flex items-center gap-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
                 <span class="inline-block h-1.5 w-1.5 rounded-full bg-blue-600 dark:bg-blue-400"></span>
-                Идёт сейчас
+                {{ isHappeningNow(item) ? "Идёт сейчас" : `Начинается через ${minutesUntilStart(item)} мин` }}
               </div>
               <slot :item="item" />
             </div>

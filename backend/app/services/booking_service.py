@@ -6,17 +6,25 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.booking import Booking, RecurringSeries
-from app.models.enums import BookedBy, BookingStatus, NotificationEvent, UserRole
+from app.models.enums import BookedBy, BookingStatus, NotificationEvent, SystemNotificationEvent, UserRole
 from app.models.lesson_type import LessonType
 from app.models.subject import TutorSubject, TutorSubjectDirection
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.schemas.booking import BookingTutorUpdate, ManualBookingCreate
-from app.services import notification_service, schedule_service, tutor_service
+from app.services import notification_service, schedule_service, system_notification_service, tutor_service
 from app.services.schedule_service import MSK
 from app.utils.time import ensure_aware, utcnow
 
 RECURRING_WEEKS_AHEAD = 8
+
+
+def _fmt_date_time(moment: dt.datetime) -> tuple[str, str]:
+    """Splits a moment into (date, time) strings in MSK for system-notification
+    template placeholders {date}/{time}/{old_date}/{old_time}/{new_date}/{new_time} -
+    see system_notification_service.DEFAULT_TEMPLATES."""
+    local = ensure_aware(moment).astimezone(MSK)
+    return f"{local:%d.%m.%Y}", f"{local:%H:%M}"
 
 
 async def _get_active_lesson_type(db: AsyncSession, tutor_id: uuid.UUID, lesson_type_id: uuid.UUID) -> LessonType:
@@ -494,6 +502,7 @@ async def cancel_booking(db: AsyncSession, booking: Booking, actor: User, reason
     await db.commit()
     await db.refresh(booking)
 
+    date_str, time_str = _fmt_date_time(start_at)
     if is_tutor:
         if booking.student_id is not None:
             await notification_service.notify(
@@ -503,6 +512,10 @@ async def cancel_booking(db: AsyncSession, booking: Booking, actor: User, reason
                 "Репетитор отменил занятие",
                 f"Занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК) отменено репетитором.",
             )
+            await system_notification_service.notify(
+                db, booking.student_id, SystemNotificationEvent.BOOKING_CANCELLED_BY_TUTOR,
+                date=date_str, time=time_str,
+            )
     else:
         await notification_service.notify_tutor(
             db,
@@ -510,6 +523,10 @@ async def cancel_booking(db: AsyncSession, booking: Booking, actor: User, reason
             NotificationEvent.SCHEDULE_CHANGE,
             "Ученик отменил занятие",
             f"{actor.display_name} отменил(а) занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
+        )
+        await system_notification_service.notify(
+            db, tutor.user_id, SystemNotificationEvent.BOOKING_CANCELLED_BY_STUDENT,
+            student_name=actor.display_name, date=date_str, time=time_str,
         )
     return booking
 
@@ -577,6 +594,8 @@ async def reschedule_booking(db: AsyncSession, booking: Booking, actor: User, ne
     await db.commit()
     await db.refresh(new_booking)
 
+    old_date_str, old_time_str = _fmt_date_time(start_at)
+    new_date_str, new_time_str = _fmt_date_time(new_start_at)
     if is_tutor:
         if booking.student_id is not None:
             await notification_service.notify(
@@ -587,6 +606,10 @@ async def reschedule_booking(db: AsyncSession, booking: Booking, actor: User, ne
                 f"Занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК) перенесено репетитором "
                 f"на {new_start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
             )
+            await system_notification_service.notify(
+                db, booking.student_id, SystemNotificationEvent.BOOKING_RESCHEDULED_BY_TUTOR,
+                old_date=old_date_str, old_time=old_time_str, new_date=new_date_str, new_time=new_time_str,
+            )
     else:
         await notification_service.notify_tutor(
             db,
@@ -596,6 +619,12 @@ async def reschedule_booking(db: AsyncSession, booking: Booking, actor: User, ne
             f"{actor.display_name} перенёс(ла) занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} "
             f"на {new_start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
         )
+        if tutor.user_id is not None:
+            await system_notification_service.notify(
+                db, tutor.user_id, SystemNotificationEvent.BOOKING_RESCHEDULED_BY_STUDENT,
+                student_name=actor.display_name,
+                old_date=old_date_str, old_time=old_time_str, new_date=new_date_str, new_time=new_time_str,
+            )
     return new_booking
 
 
@@ -676,6 +705,12 @@ async def admin_reschedule_booking(
             "Занятие перенесено администрацией",
             f"Занятие {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК) перенесено "
             f"на {new_start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
+        )
+        old_date_str, old_time_str = _fmt_date_time(start_at)
+        new_date_str, new_time_str = _fmt_date_time(new_start_at)
+        await system_notification_service.notify(
+            db, booking.student_id, SystemNotificationEvent.BOOKING_RESCHEDULED_BY_TUTOR,
+            old_date=old_date_str, old_time=old_time_str, new_date=new_date_str, new_time=new_time_str,
         )
     await notification_service.notify_tutor(
         db,

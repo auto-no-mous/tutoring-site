@@ -7,6 +7,7 @@ from app.api.v1.chat import router as chat_router
 from app.api.v1.groups import public_router as groups_public_router
 from app.api.v1.groups import router as groups_router
 from app.api.v1.homework import router as homework_router
+from app.api.v1.notifications import router as notifications_router
 from app.api.v1.reviews import router as reviews_router
 from app.api.v1.stats import router as stats_router
 from app.api.v1.subjects import router as subjects_router
@@ -21,6 +22,7 @@ api_router.include_router(groups_router)
 api_router.include_router(groups_public_router)
 api_router.include_router(homework_router)
 api_router.include_router(chat_router)
+api_router.include_router(notifications_router)
 api_router.include_router(reviews_router)
 api_router.include_router(stats_router)
 api_router.include_router(admin_router)

@@ -195,6 +195,21 @@ async def get_unread_counts(db: AsyncSession, thread_ids: list[uuid.UUID], user_
     return counts
 
 
+async def get_total_unread_for_user(db: AsyncSession, user: User) -> int:
+    """Sum of unread counts across every thread the user can see - powers the
+    combined chat+system badge (see api/v1/notifications.py, components/UserMenu.vue,
+    CabinetView.vue's "Чат" tab)."""
+    if user.role == "tutor":
+        profile = await tutor_service.get_profile_by_user_id(db, user.id)
+        threads = await list_threads_for_tutor(db, profile.id)
+    elif user.role == "student":
+        threads = await list_threads_for_student(db, user.id)
+    else:
+        return 0
+    counts = await get_unread_counts(db, [t.id for t in threads], user.id)
+    return sum(counts.values())
+
+
 async def get_last_messages(db: AsyncSession, thread_ids: list[uuid.UUID]) -> dict[uuid.UUID, ChatMessage]:
     """Most recent message per thread - powers the preview line/timestamp in the
     thread list and its sort order (most recently active thread first)."""

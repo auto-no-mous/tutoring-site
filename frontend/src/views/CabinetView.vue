@@ -16,17 +16,19 @@ import ProfileTab from "@/components/tutor/ProfileTab.vue";
 import ScheduleTab from "@/components/tutor/ScheduleTab.vue";
 import StatsTabTutor from "@/components/tutor/StatsTab.vue";
 import { useAuthStore } from "@/stores/auth";
+import { useNotificationsStore } from "@/stores/notifications";
 
 const auth = useAuthStore();
+const notifications = useNotificationsStore();
 const route = useRoute();
 
 const tutorTabs = [
   { key: "bookings", label: "Занятия" },
-  { key: "profile", label: "Профиль" },
   { key: "schedule", label: "Расписание" },
   { key: "groups", label: "Группы" },
   { key: "homework", label: "Домашние задания" },
   { key: "chat", label: "Чат" },
+  { key: "profile", label: "Профиль" },
   { key: "stats", label: "Статистика" },
   { key: "settings", label: "Настройки" },
 ];
@@ -112,6 +114,12 @@ onMounted(loadGroupHistory);
         @click="activeTab = tab.key"
       >
         {{ tab.label }}
+        <span
+          v-if="tab.key === 'chat' && notifications.total > 0"
+          class="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-medium text-white"
+        >
+          {{ notifications.total > 9 ? "9+" : notifications.total }}
+        </span>
       </button>
     </nav>
 

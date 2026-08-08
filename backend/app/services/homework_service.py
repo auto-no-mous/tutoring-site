@@ -4,11 +4,11 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import HomeworkContentType, HomeworkSubmissionMode, HomeworkSubmissionStatus
+from app.models.enums import HomeworkContentType, HomeworkSubmissionMode, HomeworkSubmissionStatus, SystemNotificationEvent
 from app.models.homework import HomeworkAssignment, HomeworkSubmission
 from app.models.tutor import TutorProfile
 from app.models.user import User
-from app.services import group_service
+from app.services import group_service, system_notification_service
 from app.utils.time import utcnow
 
 
@@ -16,7 +16,7 @@ async def create_assignment_for_student(
     db: AsyncSession,
     tutor: TutorProfile,
     student_id: uuid.UUID,
-    title: str,
+    title: str | None,
     content_type: str,
     content_url: str | None,
     content_file_path: str | None,
@@ -43,6 +43,10 @@ async def create_assignment_for_student(
     db.add(HomeworkSubmission(assignment_id=assignment.id, student_id=student_id))
     await db.commit()
     await db.refresh(assignment)
+
+    await system_notification_service.notify(
+        db, student_id, SystemNotificationEvent.HOMEWORK_ASSIGNED, homework_title=title or "Без названия"
+    )
     return assignment
 
 
@@ -50,7 +54,7 @@ async def create_assignment_for_group(
     db: AsyncSession,
     tutor: TutorProfile,
     group_id: uuid.UUID,
-    title: str,
+    title: str | None,
     content_type: str,
     content_url: str | None,
     content_file_path: str | None,
@@ -82,6 +86,11 @@ async def create_assignment_for_group(
 
     await db.commit()
     await db.refresh(assignment)
+
+    for member in members:
+        await system_notification_service.notify(
+            db, member.student_id, SystemNotificationEvent.HOMEWORK_ASSIGNED, homework_title=title or "Без названия"
+        )
     return assignment
 
 
@@ -174,6 +183,50 @@ async def get_student_status_map(db: AsyncSession, tutor_id: uuid.UUID) -> dict[
         student_id: "pending" if HomeworkSubmissionStatus.PENDING.value in statuses else "done"
         for student_id, statuses in by_student.items()
     }
+
+
+async def get_assignment_status_map(db: AsyncSession, tutor_id: uuid.UUID) -> dict[uuid.UUID, str]:
+    """Per-assignment aggregate status, same binary as get_student_status_map above -
+    "pending" if any submission (relevant for group assignments, which have one
+    submission per member) is still outstanding, else "done". Powers the status
+    filter on the tutor's assignment list (tutor/HomeworkTab.vue)."""
+    result = await db.execute(
+        select(HomeworkSubmission.assignment_id, HomeworkSubmission.status)
+        .join(HomeworkAssignment, HomeworkAssignment.id == HomeworkSubmission.assignment_id)
+        .where(HomeworkAssignment.tutor_id == tutor_id)
+    )
+    by_assignment: dict[uuid.UUID, list[str]] = {}
+    for assignment_id, submission_status in result.all():
+        by_assignment.setdefault(assignment_id, []).append(submission_status)
+
+    return {
+        assignment_id: "pending" if HomeworkSubmissionStatus.PENDING.value in statuses else "done"
+        for assignment_id, statuses in by_assignment.items()
+    }
+
+
+async def update_assignment(
+    db: AsyncSession,
+    assignment: HomeworkAssignment,
+    title: str | None,
+    submission_mode: str,
+    content_type: str | None,
+    content_url: str | None,
+    content_file_path: str | None,
+) -> HomeworkAssignment:
+    """`content_type` is None when the tutor didn't touch the material (edit form's
+    "Заменить материал" left unchecked) - the existing link/file is kept as-is;
+    otherwise it fully replaces content_url/content_file_path together, since exactly
+    one of the two is ever meaningful (see homework_service.validate_content)."""
+    assignment.title = title
+    assignment.submission_mode = submission_mode
+    if content_type is not None:
+        assignment.content_type = content_type
+        assignment.content_url = content_url
+        assignment.content_file_path = content_file_path
+    await db.commit()
+    await db.refresh(assignment)
+    return assignment
 
 
 async def get_submission_or_404(db: AsyncSession, submission_id: uuid.UUID) -> HomeworkSubmission:

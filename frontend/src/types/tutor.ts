@@ -40,6 +40,8 @@ export interface TutorCatalogItem {
   hourly_price: number | null;
   avg_rating: number | null;
   reviews_count: number;
+  about_snippet: string | null;
+  show_individual_booking: boolean;
 }
 
 export interface TutorPublicProfile {

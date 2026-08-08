@@ -7,6 +7,7 @@ from app.models.notification import NotificationLog
 from app.models.review import Review
 from app.models.schedule import WeeklyAvailability
 from app.models.subject import Direction, Subject, TutorSubject, TutorSubjectDirection
+from app.models.system_notification import NotificationTemplate, SystemNotification
 from app.models.tutor import TutorProfile
 from app.models.user import RefreshToken, User
 
@@ -25,6 +26,8 @@ __all__ = [
     "HomeworkSubmission",
     "LessonType",
     "NotificationLog",
+    "NotificationTemplate",
+    "SystemNotification",
     "Review",
     "WeeklyAvailability",
     "Subject",

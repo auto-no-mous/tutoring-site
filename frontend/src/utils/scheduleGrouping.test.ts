@@ -35,4 +35,15 @@ describe("groupByWeekAndDay", () => {
     expect(labels).toContain("Текущая неделя");
     expect(labels.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("flags isCurrentWeek only on the current week's bucket", () => {
+    const inThreeWeeks = new Date(Date.now() + 21 * 24 * 3600 * 1000);
+    const items: Item[] = [{ start_at: inThreeWeeks.toISOString() }];
+    const weeks = groupByWeekAndDay(items, (i) => i.start_at, "UTC");
+    const currentWeek = weeks.find((w) => w.label === "Текущая неделя");
+    expect(currentWeek?.isCurrentWeek).toBe(true);
+    const otherWeeks = weeks.filter((w) => w.label !== "Текущая неделя");
+    expect(otherWeeks.length).toBeGreaterThan(0);
+    expect(otherWeeks.every((w) => w.isCurrentWeek === false)).toBe(true);
+  });
 });

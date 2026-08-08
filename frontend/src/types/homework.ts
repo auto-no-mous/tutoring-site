@@ -3,13 +3,16 @@ export interface HomeworkAssignment {
   tutor_id: string;
   student_id: string | null;
   group_id: string | null;
-  title: string;
+  title: string | null;
   content_type: string;
   content_url: string | null;
   content_file_path: string | null;
   submission_mode: string;
   due_at: string | null;
   created_at: string;
+  status: string;
+  student_display_name: string | null;
+  group_name: string | null;
 }
 
 export interface HomeworkSubmission {

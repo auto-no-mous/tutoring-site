@@ -11,7 +11,7 @@ from app.schemas.homework import (
     HomeworkSubmissionStatusUpdate,
     StudentHomeworkOut,
 )
-from app.services import file_service, homework_service, tutor_service
+from app.services import booking_service, file_service, group_service, homework_service, tutor_service
 from app.utils.time import to_utc
 
 router = APIRouter(prefix="/homework", tags=["homework"])
@@ -27,25 +27,50 @@ def _require_student(user: CurrentUser) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Доступно только ученикам")
 
 
-@router.post("", response_model=HomeworkAssignmentOut, status_code=status.HTTP_201_CREATED)
+def _validate_submission_mode(submission_mode: str) -> None:
+    if submission_mode not in (HomeworkSubmissionMode.MARK_DONE.value, HomeworkSubmissionMode.FILE_UPLOAD.value):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Некорректный режим сдачи задания")
+
+
+async def _enrich(db: DbSession, assignments: list) -> list[HomeworkAssignmentOut]:
+    """Attaches the aggregate status + recipient display name each card needs (see
+    tutor/HomeworkTab.vue) - shared by every endpoint that returns assignment rows."""
+    if not assignments:
+        return []
+    tutor_id = assignments[0].tutor_id
+    status_map = await homework_service.get_assignment_status_map(db, tutor_id)
+    student_names = await booking_service.get_student_names(db, [a.student_id for a in assignments])
+    group_names = await group_service.get_group_names(db, [a.group_id for a in assignments])
+    return [
+        HomeworkAssignmentOut.model_validate(a, from_attributes=True).model_copy(
+            update={
+                "status": status_map.get(a.id, "done"),
+                "student_display_name": student_names.get(a.student_id) if a.student_id else None,
+                "group_name": group_names.get(a.group_id) if a.group_id else None,
+            }
+        )
+        for a in assignments
+    ]
+
+
+@router.post("", response_model=list[HomeworkAssignmentOut], status_code=status.HTTP_201_CREATED)
 async def create_homework(
     current_user: CurrentUser,
     db: DbSession,
-    title: str = Form(...),
     submission_mode: str = Form(...),
-    student_id: str | None = Form(None),
-    group_id: str | None = Form(None),
+    title: str | None = Form(None),
+    student_ids: list[str] = Form([]),
+    group_ids: list[str] = Form([]),
     content_url: str | None = Form(None),
     due_at: str | None = Form(None),
     file: UploadFile | None = File(None),
-) -> HomeworkAssignmentOut:
+) -> list[HomeworkAssignmentOut]:
     _require_tutor(current_user)
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
 
-    if (student_id is None) == (group_id is None):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Укажите либо student_id, либо group_id")
-    if submission_mode not in (HomeworkSubmissionMode.MARK_DONE.value, HomeworkSubmissionMode.FILE_UPLOAD.value):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Некорректный режим сдачи задания")
+    if not student_ids and not group_ids:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Укажите хотя бы одного получателя")
+    _validate_submission_mode(submission_mode)
 
     has_file = file is not None and bool(file.filename)
     content_type = homework_service.validate_content(content_url, has_file)
@@ -55,19 +80,101 @@ async def create_homework(
         content_file_path = await file_service.save_upload(file, "homework", file_service.ALLOWED_ATTACHMENT_TYPES)
 
     due_at_parsed = to_utc(datetime.fromisoformat(due_at)) if due_at else None
+    title = title or None
 
-    if student_id is not None:
-        assignment = await homework_service.create_assignment_for_student(
-            db, profile, uuid.UUID(student_id), title, content_type, content_url, content_file_path,
-            submission_mode, due_at_parsed,
+    created = []
+    for student_id in student_ids:
+        created.append(
+            await homework_service.create_assignment_for_student(
+                db, profile, uuid.UUID(student_id), title, content_type, content_url, content_file_path,
+                submission_mode, due_at_parsed,
+            )
         )
-    else:
-        assignment = await homework_service.create_assignment_for_group(
-            db, profile, uuid.UUID(group_id), title, content_type, content_url, content_file_path,
-            submission_mode, due_at_parsed,
+    for group_id in group_ids:
+        created.append(
+            await homework_service.create_assignment_for_group(
+                db, profile, uuid.UUID(group_id), title, content_type, content_url, content_file_path,
+                submission_mode, due_at_parsed,
+            )
         )
 
-    return HomeworkAssignmentOut.model_validate(assignment, from_attributes=True)
+    return await _enrich(db, created)
+
+
+@router.patch("/{assignment_id}", response_model=HomeworkAssignmentOut)
+async def update_homework(
+    assignment_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+    submission_mode: str = Form(...),
+    title: str | None = Form(None),
+    content_url: str | None = Form(None),
+    file: UploadFile | None = File(None),
+) -> HomeworkAssignmentOut:
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    assignment = await homework_service.get_assignment_or_404(db, assignment_id)
+    if assignment.tutor_id != profile.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше задание")
+
+    _validate_submission_mode(submission_mode)
+
+    has_file = file is not None and bool(file.filename)
+    replacing_content = has_file or bool(content_url)
+    content_type = None
+    content_file_path = None
+    if replacing_content:
+        content_type = homework_service.validate_content(content_url, has_file)
+        if has_file:
+            content_file_path = await file_service.save_upload(
+                file, "homework", file_service.ALLOWED_ATTACHMENT_TYPES
+            )
+
+    assignment = await homework_service.update_assignment(
+        db, assignment, title or None, submission_mode, content_type,
+        content_url if replacing_content else None, content_file_path,
+    )
+    enriched = await _enrich(db, [assignment])
+    return enriched[0]
+
+
+@router.post("/{assignment_id}/duplicate", response_model=list[HomeworkAssignmentOut], status_code=status.HTTP_201_CREATED)
+async def duplicate_homework(
+    assignment_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+    student_ids: list[str] = Form([]),
+    group_ids: list[str] = Form([]),
+) -> list[HomeworkAssignmentOut]:
+    """Sends the same title/content/submission mode as an existing assignment to a
+    newly chosen set of recipients (tutor/HomeworkTab.vue's "Скопировать" button) -
+    reuses the source's already-uploaded file/link as-is, no re-upload needed."""
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    source = await homework_service.get_assignment_or_404(db, assignment_id)
+    if source.tutor_id != profile.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше задание")
+
+    if not student_ids and not group_ids:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Укажите хотя бы одного получателя")
+
+    created = []
+    for student_id in student_ids:
+        created.append(
+            await homework_service.create_assignment_for_student(
+                db, profile, uuid.UUID(student_id), source.title, source.content_type,
+                source.content_url, source.content_file_path, source.submission_mode, source.due_at,
+            )
+        )
+    for group_id in group_ids:
+        created.append(
+            await homework_service.create_assignment_for_group(
+                db, profile, uuid.UUID(group_id), source.title, source.content_type,
+                source.content_url, source.content_file_path, source.submission_mode, source.due_at,
+            )
+        )
+
+    return await _enrich(db, created)
 
 
 @router.get("/tutor/me", response_model=list[HomeworkAssignmentOut])
@@ -75,7 +182,7 @@ async def list_my_assignments(current_user: CurrentUser, db: DbSession) -> list[
     _require_tutor(current_user)
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     rows = await homework_service.list_assignments_for_tutor(db, profile.id)
-    return [HomeworkAssignmentOut.model_validate(r, from_attributes=True) for r in rows]
+    return await _enrich(db, rows)
 
 
 @router.get("/tutor/me/student-status", response_model=dict[str, str])

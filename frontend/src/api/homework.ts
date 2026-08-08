@@ -2,25 +2,54 @@ import { apiClient } from "@/api/client";
 import type { HomeworkAssignment, HomeworkSubmission, StudentHomework } from "@/types/homework";
 
 export interface CreateHomeworkPayload {
-  title: string;
+  title?: string;
   submission_mode: "mark_done" | "file_upload";
-  student_id?: string;
-  group_id?: string;
+  student_ids: string[];
+  group_ids: string[];
   content_url?: string;
   due_at?: string;
   file?: File;
 }
 
+function appendIds(form: FormData, key: string, ids: string[]): void {
+  for (const id of ids) form.append(key, id);
+}
+
 export async function createHomework(payload: CreateHomeworkPayload) {
   const form = new FormData();
-  form.append("title", payload.title);
+  if (payload.title) form.append("title", payload.title);
   form.append("submission_mode", payload.submission_mode);
-  if (payload.student_id) form.append("student_id", payload.student_id);
-  if (payload.group_id) form.append("group_id", payload.group_id);
+  appendIds(form, "student_ids", payload.student_ids);
+  appendIds(form, "group_ids", payload.group_ids);
   if (payload.content_url) form.append("content_url", payload.content_url);
   if (payload.due_at) form.append("due_at", payload.due_at);
   if (payload.file) form.append("file", payload.file);
-  const { data } = await apiClient.post<HomeworkAssignment>("/homework", form);
+  const { data } = await apiClient.post<HomeworkAssignment[]>("/homework", form);
+  return data;
+}
+
+export interface UpdateHomeworkPayload {
+  title?: string;
+  submission_mode: "mark_done" | "file_upload";
+  content_url?: string;
+  file?: File;
+}
+
+export async function updateHomework(assignmentId: string, payload: UpdateHomeworkPayload) {
+  const form = new FormData();
+  if (payload.title) form.append("title", payload.title);
+  form.append("submission_mode", payload.submission_mode);
+  if (payload.content_url) form.append("content_url", payload.content_url);
+  if (payload.file) form.append("file", payload.file);
+  const { data } = await apiClient.patch<HomeworkAssignment>(`/homework/${assignmentId}`, form);
+  return data;
+}
+
+export async function duplicateHomework(assignmentId: string, studentIds: string[], groupIds: string[]) {
+  const form = new FormData();
+  appendIds(form, "student_ids", studentIds);
+  appendIds(form, "group_ids", groupIds);
+  const { data } = await apiClient.post<HomeworkAssignment[]>(`/homework/${assignmentId}/duplicate`, form);
   return data;
 }
 

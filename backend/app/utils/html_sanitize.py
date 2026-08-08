@@ -86,3 +86,22 @@ def sanitize_rich_text(value: str) -> str:
     parser.feed(value)
     parser.close()
     return "".join(parser.out)
+
+
+class _TextExtractor(HTMLParser):
+    """Discards every tag, keeps only the text - used for the plain-text "about"
+    snippet shown on catalog cards (tutor_service.search_catalog)."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def strip_html_to_text(value: str) -> str:
+    parser = _TextExtractor()
+    parser.feed(value)
+    parser.close()
+    return " ".join("".join(parser.parts).split())

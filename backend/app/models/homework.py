@@ -26,7 +26,9 @@ class HomeworkAssignment(UUIDPKMixin, TimestampMixin, Base):
         ForeignKey("groups.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional - the create form's "Название задания" has no required-ness, since the
+    # content (link/file) already identifies the assignment well enough on its own.
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content_type: Mapped[str] = mapped_column(String(16), default=HomeworkContentType.LINK.value)
     content_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     content_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)

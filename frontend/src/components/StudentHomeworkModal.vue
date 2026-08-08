@@ -44,7 +44,8 @@ async function create(): Promise<void> {
     await createHomework({
       title: title.value,
       submission_mode: submissionMode.value,
-      student_id: props.studentId,
+      student_ids: [props.studentId],
+      group_ids: [],
       content_url: contentUrl.value || undefined,
       file: file.value ?? undefined,
     });

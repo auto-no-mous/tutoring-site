@@ -32,9 +32,17 @@ from app.schemas.subject import (
     SubjectOut,
     SubjectUpdate,
 )
+from app.schemas.notification import NotificationTemplateOut, NotificationTemplateUpdate
 from app.schemas.tutor import TutorProfileOut
 from app.schemas.user import UserOut
-from app.services import admin_service, booking_service, group_service, schedule_service, subject_service
+from app.services import (
+    admin_service,
+    booking_service,
+    group_service,
+    schedule_service,
+    subject_service,
+    system_notification_service,
+)
 
 router = APIRouter(
     prefix="/admin", tags=["admin"], dependencies=[Depends(require_roles(UserRole.ADMIN.value))]
@@ -383,3 +391,20 @@ async def update_direction(direction_id: uuid.UUID, payload: DirectionUpdate, db
 async def delete_direction(direction_id: uuid.UUID, db: DbSession) -> None:
     direction = await subject_service.get_direction_or_404(db, direction_id)
     await subject_service.delete_direction(db, direction)
+
+
+# --- Notification templates ----------------------------------------------------
+
+
+@router.get("/notification-templates", response_model=list[NotificationTemplateOut])
+async def list_notification_templates(db: DbSession) -> list[NotificationTemplateOut]:
+    templates = await system_notification_service.list_templates(db)
+    return [NotificationTemplateOut.model_validate(t, from_attributes=True) for t in templates]
+
+
+@router.put("/notification-templates/{template_id}", response_model=NotificationTemplateOut)
+async def update_notification_template(
+    template_id: uuid.UUID, payload: NotificationTemplateUpdate, db: DbSession
+) -> NotificationTemplateOut:
+    template = await system_notification_service.update_template(db, template_id, payload.title, payload.body)
+    return NotificationTemplateOut.model_validate(template, from_attributes=True)

@@ -1,6 +1,7 @@
 import { apiClient } from "@/api/client";
 import type { Booking } from "@/types/booking";
 import type { Group, GroupApplication, GroupMembership } from "@/types/group";
+import type { NotificationTemplate } from "@/types/notification";
 import type { Direction, Subject } from "@/types/subject";
 import type { Slot, TutorProfile } from "@/types/tutor";
 import type { User } from "@/types/user";
@@ -206,4 +207,16 @@ export async function updateDirection(id: string, name: string) {
 
 export async function deleteDirection(id: string) {
   await apiClient.delete(`/admin/directions/${id}`);
+}
+
+// --- Notification templates --------------------------------------------------
+
+export async function listNotificationTemplates() {
+  const { data } = await apiClient.get<NotificationTemplate[]>("/admin/notification-templates");
+  return data;
+}
+
+export async function updateNotificationTemplate(id: string, title: string, body: string) {
+  const { data } = await apiClient.put<NotificationTemplate>(`/admin/notification-templates/${id}`, { title, body });
+  return data;
 }

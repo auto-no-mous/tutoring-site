@@ -3,6 +3,7 @@ import { ref } from "vue";
 
 import BookingsTab from "@/components/admin/BookingsTab.vue";
 import GroupsTab from "@/components/admin/GroupsTab.vue";
+import NotificationsTab from "@/components/admin/NotificationsTab.vue";
 import StudentsTab from "@/components/admin/StudentsTab.vue";
 import SubjectsTab from "@/components/admin/SubjectsTab.vue";
 import TutorsTab from "@/components/admin/TutorsTab.vue";
@@ -13,6 +14,7 @@ const tabs = [
   { key: "bookings", label: "Занятия" },
   { key: "groups", label: "Группы" },
   { key: "subjects", label: "Предметы" },
+  { key: "notifications", label: "Уведомления" },
 ];
 
 const activeTab = ref(tabs[0].key);
@@ -42,6 +44,7 @@ const activeTab = ref(tabs[0].key);
       <BookingsTab v-else-if="activeTab === 'bookings'" />
       <GroupsTab v-else-if="activeTab === 'groups'" />
       <SubjectsTab v-else-if="activeTab === 'subjects'" />
+      <NotificationsTab v-else-if="activeTab === 'notifications'" />
     </div>
   </div>
 </template>

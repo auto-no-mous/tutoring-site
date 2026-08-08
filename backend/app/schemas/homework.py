@@ -12,13 +12,18 @@ class HomeworkAssignmentOut(BaseModel):
     tutor_id: uuid.UUID
     student_id: uuid.UUID | None
     group_id: uuid.UUID | None
-    title: str
+    title: str | None
     content_type: str
     content_url: str | None
     content_file_path: str | None
     submission_mode: str
     due_at: UTCDateTime | None
     created_at: UTCDateTime
+    # Populated by list_my_assignments (api/v1/homework.py) - not meaningful right
+    # after create/update, which return before there's anything to aggregate/name.
+    status: str = "pending"
+    student_display_name: str | None = None
+    group_name: str | None = None
 
 
 class HomeworkSubmissionOut(BaseModel):

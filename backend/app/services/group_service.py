@@ -13,6 +13,7 @@ from app.models.enums import (
     GroupMembershipStatus,
     GroupOccurrenceStatus,
     NotificationEvent,
+    SystemNotificationEvent,
     UserRole,
 )
 from app.models.group import Group, GroupApplication, GroupAttendance, GroupMembership, GroupOccurrence, GroupSchedule
@@ -20,12 +21,24 @@ from app.models.lesson_type import LessonType
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.schemas.group import GroupCreate, GroupOccurrenceUpdate, GroupScheduleSlotIn, GroupUpdate
-from app.services import chat_service, notification_service, schedule_service
+from app.services import chat_service, notification_service, schedule_service, system_notification_service
 from app.services.booking_service import get_student_names
 from app.services.schedule_service import MSK
 from app.utils.time import ensure_aware, utcnow
 
 OCCURRENCE_WEEKS_AHEAD = 8
+
+
+def _fmt_date_time(moment: dt.datetime) -> tuple[str, str]:
+    local = ensure_aware(moment).astimezone(MSK)
+    return f"{local:%d.%m.%Y}", f"{local:%H:%M}"
+
+
+async def _notify_tutor_system(db: AsyncSession, tutor_id: uuid.UUID, event: SystemNotificationEvent, **params: str) -> None:
+    profile = await db.get(TutorProfile, tutor_id)
+    if profile is None:
+        return
+    await system_notification_service.notify(db, profile.user_id, event, **params)
 
 
 async def _get_group_lesson_type(db: AsyncSession, tutor_id: uuid.UUID, lesson_type_id: uuid.UUID) -> LessonType:
@@ -140,6 +153,14 @@ async def list_groups_for_tutor(db: AsyncSession, tutor_id: uuid.UUID) -> list[G
     return list(result.scalars().all())
 
 
+async def get_group_names(db: AsyncSession, group_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    ids = {gid for gid in group_ids if gid is not None}
+    if not ids:
+        return {}
+    result = await db.execute(select(Group.id, Group.name).where(Group.id.in_(ids)))
+    return dict(result.all())
+
+
 async def list_all_groups(db: AsyncSession) -> list[Group]:
     result = await db.execute(select(Group).options(selectinload(Group.schedule_slots)))
     return list(result.scalars().all())
@@ -249,6 +270,8 @@ async def create_occurrence(db: AsyncSession, group: Group, start_at: dt.datetim
 
 async def update_occurrence(db: AsyncSession, occurrence: GroupOccurrence, payload: GroupOccurrenceUpdate) -> GroupOccurrence:
     data = payload.model_dump(exclude_unset=True)
+    old_start_at = occurrence.start_at
+    schedule_changed = "start_at" in data and data["start_at"] != old_start_at
     if ("start_at" in data or "end_at" in data) and occurrence.original_start_at is None:
         occurrence.original_start_at = occurrence.start_at
         data.setdefault("status", GroupOccurrenceStatus.RESCHEDULED.value)
@@ -256,6 +279,19 @@ async def update_occurrence(db: AsyncSession, occurrence: GroupOccurrence, paylo
         setattr(occurrence, field, value)
     await db.commit()
     await db.refresh(occurrence)
+
+    if schedule_changed:
+        group = await db.get(Group, occurrence.group_id)
+        if group is not None:
+            old_date_str, old_time_str = _fmt_date_time(old_start_at)
+            new_date_str, new_time_str = _fmt_date_time(occurrence.start_at)
+            member_ids = await list_active_member_ids_at(db, occurrence.group_id, utcnow())
+            for student_id in member_ids:
+                await system_notification_service.notify(
+                    db, student_id, SystemNotificationEvent.GROUP_SCHEDULE_CHANGED,
+                    group_name=group.name,
+                    old_date=old_date_str, old_time=old_time_str, new_date=new_date_str, new_time=new_time_str,
+                )
     return occurrence
 
 
@@ -299,6 +335,10 @@ async def apply_to_group(db: AsyncSession, student: User, group: Group) -> Group
         NotificationEvent.GROUP_APPLICATION,
         "Новая заявка в группу",
         f"{student.display_name} подал(а) заявку на участие в группе «{group.name}».",
+    )
+    await _notify_tutor_system(
+        db, group.tutor_id, SystemNotificationEvent.GROUP_APPLICATION_RECEIVED,
+        student_name=student.display_name, group_name=group.name,
     )
     return application
 
@@ -345,6 +385,10 @@ async def accept_application(db: AsyncSession, group: Group, application: GroupA
 
     await db.commit()
     await db.refresh(membership)
+
+    await system_notification_service.notify(
+        db, application.student_id, SystemNotificationEvent.GROUP_APPLICATION_ACCEPTED, group_name=group.name
+    )
     return membership
 
 
@@ -355,6 +399,12 @@ async def reject_application(db: AsyncSession, application: GroupApplication) ->
     application.decided_at = utcnow()
     await db.commit()
     await db.refresh(application)
+
+    group = await db.get(Group, application.group_id)
+    if group is not None:
+        await system_notification_service.notify(
+            db, application.student_id, SystemNotificationEvent.GROUP_APPLICATION_REJECTED, group_name=group.name
+        )
     return application
 
 
@@ -394,6 +444,10 @@ async def leave_group(db: AsyncSession, student: User, group: Group) -> GroupMem
         NotificationEvent.GROUP_WITHDRAWAL,
         "Ученик покинул группу",
         f"{student.display_name} отказался(-ась) от участия в группе «{group.name}».",
+    )
+    await _notify_tutor_system(
+        db, group.tutor_id, SystemNotificationEvent.GROUP_MEMBER_LEFT,
+        student_name=student.display_name, group_name=group.name,
     )
     return membership
 

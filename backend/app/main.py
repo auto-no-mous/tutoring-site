@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,11 +11,25 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.core.rate_limit import limiter
+from app.db.session import AsyncSessionLocal
+from app.services.system_notification_service import ensure_default_templates
 
 settings.storage_dir.mkdir(parents=True, exist_ok=True)
 configure_logging()
 
-app = FastAPI(title=settings.app_name, debug=settings.debug)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Seeds any missing notification_templates rows (new event types added in a
+    # later release, or a brand-new database) so the admin "Уведомления" tab and
+    # every notify() call site always have a template to read, without a data
+    # migration per event added.
+    async with AsyncSessionLocal() as db:
+        await ensure_default_templates(db)
+    yield
+
+
+app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 
 app.state.limiter = limiter
 # slowapi's handler is typed against RateLimitExceeded specifically, which mypy sees

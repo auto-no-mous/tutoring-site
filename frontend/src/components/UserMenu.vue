@@ -3,8 +3,10 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { useAuthStore } from "@/stores/auth";
+import { useNotificationsStore } from "@/stores/notifications";
 
 const auth = useAuthStore();
+const notifications = useNotificationsStore();
 const router = useRouter();
 
 const isOpen = ref(false);
@@ -12,10 +14,9 @@ const containerRef = ref<HTMLElement | null>(null);
 
 const firstName = computed(() => auth.user?.first_name ?? "");
 const initial = computed(() => firstName.value.charAt(0).toUpperCase());
-// Tutors land on their "Профиль" tab; students have no such tab, so clicking the
-// avatar/name takes them to their lesson list instead ("Настройки", where a student's
-// own data actually lives, is still one click away via the dropdown below).
-const primaryTabKey = computed(() => (auth.user?.role === "tutor" ? "profile" : "bookings"));
+// Both roles land on their lesson list - it's the tab either role is most likely to
+// want first. "Профиль"/"Настройки" are still one click away via the dropdown below.
+const primaryTabKey = "bookings";
 
 const menuItems = computed(() => {
   const items = [{ key: "bookings", label: "Занятия" }];
@@ -59,13 +60,21 @@ onBeforeUnmount(() => {
       class="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
       @click="closeMenu"
     >
-      <img v-if="auth.tutorPhotoUrl" :src="auth.tutorPhotoUrl" alt="" class="h-8 w-8 rounded-full object-cover" />
-      <div
-        v-else
-        class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300"
-      >
-        {{ initial }}
-      </div>
+      <span class="relative shrink-0">
+        <img v-if="auth.tutorPhotoUrl" :src="auth.tutorPhotoUrl" alt="" class="h-8 w-8 rounded-full object-cover" />
+        <div
+          v-else
+          class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+        >
+          {{ initial }}
+        </div>
+        <span
+          v-if="notifications.total > 0"
+          class="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-medium text-white"
+        >
+          {{ notifications.total > 9 ? "9+" : notifications.total }}
+        </span>
+      </span>
       <span>{{ firstName }}</span>
     </RouterLink>
     <button

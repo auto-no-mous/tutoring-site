@@ -11,6 +11,7 @@ from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.schemas.tutor import TutorProfileUpdate
 from app.services import review_service, subject_service
+from app.utils.html_sanitize import strip_html_to_text
 
 
 async def get_profile_by_user_id(db: AsyncSession, user_id: uuid.UUID) -> TutorProfile:
@@ -130,9 +131,20 @@ async def search_catalog(
     ratings = await review_service.get_rating_summaries(db, tutor_ids)
     subjects_by_tutor = await subject_service.get_subject_names_for_tutors(db, tutor_ids)
 
+    about_snippet_length = 140
+
     items = []
     for profile, display_name, first_name, patronymic, hourly_price in rows:
         avg_rating, reviews_count = ratings.get(profile.id, (None, 0))
+        about_snippet = None
+        if profile.about:
+            about_text = strip_html_to_text(profile.about)
+            if about_text:
+                about_snippet = (
+                    about_text[:about_snippet_length] + "…"
+                    if len(about_text) > about_snippet_length
+                    else about_text
+                )
         items.append(
             {
                 "id": profile.id,
@@ -145,6 +157,12 @@ async def search_catalog(
                 "hourly_price": float(hourly_price) if hourly_price is not None else None,
                 "avg_rating": avg_rating,
                 "reviews_count": reviews_count,
+                "about_snippet": about_snippet,
+                # hourly_price is only computed from active individual-format lesson
+                # types (see the price_agg subquery above), so its presence already
+                # tells us whether the tutor has one - same rule as the public
+                # profile's show_individual_booking.
+                "show_individual_booking": bool(profile.allow_individual_bookings) and hourly_price is not None,
             }
         )
     return items, total
