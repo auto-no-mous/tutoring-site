@@ -74,16 +74,55 @@ async def test_student_books_and_lists_lesson(client: AsyncClient) -> None:
     # Student-facing responses carry the lesson type name and the tutor's "Имя
     # Отчество" (no surname) so booking cards don't need a separate lookup.
     assert booking["lesson_type_name"] == "Занятие"
+    assert booking["lesson_type_format"] == "individual"
     assert booking["tutor_display_name"] == "Test"
 
     student_list_resp = await client.get("/api/v1/bookings/me", headers=student["headers"])
     student_list = student_list_resp.json()
     assert len(student_list) == 1
     assert student_list[0]["lesson_type_name"] == "Занятие"
+    assert student_list[0]["lesson_type_format"] == "individual"
     assert student_list[0]["tutor_display_name"] == "Test"
 
-    tutor_list = await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])
-    assert len(tutor_list.json()) == 1
+    # Tutor-facing responses also carry the lesson type - previously only the
+    # student's own view knew what kind of lesson a booking was for.
+    tutor_list = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    assert len(tutor_list) == 1
+    assert tutor_list[0]["lesson_type_name"] == "Занятие"
+    assert tutor_list[0]["lesson_type_format"] == "individual"
+
+
+async def test_manual_booking_notes_and_lesson_type_visible_to_both_roles(client: AsyncClient) -> None:
+    """Regression test: the tutor's manual-booking "Примечание" was stored but never
+    rendered on any card, for either role - see BookingCard.vue."""
+    tutor = await _setup_tutor(client, "book-tutor-notes@example.com")
+    student = await _register(client, "book-student-notes@example.com", "student")
+
+    start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=3)
+    end_at = start_at + dt.timedelta(hours=1)
+    create_resp = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "student_id": student["user"]["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+            "end_at": end_at.isoformat(),
+            "notes": "Повторить домашнее задание перед началом",
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    created = create_resp.json()
+    assert created["notes"] == "Повторить домашнее задание перед началом"
+    assert created["lesson_type_name"] == "Занятие"
+    assert created["lesson_type_format"] == "individual"
+
+    tutor_list = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    assert tutor_list[0]["notes"] == "Повторить домашнее задание перед началом"
+
+    student_list = (await client.get("/api/v1/bookings/me", headers=student["headers"])).json()
+    assert student_list[0]["notes"] == "Повторить домашнее задание перед началом"
+    assert student_list[0]["lesson_type_name"] == "Занятие"
 
 
 async def test_booking_conflict_rejected(client: AsyncClient) -> None:

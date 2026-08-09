@@ -64,6 +64,19 @@ export interface GroupOccurrence {
   original_start_at: string | null;
 }
 
+export interface StudentGroupOccurrence {
+  id: string;
+  group_id: string;
+  start_at: string;
+  end_at: string;
+  status: string;
+  original_start_at: string | null;
+  group_name: string;
+  tutor_display_name: string;
+  meeting_link: string | null;
+  my_attendance_outcome: string | null;
+}
+
 export interface GroupAttendanceEntry {
   student_id: string;
   student_display_name: string;

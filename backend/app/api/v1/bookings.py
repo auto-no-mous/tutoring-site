@@ -43,6 +43,7 @@ def _to_booking_out(
     student_name: str | None = None,
     series_is_active: bool | None = None,
     lesson_type_name: str | None = None,
+    lesson_type_format: str | None = None,
     tutor_display_name: str | None = None,
 ) -> BookingOut:
     return BookingOut.model_validate(booking, from_attributes=True).model_copy(
@@ -50,6 +51,7 @@ def _to_booking_out(
             "student_display_name": student_name,
             "series_is_active": series_is_active,
             "lesson_type_name": lesson_type_name,
+            "lesson_type_format": lesson_type_format,
             "tutor_display_name": tutor_display_name,
         }
     )
@@ -60,12 +62,31 @@ async def _to_student_booking_out(db: DbSession, booking) -> BookingOut:
     the tutor's "Имя Отчество" (section 3.1/3.2 card format)."""
     series_map = await booking_service.get_series_active_map(db, [booking.recurring_series_id])
     lesson_type_names = await booking_service.get_lesson_type_names(db, [booking.lesson_type_id])
+    lesson_type_formats = await booking_service.get_lesson_type_formats(db, [booking.lesson_type_id])
     tutor_names = await booking_service.get_tutor_name_patronymic_map(db, [booking.tutor_id])
     return _to_booking_out(
         booking,
         series_is_active=series_map.get(booking.recurring_series_id),
         lesson_type_name=lesson_type_names.get(booking.lesson_type_id),
+        lesson_type_format=lesson_type_formats.get(booking.lesson_type_id),
         tutor_display_name=tutor_names.get(booking.tutor_id),
+    )
+
+
+async def _to_tutor_booking_out(db: DbSession, booking) -> BookingOut:
+    """Tutor-facing single-booking response - same lesson-type enrichment as the
+    student side (see _to_student_booking_out) so tutor cards also show what kind of
+    lesson it is, not just who booked it."""
+    names = await booking_service.get_student_names(db, [booking.student_id] if booking.student_id else [])
+    series_map = await booking_service.get_series_active_map(db, [booking.recurring_series_id])
+    lesson_type_names = await booking_service.get_lesson_type_names(db, [booking.lesson_type_id])
+    lesson_type_formats = await booking_service.get_lesson_type_formats(db, [booking.lesson_type_id])
+    return _to_booking_out(
+        booking,
+        student_name=names.get(booking.student_id) if booking.student_id else None,
+        series_is_active=series_map.get(booking.recurring_series_id),
+        lesson_type_name=lesson_type_names.get(booking.lesson_type_id),
+        lesson_type_format=lesson_type_formats.get(booking.lesson_type_id),
     )
 
 
@@ -73,13 +94,7 @@ async def _to_role_aware_booking_out(db: DbSession, booking, current_user: Curre
     """Cancel/reschedule are now available to both roles - render the response shape
     each side's UI actually expects (see the two builders above)."""
     if current_user.role == UserRole.TUTOR:
-        names = await booking_service.get_student_names(db, [booking.student_id] if booking.student_id else [])
-        series_map = await booking_service.get_series_active_map(db, [booking.recurring_series_id])
-        return _to_booking_out(
-            booking,
-            names.get(booking.student_id) if booking.student_id else None,
-            series_map.get(booking.recurring_series_id),
-        )
+        return await _to_tutor_booking_out(db, booking)
     return await _to_student_booking_out(db, booking)
 
 
@@ -98,12 +113,14 @@ async def list_my_bookings(current_user: CurrentUser, db: DbSession) -> list[Boo
     rows = await booking_service.list_bookings_for_student(db, current_user.id)
     series_map = await booking_service.get_series_active_map(db, [r.recurring_series_id for r in rows])
     lesson_type_names = await booking_service.get_lesson_type_names(db, [r.lesson_type_id for r in rows])
+    lesson_type_formats = await booking_service.get_lesson_type_formats(db, [r.lesson_type_id for r in rows])
     tutor_names = await booking_service.get_tutor_name_patronymic_map(db, [r.tutor_id for r in rows])
     return [
         _to_booking_out(
             r,
             series_is_active=series_map.get(r.recurring_series_id),
             lesson_type_name=lesson_type_names.get(r.lesson_type_id),
+            lesson_type_format=lesson_type_formats.get(r.lesson_type_id),
             tutor_display_name=tutor_names.get(r.tutor_id),
         )
         for r in rows
@@ -176,13 +193,7 @@ async def create_manual_booking(payload: ManualBookingCreate, current_user: Curr
     _require_tutor(current_user)
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     booking = await booking_service.create_manual_booking(db, profile, payload)
-    names = await booking_service.get_student_names(db, [booking.student_id] if booking.student_id else [])
-    series_map = await booking_service.get_series_active_map(db, [booking.recurring_series_id])
-    return _to_booking_out(
-        booking,
-        names.get(booking.student_id) if booking.student_id else None,
-        series_map.get(booking.recurring_series_id),
-    )
+    return await _to_tutor_booking_out(db, booking)
 
 
 @router.get("/tutor/me", response_model=list[BookingOut])
@@ -192,8 +203,16 @@ async def list_my_tutor_bookings(current_user: CurrentUser, db: DbSession) -> li
     rows = await booking_service.list_bookings_for_tutor(db, profile.id)
     names = await booking_service.get_student_names(db, [r.student_id for r in rows if r.student_id])
     series_map = await booking_service.get_series_active_map(db, [r.recurring_series_id for r in rows])
+    lesson_type_names = await booking_service.get_lesson_type_names(db, [r.lesson_type_id for r in rows])
+    lesson_type_formats = await booking_service.get_lesson_type_formats(db, [r.lesson_type_id for r in rows])
     return [
-        _to_booking_out(r, names.get(r.student_id) if r.student_id else None, series_map.get(r.recurring_series_id))
+        _to_booking_out(
+            r,
+            student_name=names.get(r.student_id) if r.student_id else None,
+            series_is_active=series_map.get(r.recurring_series_id),
+            lesson_type_name=lesson_type_names.get(r.lesson_type_id),
+            lesson_type_format=lesson_type_formats.get(r.lesson_type_id),
+        )
         for r in rows
     ]
 
@@ -208,13 +227,7 @@ async def update_booking(
     if booking.tutor_id != profile.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше занятие")
     booking = await booking_service.update_booking_by_tutor(db, booking, payload)
-    names = await booking_service.get_student_names(db, [booking.student_id] if booking.student_id else [])
-    series_map = await booking_service.get_series_active_map(db, [booking.recurring_series_id])
-    return _to_booking_out(
-        booking,
-        names.get(booking.student_id) if booking.student_id else None,
-        series_map.get(booking.recurring_series_id),
-    )
+    return await _to_tutor_booking_out(db, booking)
 
 
 @router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -237,10 +250,4 @@ async def set_booking_outcome(
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     booking = await booking_service.get_booking_or_404(db, booking_id)
     booking = await booking_service.set_booking_outcome(db, profile, booking, payload.outcome)
-    names = await booking_service.get_student_names(db, [booking.student_id] if booking.student_id else [])
-    series_map = await booking_service.get_series_active_map(db, [booking.recurring_series_id])
-    return _to_booking_out(
-        booking,
-        names.get(booking.student_id) if booking.student_id else None,
-        series_map.get(booking.recurring_series_id),
-    )
+    return await _to_tutor_booking_out(db, booking)

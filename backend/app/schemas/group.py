@@ -121,6 +121,24 @@ class GroupOccurrenceCreate(BaseModel):
     end_at: UTCDateTime
 
 
+class StudentGroupOccurrenceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    group_id: uuid.UUID
+    start_at: UTCDateTime
+    end_at: UTCDateTime
+    status: str
+    original_start_at: UTCDateTime | None
+    group_name: str = ""
+    tutor_display_name: str = ""
+    meeting_link: str | None = None
+    # Set once the student has declared they won't attend this specific occurrence
+    # (see group_service.mark_own_no_show) - lets the card show that state instead of
+    # the "Отменить" button.
+    my_attendance_outcome: str | None = None
+
+
 class GroupAttendanceEntryOut(BaseModel):
     student_id: uuid.UUID
     student_display_name: str

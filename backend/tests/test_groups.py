@@ -2,10 +2,12 @@ import datetime as dt
 import uuid
 
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.group import Group
+from app.models.notification import NotificationLog
+from app.models.system_notification import SystemNotification
 
 
 async def _register(client: AsyncClient, email: str, role: str) -> dict:
@@ -323,3 +325,91 @@ async def test_replace_schedule_response_reflects_the_update(client: AsyncClient
     my_groups = (await client.get("/api/v1/groups/tutor/me", headers=tutor["headers"])).json()
     assert my_groups[0]["schedule_slots"] == put_slots
     assert all(g["created_at"] for g in my_groups)
+
+
+async def _accept_student(client: AsyncClient, tutor: dict, group_id: str, email: str) -> dict:
+    student = await _register(client, email, "student")
+    app_resp = await client.post(f"/api/v1/groups/{group_id}/apply", headers=student["headers"], json={})
+    assert app_resp.status_code == 201, app_resp.text
+    accept_resp = await client.post(
+        f"/api/v1/groups/{group_id}/applications/{app_resp.json()['id']}/accept", headers=tutor["headers"]
+    )
+    assert accept_resp.status_code == 200, accept_resp.text
+    return student
+
+
+async def test_student_occurrences_list_includes_group_context(client: AsyncClient) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-tutor9@example.com")
+    group_id = tutor["group"]["id"]
+    member = await _accept_student(client, tutor, group_id, "group-student9a@example.com")
+    outsider = await _register(client, "group-student9b@example.com", "student")
+
+    resp = await client.get("/api/v1/groups/me/occurrences", headers=member["headers"])
+    assert resp.status_code == 200, resp.text
+    occurrences = resp.json()
+    assert len(occurrences) > 0
+    assert occurrences[0]["group_name"] == "Подготовка к ЕГЭ"
+    assert occurrences[0]["meeting_link"] == "https://meet.example.com/group"
+    assert occurrences[0]["my_attendance_outcome"] is None
+
+    outsider_resp = await client.get("/api/v1/groups/me/occurrences", headers=outsider["headers"])
+    assert outsider_resp.json() == []
+
+
+async def test_student_marks_own_no_show(client: AsyncClient, db_session: AsyncSession) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-tutor10@example.com")
+    group_id = tutor["group"]["id"]
+    member = await _accept_student(client, tutor, group_id, "group-student10a@example.com")
+
+    occurrences = (await client.get("/api/v1/groups/me/occurrences", headers=member["headers"])).json()
+    occurrence_id = occurrences[0]["id"]
+
+    resp = await client.post(f"/api/v1/groups/me/occurrences/{occurrence_id}/no-show", headers=member["headers"])
+    assert resp.status_code == 200, resp.text
+    updated = resp.json()
+    assert updated["my_attendance_outcome"] == "student_no_show"
+    # The session itself is unaffected - it still happens for the rest of the group.
+    assert updated["status"] == "scheduled"
+
+    refreshed = (await client.get("/api/v1/groups/me/occurrences", headers=member["headers"])).json()
+    assert refreshed[0]["my_attendance_outcome"] == "student_no_show"
+
+    tutor_user_id = uuid.UUID(tutor["user"]["id"])
+    log_result = await db_session.execute(
+        select(NotificationLog).where(NotificationLog.user_id == tutor_user_id)
+    )
+    assert any(row.event_type == "other" for row in log_result.scalars().all())
+
+    sysnotif_result = await db_session.execute(
+        select(SystemNotification).where(SystemNotification.user_id == tutor_user_id)
+    )
+    assert any(row.event_type == "group_lesson_no_show_by_student" for row in sysnotif_result.scalars().all())
+
+
+async def test_no_show_forbidden_for_non_member(client: AsyncClient) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-tutor11@example.com")
+    group_id = tutor["group"]["id"]
+    outsider = await _register(client, "group-student11a@example.com", "student")
+
+    occurrences = (await client.get(f"/api/v1/groups/{group_id}/occurrences")).json()
+    resp = await client.post(
+        f"/api/v1/groups/me/occurrences/{occurrences[0]['id']}/no-show", headers=outsider["headers"]
+    )
+    assert resp.status_code == 403
+
+
+async def test_no_show_rejected_for_cancelled_occurrence(client: AsyncClient) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-tutor12@example.com")
+    group_id = tutor["group"]["id"]
+    member = await _accept_student(client, tutor, group_id, "group-student12a@example.com")
+
+    occurrences = (await client.get("/api/v1/groups/me/occurrences", headers=member["headers"])).json()
+    occurrence_id = occurrences[0]["id"]
+
+    cancel_resp = await client.patch(
+        f"/api/v1/groups/{group_id}/occurrences/{occurrence_id}", headers=tutor["headers"], json={"status": "cancelled"}
+    )
+    assert cancel_resp.status_code == 200, cancel_resp.text
+
+    resp = await client.post(f"/api/v1/groups/me/occurrences/{occurrence_id}/no-show", headers=member["headers"])
+    assert resp.status_code == 409

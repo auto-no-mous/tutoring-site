@@ -8,12 +8,27 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.v1.router import api_router
-from app.core.config import settings
+from app.core.config import INSECURE_DEFAULT_JWT_SECRET, settings
 from app.core.logging import configure_logging
 from app.core.rate_limit import limiter
 from app.db.session import AsyncSessionLocal
 from app.services.system_notification_service import ensure_default_templates
 
+
+def _validate_production_config() -> None:
+    """Refuses to boot with the insecure placeholder JWT secret outside local dev
+    (DEBUG=false is the signal a deployer used, per README's "Docker / продакшен")
+    - failing fast here beats silently issuing tokens anyone could forge by reading
+    this file on GitHub."""
+    if not settings.debug and settings.jwt_secret_key == INSECURE_DEFAULT_JWT_SECRET:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is still the insecure default while DEBUG=false - set a "
+            "real secret in backend/.env before running in production (e.g. "
+            "`openssl rand -hex 32`)."
+        )
+
+
+_validate_production_config()
 settings.storage_dir.mkdir(parents=True, exist_ok=True)
 configure_logging()
 

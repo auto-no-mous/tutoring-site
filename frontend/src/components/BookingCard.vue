@@ -24,6 +24,12 @@ const isBusy = ref(false);
 
 const isManualBlock = computed(() => props.role === "tutor" && props.booking.is_manual_block);
 
+const FORMAT_LABELS: Record<string, string> = { individual: "Индивидуальное", group: "Групповое" };
+const formatLabel = computed(() => (props.booking.lesson_type_format ? FORMAT_LABELS[props.booking.lesson_type_format] : null));
+const displayDurationMinutes = computed(() =>
+  Math.round((new Date(props.booking.end_at).getTime() - new Date(props.booking.start_at).getTime()) / 60000),
+);
+
 const HOMEWORK_BUTTON_STYLE: Record<string, string> = {
   none: "border-slate-300 text-slate-500 dark:border-slate-700",
   pending: "border-amber-400 bg-amber-100 text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-400",
@@ -107,6 +113,10 @@ async function saveDuration(): Promise<void> {
           {{ booking.lesson_type_name }} · Репетитор {{ booking.tutor_display_name }}
           <span v-if="booking.recurring_series_id"> · еженедельно</span>
         </div>
+        <div v-if="!booking.is_manual_block" class="text-xs text-slate-400">
+          <template v-if="role === 'tutor'">{{ booking.lesson_type_name ?? "Занятие" }} · </template>{{ displayDurationMinutes }} мин<template v-if="formatLabel"> · {{ formatLabel }}</template>
+        </div>
+        <div v-if="booking.notes" class="mt-1 text-xs text-slate-500">📝 {{ booking.notes }}</div>
       </div>
       <div class="flex items-center gap-2">
         <a v-if="booking.meeting_link" :href="booking.meeting_link" target="_blank" class="text-xs underline">

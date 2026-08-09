@@ -14,5 +14,6 @@ export interface User {
   timezone: string;
   telegram_chat_id: string | null;
   email_notifications_enabled: boolean;
+  reminder_lead_minutes: number;
   created_at: string;
 }

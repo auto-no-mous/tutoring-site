@@ -19,6 +19,7 @@ export interface Booking {
   student_display_name?: string | null;
   series_is_active?: boolean | null;
   lesson_type_name?: string | null;
+  lesson_type_format?: string | null;
   tutor_display_name?: string | null;
 }
 

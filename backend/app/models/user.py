@@ -59,6 +59,11 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     # Notification channel settings (section 2.7)
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     email_notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # How long before a lesson this user wants the "Скоро занятие" reminder (see
+    # notification_service.send_upcoming_reminders) - editable in Settings, next to
+    # the Telegram connect button. Each participant of a booking has their own value,
+    # so a tutor and student on the same lesson can be reminded at different times.
+    reminder_lead_minutes: Mapped[int] = mapped_column(Integer, default=60)
 
     # Short-lived token for the "Подключить Telegram" deep-link flow (see
     # app.services.telegram_service.create_link_token / the bot's /start handler in

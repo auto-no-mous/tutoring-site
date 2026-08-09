@@ -243,7 +243,12 @@ async def test_resend_verification_email(client: AsyncClient) -> None:
     assert already_verified_resp.status_code == 409
 
 
-async def test_telegram_link_token_flow(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_telegram_link_token_flow(client: AsyncClient, db_session: AsyncSession, monkeypatch) -> None:
+    # Isolate from whatever the developer running these tests has in their own
+    # backend/.env (pydantic-settings loads it regardless of test context) - this
+    # test specifically covers the "bot not configured" behavior.
+    monkeypatch.setattr(telegram_service.settings, "telegram_bot_username", None)
+
     resp = await client.post("/api/v1/auth/register", json={
         "email": "tglink@example.com",
         "password": "supersecret1",

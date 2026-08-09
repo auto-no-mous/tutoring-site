@@ -21,6 +21,7 @@ class UserOut(BaseModel):
     timezone: str
     telegram_chat_id: str | None
     email_notifications_enabled: bool
+    reminder_lead_minutes: int
     created_at: UTCDateTime
 
 
@@ -37,3 +38,7 @@ class UserSettingsUpdate(BaseModel):
     timezone: str | None = None
     telegram_chat_id: str | None = None
     email_notifications_enabled: bool | None = None
+    # How long before a lesson to send the "Скоро занятие" reminder (section 2.7) -
+    # capped at a week (see notification_service.MAX_REMINDER_LEAD_MINUTES, which
+    # send_upcoming_reminders' scan window is sized against).
+    reminder_lead_minutes: int | None = Field(default=None, ge=1, le=7 * 24 * 60)

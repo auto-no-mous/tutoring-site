@@ -63,6 +63,11 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
         "Ученик покинул группу",
         "{student_name} покинул(а) группу «{group_name}».",
     ),
+    (SystemNotificationEvent.GROUP_LESSON_NO_SHOW_BY_STUDENT, UserRole.TUTOR): (
+        "Ученик не сможет присутствовать",
+        "{student_name} сообщил(а), что не сможет присутствовать на групповом занятии "
+        "«{group_name}» {date} в {time} (МСК).",
+    ),
     (SystemNotificationEvent.BOOKING_CANCELLED_BY_TUTOR, UserRole.STUDENT): (
         "Репетитор отменил занятие",
         "Репетитор отменил ваше занятие {date} в {time} (МСК).",
@@ -88,6 +93,14 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
         "Новое домашнее задание",
         "Репетитор задал новое домашнее задание: «{homework_title}». Посмотреть его можно "
         "во вкладке «Домашние задания».",
+    ),
+    (SystemNotificationEvent.UPCOMING_LESSON_REMINDER, UserRole.TUTOR): (
+        "Скоро занятие",
+        "Через {lead_minutes} мин ({time}) у вас занятие с {student_name}.",
+    ),
+    (SystemNotificationEvent.UPCOMING_LESSON_REMINDER, UserRole.STUDENT): (
+        "Скоро занятие",
+        "Через {lead_minutes} мин ({time}) у вас занятие с репетитором {tutor_name}.",
     ),
 }
 

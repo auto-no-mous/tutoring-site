@@ -64,9 +64,12 @@ class Booking(UUIDPKMixin, TimestampMixin, Base):
     meeting_link: Mapped[str | None] = mapped_column(String(512), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Set once the "upcoming lesson" reminder notification has been sent (section
+    # Set once the "upcoming lesson" reminder has been sent to the TUTOR (section
     # 2.7), so a periodically-run reminder job doesn't re-notify the same booking.
+    # Tutor and student are reminded independently, each at their own configured
+    # lead time (User.reminder_lead_minutes), hence two separate columns.
     reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    student_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     recurring_series_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("recurring_series.id", ondelete="SET NULL"), nullable=True, index=True

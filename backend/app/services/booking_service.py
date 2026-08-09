@@ -123,6 +123,16 @@ async def get_lesson_type_names(db: AsyncSession, lesson_type_ids: list[uuid.UUI
     return dict(result.all())
 
 
+async def get_lesson_type_formats(db: AsyncSession, lesson_type_ids: list[uuid.UUID | None]) -> dict[uuid.UUID, str]:
+    """"individual" / "group" per lesson type - lets every booking card show what kind
+    of lesson it is (see BookingOut.lesson_type_format)."""
+    ids = {i for i in lesson_type_ids if i is not None}
+    if not ids:
+        return {}
+    result = await db.execute(select(LessonType.id, LessonType.format).where(LessonType.id.in_(ids)))
+    return dict(result.all())
+
+
 async def get_tutor_name_patronymic_map(db: AsyncSession, tutor_ids: list[uuid.UUID | None]) -> dict[uuid.UUID, str]:
     """"Имя Отчество" only (no surname) - the format used on student-facing booking
     cards, see api/v1/bookings.py::_to_booking_out."""

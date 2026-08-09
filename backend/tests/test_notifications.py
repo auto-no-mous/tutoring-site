@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.booking import Booking
 from app.models.enums import BookingStatus
 from app.models.notification import NotificationLog
+from app.models.system_notification import SystemNotification
 from app.services.notification_service import send_upcoming_reminders
 
 
@@ -135,7 +136,10 @@ async def test_upcoming_reminder_sent_once(client: AsyncClient, db_session: Asyn
         )
     ).json()["id"]
 
-    start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=24)
+    # Both tutor and student default to a 60-minute reminder lead time (see
+    # User.reminder_lead_minutes / Settings) - land the booking right at that mark so
+    # both are due at once.
+    start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=60)
     booking = Booking(
         tutor_id=uuid.UUID(tutor_id),
         student_id=uuid.UUID(student["user"]["id"]),
@@ -147,12 +151,85 @@ async def test_upcoming_reminder_sent_once(client: AsyncClient, db_session: Asyn
     db_session.add(booking)
     await db_session.commit()
 
+    # Tutor and student are reminded independently - both fire on the same run here
+    # since both use the default lead time.
     sent_count = await send_upcoming_reminders(db_session)
-    assert sent_count == 1
+    assert sent_count == 2
 
-    events = await _events_for_user(db_session, tutor["user"]["id"])
-    assert "upcoming_reminder" in events
+    tutor_events = await _events_for_user(db_session, tutor["user"]["id"])
+    assert "upcoming_reminder" in tutor_events
+    student_events = await _events_for_user(db_session, student["user"]["id"])
+    assert "upcoming_reminder" in student_events
 
-    # Running again shouldn't re-notify the same booking.
+    # Running again shouldn't re-notify the same booking for either recipient.
     sent_again = await send_upcoming_reminders(db_session)
     assert sent_again == 0
+
+
+async def test_reminder_lead_time_is_per_user_and_independent(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Tutor and student can configure different lead times (Settings, next to the
+    Telegram connect button) - each is reminded on their own schedule, not the
+    other's."""
+    tutor = await _register(client, "notif-tutor5@example.com", "tutor")
+    student = await _register(client, "notif-student5@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+    lesson_type_id = (
+        await client.post(
+            "/api/v1/tutors/me/lesson-types",
+            headers=tutor["headers"],
+            json={"name": "Занятие", "format": "individual", "duration_minutes": 60, "price": 1000},
+        )
+    ).json()["id"]
+
+    # Student wants an earlier heads-up (15 min); tutor keeps the 60-minute default.
+    settings_resp = await client.patch(
+        "/api/v1/auth/me", headers=student["headers"], json={"reminder_lead_minutes": 15}
+    )
+    assert settings_resp.status_code == 200, settings_resp.text
+    assert settings_resp.json()["reminder_lead_minutes"] == 15
+
+    start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=15)
+    booking = Booking(
+        tutor_id=uuid.UUID(tutor_id),
+        student_id=uuid.UUID(student["user"]["id"]),
+        lesson_type_id=uuid.UUID(lesson_type_id),
+        start_at=start_at,
+        end_at=start_at + dt.timedelta(hours=1),
+        status=BookingStatus.SCHEDULED.value,
+    )
+    db_session.add(booking)
+    await db_session.commit()
+
+    # At the 15-minute mark, only the student (lead=15) is due - the tutor (lead=60)
+    # isn't due for another 45 minutes.
+    sent_count = await send_upcoming_reminders(db_session)
+    assert sent_count == 1
+    student_events = await _events_for_user(db_session, student["user"]["id"])
+    assert "upcoming_reminder" in student_events
+    tutor_events = await _events_for_user(db_session, tutor["user"]["id"])
+    assert "upcoming_reminder" not in tutor_events
+
+    # The in-app "Системные уведомления" copy names the actual configured lead time.
+    sysnotif_result = await db_session.execute(
+        select(SystemNotification).where(SystemNotification.user_id == uuid.UUID(student["user"]["id"]))
+    )
+    reminder = next(
+        r for r in sysnotif_result.scalars().all() if r.event_type == "upcoming_lesson_reminder"
+    )
+    assert "15" in reminder.body
+    assert tutor["user"]["display_name"] in reminder.body
+
+
+async def test_reminder_lead_minutes_bounds_validated(client: AsyncClient) -> None:
+    student = await _register(client, "notif-student6@example.com", "student")
+
+    too_low = await client.patch("/api/v1/auth/me", headers=student["headers"], json={"reminder_lead_minutes": 0})
+    assert too_low.status_code == 422
+
+    too_high = await client.patch(
+        "/api/v1/auth/me", headers=student["headers"], json={"reminder_lead_minutes": 7 * 24 * 60 + 1}
+    )
+    assert too_high.status_code == 422
+
+    default_resp = await client.get("/api/v1/auth/me", headers=student["headers"])
+    assert default_resp.json()["reminder_lead_minutes"] == 60

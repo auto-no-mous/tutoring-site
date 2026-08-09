@@ -125,12 +125,14 @@ class SystemNotificationEvent(StrEnum):
     BOOKING_RESCHEDULED_BY_STUDENT = "booking_rescheduled_by_student"
     GROUP_APPLICATION_RECEIVED = "group_application_received"
     GROUP_MEMBER_LEFT = "group_member_left"
+    GROUP_LESSON_NO_SHOW_BY_STUDENT = "group_lesson_no_show_by_student"
     BOOKING_CANCELLED_BY_TUTOR = "booking_cancelled_by_tutor"
     BOOKING_RESCHEDULED_BY_TUTOR = "booking_rescheduled_by_tutor"
     GROUP_SCHEDULE_CHANGED = "group_schedule_changed"
     GROUP_APPLICATION_ACCEPTED = "group_application_accepted"
     GROUP_APPLICATION_REJECTED = "group_application_rejected"
     HOMEWORK_ASSIGNED = "homework_assigned"
+    UPCOMING_LESSON_REMINDER = "upcoming_lesson_reminder"
 
 
 class ActivityEventType(StrEnum):

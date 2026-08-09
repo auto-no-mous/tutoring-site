@@ -10,6 +10,7 @@ export interface UserSettingsUpdate {
   timezone?: string;
   telegram_chat_id?: string | null;
   email_notifications_enabled?: boolean;
+  reminder_lead_minutes?: number;
 }
 
 export async function updateMySettings(payload: UserSettingsUpdate) {

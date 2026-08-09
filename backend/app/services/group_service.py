@@ -626,3 +626,81 @@ async def set_occurrence_attendance(
             db.add(GroupAttendance(occurrence_id=occurrence.id, student_id=student_id, outcome=outcome))
 
     await db.commit()
+
+
+async def list_occurrences_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[GroupOccurrence]:
+    """Every occurrence of every group the student is currently an active member of -
+    powers the merged "Занятия" schedule (student/BookingsTab.vue), alongside their
+    individual Booking rows."""
+    membership_ids = await db.execute(
+        select(GroupMembership.group_id).where(
+            GroupMembership.student_id == student_id, GroupMembership.status == GroupMembershipStatus.ACTIVE.value
+        )
+    )
+    group_ids = [row[0] for row in membership_ids.all()]
+    if not group_ids:
+        return []
+    result = await db.execute(
+        select(GroupOccurrence).where(GroupOccurrence.group_id.in_(group_ids)).order_by(GroupOccurrence.start_at)
+    )
+    return list(result.scalars().all())
+
+
+async def get_own_attendance_map(db: AsyncSession, student_id: uuid.UUID, occurrence_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not occurrence_ids:
+        return {}
+    result = await db.execute(
+        select(GroupAttendance.occurrence_id, GroupAttendance.outcome).where(
+            GroupAttendance.student_id == student_id, GroupAttendance.occurrence_id.in_(occurrence_ids)
+        )
+    )
+    return dict(result.all())
+
+
+async def mark_own_no_show(db: AsyncSession, occurrence: GroupOccurrence, student: User) -> GroupOccurrence:
+    """A student declaring, ahead of time, that they won't attend a specific group
+    session (tutor/student BookingCard's "Отменить" on a group-lesson card) - reuses
+    the same GroupAttendance row the tutor's post-hoc attendance log writes to
+    (see set_occurrence_attendance), just written by the student themselves and
+    earlier. Unlike an individual booking cancellation the session itself isn't
+    cancelled - it still happens for the rest of the group."""
+    if occurrence.status == GroupOccurrenceStatus.CANCELLED.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Это занятие уже отменено")
+
+    active_ids = set(await list_active_member_ids_at(db, occurrence.group_id, ensure_aware(occurrence.start_at)))
+    if student.id not in active_ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Вы не были участником группы на момент этого занятия")
+
+    result = await db.execute(
+        select(GroupAttendance).where(
+            GroupAttendance.occurrence_id == occurrence.id, GroupAttendance.student_id == student.id
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is not None:
+        row.outcome = GroupAttendanceOutcome.STUDENT_NO_SHOW.value
+    else:
+        db.add(
+            GroupAttendance(
+                occurrence_id=occurrence.id, student_id=student.id,
+                outcome=GroupAttendanceOutcome.STUDENT_NO_SHOW.value,
+            )
+        )
+    await db.commit()
+
+    group = await db.get(Group, occurrence.group_id)
+    if group is not None:
+        date_str, time_str = _fmt_date_time(occurrence.start_at)
+        await notification_service.notify_tutor(
+            db,
+            group.tutor_id,
+            NotificationEvent.OTHER,
+            "Ученик не сможет присутствовать",
+            f"{student.display_name} сообщил(а), что не сможет присутствовать на групповом занятии "
+            f"«{group.name}» {date_str} в {time_str} (МСК).",
+        )
+        await _notify_tutor_system(
+            db, group.tutor_id, SystemNotificationEvent.GROUP_LESSON_NO_SHOW_BY_STUDENT,
+            student_name=student.display_name, group_name=group.name, date=date_str, time=time_str,
+        )
+    return occurrence

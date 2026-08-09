@@ -19,7 +19,7 @@ const initial = computed(() => firstName.value.charAt(0).toUpperCase());
 const primaryTabKey = "bookings";
 
 const menuItems = computed(() => {
-  const items = [{ key: "bookings", label: "Занятия" }];
+  const items = [{ key: "bookings", label: "Занятия" }, { key: "chat", label: "Сообщения" }];
   if (auth.user?.role === "tutor") items.unshift({ key: "profile", label: "Профиль" });
   items.push({ key: "settings", label: "Настройки" });
   return items;

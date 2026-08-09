@@ -24,6 +24,7 @@ from app.schemas.group import (
     GroupScheduleSlotIn,
     GroupScheduleSlotOut,
     GroupUpdate,
+    StudentGroupOccurrenceOut,
 )
 from app.services import group_service, tutor_service
 from app.services.booking_service import get_student_names
@@ -144,6 +145,52 @@ async def my_applications(current_user: CurrentUser, db: DbSession) -> list[Grou
             )
         )
     return out
+
+
+async def _to_student_occurrence_out_list(
+    db: DbSession, rows: list, current_user: CurrentUser
+) -> list[StudentGroupOccurrenceOut]:
+    names = await _group_and_tutor_names(db, [r.group_id for r in rows])
+    groups_result = await db.execute(select(Group).where(Group.id.in_([r.group_id for r in rows] or [None])))
+    meeting_links = {g.id: g.meeting_link for g in groups_result.scalars().all()}
+    attendance = await group_service.get_own_attendance_map(db, current_user.id, [r.id for r in rows])
+    out = []
+    for r in rows:
+        group_name, tutor_name = names.get(r.group_id, ("", ""))
+        out.append(
+            StudentGroupOccurrenceOut.model_validate(r, from_attributes=True).model_copy(
+                update={
+                    "group_name": group_name,
+                    "tutor_display_name": tutor_name,
+                    "meeting_link": meeting_links.get(r.group_id),
+                    "my_attendance_outcome": attendance.get(r.id),
+                }
+            )
+        )
+    return out
+
+
+@router.get("/me/occurrences", response_model=list[StudentGroupOccurrenceOut])
+async def my_occurrences(current_user: CurrentUser, db: DbSession) -> list[StudentGroupOccurrenceOut]:
+    """Every dated session of every group the student is an active member of - merged
+    into the student's "Занятия" schedule alongside individual bookings (see
+    student/BookingsTab.vue)."""
+    _require_student(current_user)
+    rows = await group_service.list_occurrences_for_student(db, current_user.id)
+    return await _to_student_occurrence_out_list(db, rows, current_user)
+
+
+@router.post("/me/occurrences/{occurrence_id}/no-show", response_model=StudentGroupOccurrenceOut)
+async def mark_own_no_show(occurrence_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> StudentGroupOccurrenceOut:
+    """Student-initiated "I won't attend this session" (the group-lesson card's
+    "Отменить" button, see components/GroupOccurrenceCard.vue) - notifies the tutor,
+    but unlike an individual booking cancellation the occurrence itself keeps
+    happening for everyone else."""
+    _require_student(current_user)
+    occurrence = await group_service.get_occurrence_or_404(db, occurrence_id)
+    occurrence = await group_service.mark_own_no_show(db, occurrence, current_user)
+    out = await _to_student_occurrence_out_list(db, [occurrence], current_user)
+    return out[0]
 
 
 @router.patch("/{group_id}", response_model=GroupOut)

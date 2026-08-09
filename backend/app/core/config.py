@@ -5,6 +5,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+# Referenced from both the field default below and app.main's startup guard, which
+# refuses to boot with this value when DEBUG=false - see app.main._validate_production_config.
+INSECURE_DEFAULT_JWT_SECRET = "CHANGE_ME_INSECURE_DEV_SECRET"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -18,7 +22,7 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite+aiosqlite:///{BASE_DIR / 'storage' / 'db.sqlite3'}"
 
     # JWT
-    jwt_secret_key: str = "CHANGE_ME_INSECURE_DEV_SECRET"
+    jwt_secret_key: str = INSECURE_DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30

@@ -19,6 +19,7 @@ const grade = ref<number | null>(auth.user?.grade ?? null);
 const email = ref(auth.user?.email ?? "");
 const timezone = ref(auth.user?.timezone ?? "Europe/Moscow");
 const emailNotifications = ref(auth.user?.email_notifications_enabled ?? true);
+const reminderLeadMinutes = ref(auth.user?.reminder_lead_minutes ?? 60);
 const savedMessage = ref("");
 const emailError = ref("");
 const resendMessage = ref("");
@@ -62,6 +63,7 @@ async function save(): Promise<void> {
       email: email.value || undefined,
       timezone: timezone.value,
       email_notifications_enabled: emailNotifications.value,
+      reminder_lead_minutes: reminderLeadMinutes.value,
     });
     auth.user = updated;
     savedMessage.value = "Сохранено";
@@ -211,6 +213,21 @@ onMounted(load);
           <span v-if="telegramLinkError" class="text-xs text-red-600 dark:text-red-400">{{ telegramLinkError }}</span>
         </div>
       </div>
+
+      <label class="flex flex-col gap-1 text-sm">
+        Уведомлять о занятии за
+        <span class="flex items-center gap-2">
+          <input
+            v-model.number="reminderLeadMinutes"
+            type="number"
+            min="1"
+            max="10080"
+            class="w-24 rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+          />
+          мин до его начала
+        </span>
+        <span class="text-xs text-slate-400">Придёт в Telegram/на почту и в «Системные уведомления». По умолчанию — 60 минут.</span>
+      </label>
 
       <label class="flex items-center gap-2 text-sm">
         <input v-model="emailNotifications" type="checkbox" />

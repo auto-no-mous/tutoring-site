@@ -74,9 +74,11 @@ class BookingOut(BaseModel):
     # occurrences - lets the frontend hide "stop recurring" once it's already stopped
     # (or show it at all only when recurring_series_id is set). None when no series.
     series_is_active: bool | None = None
-    # Populated only on student-facing responses (student doesn't otherwise know which
-    # lesson type / tutor a card refers to) - see api/v1/bookings.py::_to_booking_out.
+    # Populated for both roles (see api/v1/bookings.py::_to_booking_out) so every card
+    # can show what kind of lesson it is - duration is derivable from start_at/end_at
+    # on the frontend, so only name/format need a round trip.
     lesson_type_name: str | None = None
+    lesson_type_format: str | None = None
     # "Имя Отчество" only (no surname), per the student cabinet's card format. Admin's
     # listing (api/v1/admin.py::list_bookings) instead populates this with the full
     # display_name, since it has no single "counterpart" to omit the surname for.

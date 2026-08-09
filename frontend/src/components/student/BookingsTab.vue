@@ -2,26 +2,39 @@
 import { computed, onMounted, ref } from "vue";
 
 import { listMyBookings } from "@/api/bookings";
+import { myOccurrences } from "@/api/groups";
 import BookingCard from "@/components/BookingCard.vue";
 import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
+import GroupOccurrenceCard from "@/components/GroupOccurrenceCard.vue";
 import RescheduleModal from "@/components/RescheduleModal.vue";
 import { useToastStore } from "@/stores/toast";
 import type { Booking } from "@/types/booking";
+import type { StudentGroupOccurrence } from "@/types/group";
 import { formatDateTimeWithMsk } from "@/utils/time";
 import { groupByWeekAndDay } from "@/utils/scheduleGrouping";
 
 const toast = useToastStore();
 
 const bookings = ref<Booking[]>([]);
+const occurrences = ref<StudentGroupOccurrence[]>([]);
 const reschedulingBooking = ref<Booking | null>(null);
 
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-const upcoming = computed(() =>
-  bookings.value
+// A flat, keyable union of individual bookings and group occurrences so both kinds
+// can share one day/week-grouped schedule (see BookingScheduleGroups.vue, generic
+// over any item with an id/start_at) - the "kind" tag picks which card to render.
+type ScheduleItem = ({ kind: "booking" } & Booking) | ({ kind: "occurrence" } & StudentGroupOccurrence);
+
+const upcoming = computed<ScheduleItem[]>(() => {
+  const bookingItems: ScheduleItem[] = bookings.value
     .filter((b) => b.status === "scheduled" && new Date(b.start_at) >= new Date())
-    .sort((a, b) => a.start_at.localeCompare(b.start_at)),
-);
+    .map((b) => ({ kind: "booking", ...b }));
+  const occurrenceItems: ScheduleItem[] = occurrences.value
+    .filter((o) => o.status !== "cancelled" && new Date(o.start_at) >= new Date())
+    .map((o) => ({ kind: "occurrence", ...o }));
+  return [...bookingItems, ...occurrenceItems].sort((a, b) => a.start_at.localeCompare(b.start_at));
+});
 const past = computed(() =>
   bookings.value
     .filter((b) => b.status !== "scheduled" || new Date(b.start_at) < new Date())
@@ -29,10 +42,10 @@ const past = computed(() =>
     .slice(0, 20),
 );
 
-const weeks = computed(() => groupByWeekAndDay(upcoming.value, (b) => b.start_at, localTimeZone));
+const weeks = computed(() => groupByWeekAndDay(upcoming.value, (item) => item.start_at, localTimeZone));
 
 async function load(): Promise<void> {
-  bookings.value = await listMyBookings();
+  [bookings.value, occurrences.value] = await Promise.all([listMyBookings(), myOccurrences()]);
 }
 
 function openReschedule(booking: Booking): void {
@@ -52,8 +65,15 @@ onMounted(load);
   <div class="flex max-w-2xl flex-col gap-6">
     <section>
       <BookingScheduleGroups :weeks="weeks">
-        <template #default="{ item: booking }">
-          <BookingCard :booking="booking" role="student" @changed="load" @reschedule-requested="openReschedule" />
+        <template #default="{ item }">
+          <BookingCard
+            v-if="item.kind === 'booking'"
+            :booking="item"
+            role="student"
+            @changed="load"
+            @reschedule-requested="openReschedule"
+          />
+          <GroupOccurrenceCard v-else :occurrence="item" @changed="load" />
         </template>
       </BookingScheduleGroups>
     </section>

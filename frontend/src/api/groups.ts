@@ -6,6 +6,7 @@ import type {
   GroupMembership,
   GroupOccurrence,
   GroupScheduleSlot,
+  StudentGroupOccurrence,
 } from "@/types/group";
 
 export async function createGroup(payload: {
@@ -104,6 +105,16 @@ export async function myMemberships() {
 
 export async function myApplications() {
   const { data } = await apiClient.get<GroupApplication[]>("/groups/me/applications");
+  return data;
+}
+
+export async function myOccurrences() {
+  const { data } = await apiClient.get<StudentGroupOccurrence[]>("/groups/me/occurrences");
+  return data;
+}
+
+export async function markOwnNoShow(occurrenceId: string) {
+  const { data } = await apiClient.post<StudentGroupOccurrence>(`/groups/me/occurrences/${occurrenceId}/no-show`);
   return data;
 }
 

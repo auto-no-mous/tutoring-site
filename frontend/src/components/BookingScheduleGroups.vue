@@ -1,10 +1,9 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends { id: string; start_at: string; end_at: string }">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
-import type { Booking } from "@/types/booking";
 import type { WeekGroup } from "@/utils/scheduleGrouping";
 
-defineProps<{ weeks: WeekGroup<Booking>[] }>();
+defineProps<{ weeks: WeekGroup<T>[] }>();
 
 // Refreshed periodically so the "idёт сейчас" highlight appears/disappears without
 // requiring a reload while the tab is open.
@@ -21,24 +20,24 @@ onBeforeUnmount(() => {
 
 const IMMINENT_WINDOW_MS = 15 * 60 * 1000;
 
-function isHappeningNow(item: Booking): boolean {
+function isHappeningNow(item: T): boolean {
   const t = now.value.getTime();
   return t >= new Date(item.start_at).getTime() && t < new Date(item.end_at).getTime();
 }
 
 // Starts within the next 15 minutes (but hasn't started yet - once it has, it's
 // "happening now" instead).
-function isStartingSoon(item: Booking): boolean {
+function isStartingSoon(item: T): boolean {
   const t = now.value.getTime();
   const start = new Date(item.start_at).getTime();
   return t < start && start - t <= IMMINENT_WINDOW_MS;
 }
 
-function isImminent(item: Booking): boolean {
+function isImminent(item: T): boolean {
   return isHappeningNow(item) || isStartingSoon(item);
 }
 
-function minutesUntilStart(item: Booking): number {
+function minutesUntilStart(item: T): number {
   return Math.max(0, Math.round((new Date(item.start_at).getTime() - now.value.getTime()) / 60000));
 }
 </script>
@@ -62,7 +61,7 @@ function minutesUntilStart(item: Booking): number {
           <div v-else class="mt-1 flex flex-col gap-2">
             <div
               v-for="item in day.items"
-              :key="(item as Booking).id"
+              :key="item.id"
               class="rounded-md border px-3 py-2 transition-colors"
               :class="
                 isImminent(item)
