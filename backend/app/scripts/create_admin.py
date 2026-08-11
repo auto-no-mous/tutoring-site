@@ -1,7 +1,7 @@
 """Creates or updates the single admin account (project_description.md section 4).
 
 Usage:
-    poetry run python -m app.scripts.create_admin --email admin@it-tutor.pro --password ...
+    poetry run python -m app.scripts.create_admin --email admin@my-tutor.ru --password ...
 
 Falls back to ADMIN_EMAIL / ADMIN_PASSWORD from the environment/.env when the flags
 are omitted.

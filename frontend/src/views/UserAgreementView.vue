@@ -3,12 +3,12 @@
 <template>
   <div class="mx-auto max-w-3xl px-4 py-10">
     <h1 class="text-2xl font-semibold">Пользовательское соглашение</h1>
-    <p class="mt-2 text-sm text-slate-500">Действует для пользователей it-tutor.pro</p>
+    <p class="mt-2 text-sm text-slate-500">Действует для пользователей my-tutor.ru</p>
 
     <div class="mt-6 flex flex-col gap-4 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
       <h2 class="text-lg font-medium">1. Общие положения</h2>
       <p>
-        Используя сайт it-tutor.pro (далее — «Сайт»), пользователь соглашается с
+        Используя сайт my-tutor.ru (далее — «Сайт»), пользователь соглашается с
         условиями настоящего Соглашения. Сайт связывает репетиторов и учеников для
         подготовки к экзаменам по информатике (ЕГЭ/ОГЭ).
       </p>

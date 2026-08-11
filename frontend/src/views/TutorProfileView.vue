@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { openThreadWithTutor } from "@/api/chat";
 import { getPublicProfile, getReviews } from "@/api/tutors";
+import SocialLinks from "@/components/tutor/SocialLinks.vue";
 import { useAuthStore } from "@/stores/auth";
 import { sanitizeRichText } from "@/utils/richText";
 import type { TutorPublicProfile } from "@/types/tutor";
@@ -34,6 +35,15 @@ async function load(): Promise<void> {
 
 const aboutHtml = computed(() => (profile.value?.about ? sanitizeRichText(profile.value.about) : ""));
 
+const hasSocialLinks = computed(
+  () =>
+    !!profile.value &&
+    (!!profile.value.telegram_url ||
+      !!profile.value.vk_url ||
+      !!profile.value.youtube_url ||
+      profile.value.extra_links.length > 0),
+);
+
 async function openChat(): Promise<void> {
   if (!profile.value) return;
   const thread = await openThreadWithTutor(profile.value.id);
@@ -47,44 +57,57 @@ onMounted(load);
   <div class="mx-auto max-w-3xl px-4 py-10">
     <p v-if="isLoading" class="text-slate-400">Загрузка…</p>
     <template v-else-if="profile">
-      <div class="flex flex-col items-center text-center">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start">
         <img
           v-if="profile.photo_url"
           :src="profile.photo_url"
           alt=""
-          class="aspect-[3/4] w-[30vw] min-w-40 max-w-sm rounded-lg object-cover"
+          class="h-32 w-32 shrink-0 self-center rounded-lg object-cover sm:h-36 sm:w-36 sm:self-start"
         />
-        <div v-else class="aspect-[3/4] w-[30vw] min-w-40 max-w-sm rounded-lg bg-slate-200 dark:bg-slate-800"></div>
-        <h1 class="mt-4 text-2xl font-semibold">{{ profile.display_name }}</h1>
-        <p v-if="profile.avg_rating != null" class="mt-1 text-sm text-slate-500">
-          ★ {{ profile.avg_rating.toFixed(1) }} ({{ profile.reviews_count }} отзывов)
-        </p>
         <div
-          v-if="profile.show_individual_booking || profile.show_group_booking || auth.user?.role === 'student'"
-          class="mt-4 flex flex-wrap justify-center gap-3"
-        >
-          <RouterLink
-            v-if="profile.show_individual_booking"
-            :to="`/tutors/${profile.id}/book`"
-            class="rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900"
+          v-else
+          class="h-32 w-32 shrink-0 self-center rounded-lg bg-slate-200 dark:bg-slate-800 sm:h-36 sm:w-36 sm:self-start"
+        ></div>
+        <div class="flex flex-1 flex-col items-center text-center sm:items-start sm:text-left">
+          <h1 class="text-2xl font-semibold">{{ profile.display_name }}</h1>
+          <p v-if="profile.avg_rating != null" class="mt-1 text-sm text-slate-500">
+            ★ {{ profile.avg_rating.toFixed(1) }} ({{ profile.reviews_count }} отзывов)
+          </p>
+          <SocialLinks
+            v-if="hasSocialLinks"
+            class="mt-3 justify-center sm:justify-start"
+            :telegram-url="profile.telegram_url"
+            :vk-url="profile.vk_url"
+            :youtube-url="profile.youtube_url"
+            :extra-links="profile.extra_links"
+          />
+          <div
+            v-if="profile.show_individual_booking || profile.show_group_booking || auth.user?.role === 'student'"
+            class="mt-4 flex flex-wrap justify-center gap-3 sm:justify-start"
           >
-            Запись на индивидуальное занятие
-          </RouterLink>
-          <RouterLink
-            v-if="profile.show_group_booking"
-            :to="`/tutors/${profile.id}/groups`"
-            class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700"
-          >
-            Запись на групповое занятие
-          </RouterLink>
-          <button
-            v-if="auth.user?.role === 'student'"
-            type="button"
-            class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700"
-            @click="openChat"
-          >
-            Написать сообщение
-          </button>
+            <RouterLink
+              v-if="profile.show_individual_booking"
+              :to="`/tutors/${profile.id}/book`"
+              class="rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900"
+            >
+              Запись на индивидуальное занятие
+            </RouterLink>
+            <RouterLink
+              v-if="profile.show_group_booking"
+              :to="`/tutors/${profile.id}/groups`"
+              class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700"
+            >
+              Запись на групповое занятие
+            </RouterLink>
+            <button
+              v-if="auth.user?.role === 'student'"
+              type="button"
+              class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700"
+              @click="openChat"
+            >
+              Написать сообщение
+            </button>
+          </div>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.config import settings
@@ -16,7 +16,7 @@ class TutorProfile(UUIDPKMixin, TimestampMixin, Base):
 
     photo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Optional custom nickname for a pretty public profile URL
-    # (it-tutor.pro/tutors/<slug>), settable after registration - see
+    # (my-tutor.ru/tutors/<slug>), settable after registration - see
     # tutor_service.update_profile for format/uniqueness validation and
     # get_profile_by_id_or_slug for the lookup side.
     slug: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
@@ -30,6 +30,16 @@ class TutorProfile(UUIDPKMixin, TimestampMixin, Base):
 
     # Hidden from the public catalog, still reachable via direct link (section 2.1)
     is_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Contact links shown on the public profile (section on making the profile more
+    # attractive/informative). Telegram/VK/YouTube are the three explicitly requested
+    # channels, kept as dedicated columns since every tutor is expected to have at
+    # most one of each; extra_links covers anything else (personal site, Instagram,
+    # WhatsApp, ...) as an open-ended list.
+    telegram_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    vk_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    youtube_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    extra_links: Mapped[list[dict]] = mapped_column(JSON, default=list)
 
     # Schedule settings (section 2.3), shared across the tutor's whole schedule.
     slot_granularity_minutes: Mapped[int] = mapped_column(

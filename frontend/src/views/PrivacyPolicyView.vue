@@ -3,12 +3,12 @@
 <template>
   <div class="mx-auto max-w-3xl px-4 py-10">
     <h1 class="text-2xl font-semibold">Политика конфиденциальности</h1>
-    <p class="mt-2 text-sm text-slate-500">Действует для пользователей it-tutor.pro</p>
+    <p class="mt-2 text-sm text-slate-500">Действует для пользователей my-tutor.ru</p>
 
     <div class="mt-6 flex flex-col gap-4 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
       <p>
         Настоящая Политика конфиденциальности определяет порядок обработки и защиты
-        персональных данных пользователей сайта it-tutor.pro (далее — «Сайт») в
+        персональных данных пользователей сайта my-tutor.ru (далее — «Сайт») в
         соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных
         данных».
       </p>

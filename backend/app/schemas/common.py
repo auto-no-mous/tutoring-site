@@ -1,5 +1,6 @@
 import datetime as dt
 from typing import Annotated
+from urllib.parse import urlparse
 
 from pydantic import AfterValidator
 
@@ -17,3 +18,23 @@ UTCDateTime = Annotated[dt.datetime, AfterValidator(to_utc)]
 # boundary - a value could reach the DB via a direct API call that never touched the
 # frontend sanitizer at all.
 SanitizedHtml = Annotated[str, AfterValidator(sanitize_rich_text)]
+
+_MAX_PROFILE_URL_LENGTH = 512
+
+
+def _validate_profile_url(value: str) -> str:
+    """Validates a tutor-supplied contact link (Telegram/VK/YouTube/extra links) -
+    must be an absolute http(s) URL so it's safe to render as an <a href> and can't
+    be used for a javascript:/data: URL injection."""
+    value = value.strip()
+    if len(value) > _MAX_PROFILE_URL_LENGTH:
+        raise ValueError("Ссылка слишком длинная")
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError("Ссылка должна начинаться с http:// или https://")
+    return value
+
+
+# Use for any client-supplied link meant to be rendered as an <a href> on a public
+# profile - see TutorProfileUpdate.telegram_url/vk_url/youtube_url and TutorExtraLink.
+ProfileUrl = Annotated[str, AfterValidator(_validate_profile_url)]

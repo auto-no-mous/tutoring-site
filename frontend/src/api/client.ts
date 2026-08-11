@@ -1,7 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 
-const ACCESS_TOKEN_KEY = "it-tutor.access_token";
-const REFRESH_TOKEN_KEY = "it-tutor.refresh_token";
+const ACCESS_TOKEN_KEY = "my-tutor.access_token";
+const REFRESH_TOKEN_KEY = "my-tutor.refresh_token";
 
 export function getAccessToken(): string | null {
   return localStorage.getItem(ACCESS_TOKEN_KEY);

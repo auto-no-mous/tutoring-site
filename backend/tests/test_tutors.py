@@ -135,6 +135,48 @@ async def test_tutor_slug_uniqueness_and_reserved_word(client: AsyncClient) -> N
     assert cleared.json()["slug"] is None
 
 
+async def test_tutor_social_links_saved_and_shown_on_public_profile(client: AsyncClient) -> None:
+    tutor = await _register_tutor(client, "social-tutor@example.com")
+    resp = await client.patch(
+        "/api/v1/tutors/me",
+        headers=tutor["headers"],
+        json={
+            "telegram_url": "https://t.me/example",
+            "vk_url": "https://vk.com/example",
+            "youtube_url": "https://youtube.com/@example",
+            "extra_links": [{"label": "Личный сайт", "url": "https://example.com"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["telegram_url"] == "https://t.me/example"
+    assert body["vk_url"] == "https://vk.com/example"
+    assert body["youtube_url"] == "https://youtube.com/@example"
+    assert body["extra_links"] == [{"label": "Личный сайт", "url": "https://example.com"}]
+    tutor_id = body["id"]
+
+    public = await client.get(f"/api/v1/tutors/{tutor_id}")
+    assert public.status_code == 200
+    public_body = public.json()
+    assert public_body["telegram_url"] == "https://t.me/example"
+    assert public_body["vk_url"] == "https://vk.com/example"
+    assert public_body["youtube_url"] == "https://youtube.com/@example"
+    assert public_body["extra_links"] == [{"label": "Личный сайт", "url": "https://example.com"}]
+
+    # Clearing a link (explicit null) removes it.
+    cleared = await client.patch("/api/v1/tutors/me", headers=tutor["headers"], json={"telegram_url": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["telegram_url"] is None
+
+
+async def test_tutor_social_link_rejects_non_url(client: AsyncClient) -> None:
+    tutor = await _register_tutor(client, "bad-link-tutor@example.com")
+    resp = await client.patch(
+        "/api/v1/tutors/me", headers=tutor["headers"], json={"vk_url": "javascript:alert(1)"}
+    )
+    assert resp.status_code == 422
+
+
 async def test_public_profile_booking_buttons_reflect_toggles_and_lesson_types(client: AsyncClient) -> None:
     tutor = await _register_tutor(client, "toggle-tutor@example.com")
     tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]

@@ -18,12 +18,12 @@ from app.utils.time import utcnow
 DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str]] = {
     (SystemNotificationEvent.LOGIN_SUCCESS, UserRole.TUTOR): (
         "Вход в аккаунт",
-        "Здравствуйте, {name}! Только что был выполнен вход в ваш аккаунт на it-tutor.pro. "
+        "Здравствуйте, {name}! Только что был выполнен вход в ваш аккаунт на my-tutor.ru. "
         "Если это были не вы, срочно смените пароль в разделе «Настройки».",
     ),
     (SystemNotificationEvent.LOGIN_SUCCESS, UserRole.STUDENT): (
         "Вход в аккаунт",
-        "Здравствуйте, {name}! Только что был выполнен вход в ваш аккаунт на it-tutor.pro. "
+        "Здравствуйте, {name}! Только что был выполнен вход в ваш аккаунт на my-tutor.ru. "
         "Если это были не вы, срочно смените пароль в разделе «Настройки».",
     ),
     (SystemNotificationEvent.LOGIN_FAILED, UserRole.TUTOR): (
@@ -37,12 +37,12 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
         "(неверный пароль). Если это были не вы, рекомендуем сменить пароль.",
     ),
     (SystemNotificationEvent.WELCOME, UserRole.TUTOR): (
-        "Добро пожаловать на it-tutor.pro",
+        "Добро пожаловать на my-tutor.ru",
         "Добро пожаловать, {name}! Ваш профиль репетитора создан. Заполните раздел «Профиль» "
         "и настройте расписание во вкладке «Расписание», чтобы ученики могли записываться на занятия.",
     ),
     (SystemNotificationEvent.WELCOME, UserRole.STUDENT): (
-        "Добро пожаловать на it-tutor.pro",
+        "Добро пожаловать на my-tutor.ru",
         "Добро пожаловать, {name}! Теперь вы можете найти репетитора в каталоге и записаться "
         "на первое занятие.",
     ),

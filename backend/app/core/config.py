@@ -13,7 +13,7 @@ INSECURE_DEFAULT_JWT_SECRET = "CHANGE_ME_INSECURE_DEV_SECRET"
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "it-tutor.pro"
+    app_name: str = "my-tutor.ru"
     environment: str = "development"
     debug: bool = True
 
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str | None = None
     smtp_password: str | None = None
-    smtp_from: str = "no-reply@it-tutor.pro"
+    smtp_from: str = "no-reply@my-tutor.ru"
     email_enabled: bool = False
 
     # Telegram

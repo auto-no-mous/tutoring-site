@@ -34,7 +34,7 @@ async def send_verification_email(to: str, token: str) -> None:
     link = f"{settings.frontend_base_url}/verify-email?token={token}"
     await send_email(
         to=to,
-        subject="Подтверждение почты — it-tutor.pro",
+        subject="Подтверждение почты — my-tutor.ru",
         body=f"Перейдите по ссылке, чтобы подтвердить почту:\n{link}",
     )
 
@@ -43,6 +43,6 @@ async def send_password_reset_email(to: str, token: str) -> None:
     link = f"{settings.frontend_base_url}/reset-password?token={token}"
     await send_email(
         to=to,
-        subject="Восстановление пароля — it-tutor.pro",
+        subject="Восстановление пароля — my-tutor.ru",
         body=f"Перейдите по ссылке, чтобы задать новый пароль:\n{link}",
     )

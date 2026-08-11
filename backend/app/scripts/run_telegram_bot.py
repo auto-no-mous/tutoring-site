@@ -1,4 +1,4 @@
-"""Runs the it-tutor.pro Telegram bot via long polling (section 2.7).
+"""Runs the my-tutor.ru Telegram bot via long polling (section 2.7).
 
 Long polling means the bot reaches out to Telegram itself rather than Telegram
 pushing updates to a public webhook URL, so this works identically on a laptop
@@ -32,7 +32,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if not context.args:
         await update.message.reply_text(
-            "Привет! Чтобы получать уведомления от it-tutor.pro в Telegram, откройте "
+            "Привет! Чтобы получать уведомления от my-tutor.ru в Telegram, откройте "
             "«Настройки» на сайте и нажмите «Подключить Telegram» - оттуда придёт "
             "персональная ссылка на этого бота."
         )
@@ -49,7 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await update.message.reply_text(
-        f"Готово, {user.first_name}! Теперь уведомления с it-tutor.pro будут приходить сюда."
+        f"Готово, {user.first_name}! Теперь уведомления с my-tutor.ru будут приходить сюда."
     )
 
 
@@ -57,7 +57,7 @@ async def fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None:
         return
     await update.message.reply_text(
-        "Этот бот понимает только ссылку-приглашение из «Настроек» на it-tutor.pro."
+        "Этот бот понимает только ссылку-приглашение из «Настроек» на my-tutor.ru."
     )
 
 

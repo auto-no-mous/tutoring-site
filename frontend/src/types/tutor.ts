@@ -1,5 +1,10 @@
 import type { TutorSubject } from "@/types/subject";
 
+export interface TutorExtraLink {
+  label: string;
+  url: string;
+}
+
 export interface TutorProfile {
   id: string;
   user_id: string;
@@ -7,6 +12,10 @@ export interface TutorProfile {
   about: string;
   is_hidden: boolean;
   slug: string | null;
+  telegram_url: string | null;
+  vk_url: string | null;
+  youtube_url: string | null;
+  extra_links: TutorExtraLink[];
   slot_granularity_minutes: number;
   break_between_lessons_minutes: number;
   min_lead_time_hours: number;
@@ -50,6 +59,10 @@ export interface TutorPublicProfile {
   display_name: string;
   photo_url: string | null;
   about: string;
+  telegram_url: string | null;
+  vk_url: string | null;
+  youtube_url: string | null;
+  extra_links: TutorExtraLink[];
   subjects: TutorSubject[];
   avg_rating: number | null;
   reviews_count: number;

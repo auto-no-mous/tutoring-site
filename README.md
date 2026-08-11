@@ -1,4 +1,4 @@
-# tutoring-site (it-tutor.pro)
+# tutoring-site (my-tutor.ru)
 
 Платформа для репетиторов и учеников: каталог с поиском по предмету и цене,
 запись на занятия (индивидуальные и групповые), домашние задания, чат,
@@ -96,7 +96,7 @@ frontend, из тех же команд, что и выше.
 
 ```
 cd backend
-poetry run python -m app.scripts.create_admin --email admin@it-tutor.pro --password ...
+poetry run python -m app.scripts.create_admin --email admin@my-tutor.ru --password ...
 ```
 
 Повторный запуск с другим email/паролем обновит тот же единственный
@@ -132,7 +132,7 @@ backend'а вместо реальной отправки — этого дос�
 Чтобы письма реально уходили — это можно включить прямо сейчас, деплой на
 сервер для этого не нужен, только рабочие SMTP-креды:
 
-1. Заведите почтовый ящик/SMTP-доступ на домене it-tutor.pro (либо любом
+1. Заведите почтовый ящик/SMTP-доступ на домене my-tutor.ru (либо любом
    другом, если тестируете) — подойдёт обычный почтовый провайдер (Яндекс 360
    для домена, mail.ru для бизнеса) или транзакционный сервис (Postmark,
    SendGrid, Mailgun — обычно даёт лучшую доставляемость и меньше шансов
@@ -141,9 +141,9 @@ backend'а вместо реальной отправки — этого дос�
    ```
    SMTP_HOST=smtp.example.com
    SMTP_PORT=587
-   SMTP_USER=no-reply@it-tutor.pro
+   SMTP_USER=no-reply@my-tutor.ru
    SMTP_PASSWORD=...
-   SMTP_FROM=no-reply@it-tutor.pro
+   SMTP_FROM=no-reply@my-tutor.ru
    EMAIL_ENABLED=true
    ```
 3. Перезапустите backend.
@@ -152,7 +152,7 @@ backend'а вместо реальной отправки — этого дос�
 `FRONTEND_BASE_URL` — пока это `http://localhost:5173`, письма технически
 уходят и работают, но ссылка в них откроется только на вашей же машине. Как
 только сайт будет на реальном домене — поменяйте `FRONTEND_BASE_URL` на него
-(например, `https://it-tutor.pro`), и ссылки станут рабочими для всех.
+(например, `https://my-tutor.ru`), и ссылки станут рабочими для всех.
 Дополнительно для продакшена стоит настроить SPF/DKIM записи у почтового
 провайдера — иначе письма будут чаще попадать в спам (это делается на стороне
 DNS домена, а не в коде).
@@ -222,20 +222,20 @@ systemd-таймер или cron внутри отдельного контей�
 Docker, а напрямую на сервере:
 
 ```ini
-# /etc/systemd/system/it-tutor-reminders.service
+# /etc/systemd/system/my-tutor-reminders.service
 [Unit]
-Description=it-tutor.pro lesson reminders
+Description=my-tutor.ru lesson reminders
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/it-tutor/backend
+WorkingDirectory=/opt/my-tutor/backend
 ExecStart=/usr/local/bin/poetry run python -m app.scripts.send_reminders
 ```
 
 ```ini
-# /etc/systemd/system/it-tutor-reminders.timer
+# /etc/systemd/system/my-tutor-reminders.timer
 [Unit]
-Description=Run it-tutor.pro lesson reminders every 10 minutes
+Description=Run my-tutor.ru lesson reminders every 10 minutes
 
 [Timer]
 OnCalendar=*:0/10
@@ -246,7 +246,7 @@ WantedBy=timers.target
 ```
 
 ```
-sudo systemctl enable --now it-tutor-reminders.timer
+sudo systemctl enable --now my-tutor-reminders.timer
 ```
 
 ## Docker / продакшен
@@ -269,11 +269,11 @@ docker compose up --build -d
 
 1. Поставьте Docker и Docker Compose plugin (`docker compose version` должен
    отработать без ошибок).
-2. Склонируйте репозиторий на сервер: `git clone <repo> it-tutor && cd it-tutor`.
+2. Склонируйте репозиторий на сервер: `git clone <repo> my-tutor && cd my-tutor`.
 3. `cd backend && cp .env.example .env`, заполните как минимум
    `JWT_SECRET_KEY` (длинная случайная строка — например,
    `openssl rand -hex 32`) и `FRONTEND_BASE_URL` (реальный домен, например
-   `https://it-tutor.pro`); остальное — по разделам «Почта»/«Telegram-бот»
+   `https://my-tutor.ru`); остальное — по разделам «Почта»/«Telegram-бот»
    выше, можно и позже. `cd ..`.
 4. `docker compose up --build -d` — соберёт образы и поднимет `backend` +
    `nginx`.
@@ -282,7 +282,7 @@ docker compose up --build -d
 6. Создайте администратора и (по желанию) справочник предметов — те же
    команды, что и локально, но через `docker compose exec`:
    ```
-   docker compose exec backend poetry run python -m app.scripts.create_admin --email admin@it-tutor.pro --password ...
+   docker compose exec backend poetry run python -m app.scripts.create_admin --email admin@my-tutor.ru --password ...
    docker compose exec backend poetry run python -m app.scripts.seed_subjects
    ```
 7. Проверьте: `docker compose ps` (оба контейнера в статусе `running`; отдельных
@@ -298,6 +298,26 @@ HTTP на 80 порту. Проще всего добавить терминац
 - Либо `certbot` прямо на хосте (вне Docker) + системный nginx/haproxy как
   внешний реверс-прокси перед портом 80 контейнера.
 
+**Рабочий процесс: тестируем локально, выкатываем на сервер, не ломая прод.**
+
+Проект ещё активно меняется, поэтому `main` — это ветка, из которой
+деплоят, а не черновик. Порядок для новой фичи/правки:
+
+1. Отдельная ветка от `main`, разработка и ручная проверка локально через
+   `run-local.ps1` (раздел «Быстрый локальный запуск») — там своя SQLite-база
+   (`backend/storage/db.sqlite3`), никак не пересекающаяся с продакшеном.
+2. PR в `main` — CI (`.github/workflows/ci.yml`) прогоняет линтеры, тесты и
+   сборку обоих частей на каждый push в PR (раздел «Тесты, линтеры, CI»).
+   Мержим только когда CI зелёный.
+3. На сервере — сначала бэкап (см. ниже), затем обновление (команды ниже).
+4. После деплоя — быстрый смоук-тест: `curl http://127.0.0.1/api/v1/health`
+   и открыть сайт в браузере, проверить логи (`docker compose logs -f
+   backend`) на ошибки при старте.
+5. Если релиз значимый — тег на смёрженном коммите (`git tag vX.Y.Z && git
+   push --tags`), как уже сделано для `v0.1.0`…`v0.4.0`. Тег — это точка
+   отката: если после деплоя что-то пошло не так, можно быстро вернуться к
+   предыдущей рабочей версии.
+
 **Обновление после изменений в коде:**
 
 ```
@@ -309,12 +329,28 @@ docker compose up --build -d
 backend'а делает это на каждом старте) и перезапустит контейнеры с
 downtime в несколько секунд.
 
+**Откат к предыдущей версии**, если после деплоя что-то сломалось:
+
+```
+git checkout vX.Y.Z   # предыдущий рабочий тег
+docker compose up --build -d
+```
+
+Это откатывает код и статику, но **не откатывает саму базу** — Alembic
+накатывает миграции вперёд, а не назад. Пока миграции только добавляют
+таблицы/колонки (как сейчас), старый код на новой схеме работает нормально
+(просто не знает о новых колонках), так что этого отката достаточно. Если
+случится миграция, которая физически удаляет или переименовывает
+данные, — заранее продумайте её обратимость (`downgrade()` в самой
+миграции) или восстанавливайтесь из бэкапа тома, снятого перед деплоем
+(ниже).
+
 **Бэкап.** Всё, что нужно сохранить — именованный том `backend_storage`
 (SQLite-файл `db.sqlite3` + все загруженные фото/файлы):
 
 ```
-docker run --rm -v it-tutor_backend_storage:/data -v $(pwd):/backup alpine \
-  tar czf /backup/it-tutor-backup-$(date +%F).tar.gz -C /data .
+docker run --rm -v my-tutor_backend_storage:/data -v $(pwd):/backup alpine \
+  tar czf /backup/my-tutor-backup-$(date +%F).tar.gz -C /data .
 ```
 
 (имя тома может отличаться в зависимости от имени папки проекта — уточните

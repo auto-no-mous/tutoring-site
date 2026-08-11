@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Запускает backend и frontend it-tutor.pro локально для тестирования.
+    Запускает backend и frontend my-tutor.ru локально для тестирования.
 
 .DESCRIPTION
     Ставит зависимости (poetry/npm), применяет миграции, поднимает backend

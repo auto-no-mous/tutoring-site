@@ -2,12 +2,22 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.common import SanitizedHtml, UTCDateTime
+from app.schemas.common import ProfileUrl, SanitizedHtml, UTCDateTime
 from app.schemas.subject import TutorSubjectOut
 
 # Lowercase letters/digits, hyphens allowed in the middle only, 3-64 chars total -
-# used for the tutor's optional public-profile nickname (it-tutor.pro/tutors/<slug>).
+# used for the tutor's optional public-profile nickname (my-tutor.ru/tutors/<slug>).
 SLUG_PATTERN = r"^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])?$"
+
+# Cap on the number of free-form extra links (personal site, Instagram, ...) a tutor
+# can add on top of the dedicated Telegram/VK/YouTube fields, so the public profile
+# can't be turned into an unbounded link list.
+MAX_EXTRA_LINKS = 10
+
+
+class TutorExtraLink(BaseModel):
+    label: str = Field(min_length=1, max_length=50)
+    url: ProfileUrl
 
 
 class TutorScheduleSettings(BaseModel):
@@ -24,6 +34,10 @@ class TutorProfileUpdate(BaseModel):
     about: SanitizedHtml | None = None
     is_hidden: bool | None = None
     slug: str | None = Field(default=None, pattern=SLUG_PATTERN)
+    telegram_url: ProfileUrl | None = None
+    vk_url: ProfileUrl | None = None
+    youtube_url: ProfileUrl | None = None
+    extra_links: list[TutorExtraLink] | None = Field(default=None, max_length=MAX_EXTRA_LINKS)
     slot_granularity_minutes: int | None = None
     break_between_lessons_minutes: int | None = Field(default=None, ge=0)
     min_lead_time_hours: int | None = Field(default=None, ge=0)
@@ -44,6 +58,10 @@ class TutorProfileOut(BaseModel):
     about: str
     is_hidden: bool
     slug: str | None = None
+    telegram_url: str | None = None
+    vk_url: str | None = None
+    youtube_url: str | None = None
+    extra_links: list[TutorExtraLink] = Field(default_factory=list)
     slot_granularity_minutes: int
     break_between_lessons_minutes: int
     min_lead_time_hours: int
@@ -107,6 +125,10 @@ class TutorPublicProfile(BaseModel):
     display_name: str
     photo_url: str | None
     about: str
+    telegram_url: str | None = None
+    vk_url: str | None = None
+    youtube_url: str | None = None
+    extra_links: list[TutorExtraLink] = Field(default_factory=list)
     subjects: list[TutorSubjectOut] = Field(default_factory=list)
     avg_rating: float | None = None
     reviews_count: int = 0

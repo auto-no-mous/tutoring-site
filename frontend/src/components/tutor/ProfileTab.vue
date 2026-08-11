@@ -7,7 +7,7 @@ import { getMyProfile, getMySubjects, replaceMySubjects, updateMyProfile, upload
 import RichTextEditor from "@/components/RichTextEditor.vue";
 import { useAuthStore } from "@/stores/auth";
 import type { Subject } from "@/types/subject";
-import type { TutorProfile } from "@/types/tutor";
+import type { TutorExtraLink, TutorProfile } from "@/types/tutor";
 
 const auth = useAuthStore();
 
@@ -75,6 +75,10 @@ async function load(): Promise<void> {
   ]);
   profile.value = profileData;
   slugInput.value = profileData.slug ?? "";
+  telegramInput.value = profileData.telegram_url ?? "";
+  vkInput.value = profileData.vk_url ?? "";
+  youtubeInput.value = profileData.youtube_url ?? "";
+  extraLinksInput.splice(0, extraLinksInput.length, ...profileData.extra_links);
   allSubjects.value = subjectsData;
   for (const entry of mySubjectsData) {
     checkedSubjects.add(entry.subject_id);
@@ -118,16 +122,47 @@ async function saveSubjects(): Promise<void> {
   }
 }
 
+const telegramInput = ref("");
+const vkInput = ref("");
+const youtubeInput = ref("");
+const extraLinksInput = reactive<TutorExtraLink[]>([]);
+const saveError = ref("");
+
+function addExtraLink(): void {
+  extraLinksInput.push({ label: "", url: "" });
+}
+
+function removeExtraLink(index: number): void {
+  extraLinksInput.splice(index, 1);
+}
+
 async function save(): Promise<void> {
   if (!profile.value) return;
   isSaving.value = true;
   savedMessage.value = "";
+  saveError.value = "";
   try {
     profile.value = await updateMyProfile({
       about: profile.value.about,
       is_hidden: profile.value.is_hidden,
+      telegram_url: telegramInput.value.trim() || null,
+      vk_url: vkInput.value.trim() || null,
+      youtube_url: youtubeInput.value.trim() || null,
+      extra_links: extraLinksInput
+        .map((link) => ({ label: link.label.trim(), url: link.url.trim() }))
+        .filter((link) => link.label && link.url),
     });
+    telegramInput.value = profile.value.telegram_url ?? "";
+    vkInput.value = profile.value.vk_url ?? "";
+    youtubeInput.value = profile.value.youtube_url ?? "";
+    extraLinksInput.splice(0, extraLinksInput.length, ...profile.value.extra_links);
     savedMessage.value = "Сохранено";
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 422) {
+      saveError.value = "Проверьте правильность ссылок — они должны начинаться с http:// или https://";
+    } else {
+      saveError.value = "Не удалось сохранить профиль";
+    }
   } finally {
     isSaving.value = false;
   }
@@ -196,6 +231,76 @@ onMounted(load);
         <p v-if="slugError" class="text-xs text-red-600 dark:text-red-400">{{ slugError }}</p>
       </div>
 
+      <div class="flex flex-col gap-3 text-sm">
+        <span class="font-medium">Контакты и соцсети</span>
+        <p class="text-xs text-slate-500">Будут показаны на вашей публичной странице как иконки-ссылки.</p>
+        <label class="flex flex-col gap-1 text-xs">
+          Telegram
+          <input
+            v-model="telegramInput"
+            type="url"
+            placeholder="https://t.me/username"
+            class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700"
+          />
+        </label>
+        <label class="flex flex-col gap-1 text-xs">
+          ВКонтакте
+          <input
+            v-model="vkInput"
+            type="url"
+            placeholder="https://vk.com/username"
+            class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700"
+          />
+        </label>
+        <label class="flex flex-col gap-1 text-xs">
+          YouTube
+          <input
+            v-model="youtubeInput"
+            type="url"
+            placeholder="https://youtube.com/@username"
+            class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700"
+          />
+        </label>
+
+        <div class="flex flex-col gap-2">
+          <div v-for="(link, index) in extraLinksInput" :key="index" class="flex items-end gap-2">
+            <label class="flex flex-col gap-1 text-xs">
+              Название
+              <input
+                v-model="link.label"
+                placeholder="например, Личный сайт"
+                class="w-40 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700"
+              />
+            </label>
+            <label class="flex flex-1 flex-col gap-1 text-xs">
+              Ссылка
+              <input
+                v-model="link.url"
+                type="url"
+                placeholder="https://…"
+                class="w-full rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700"
+              />
+            </label>
+            <button
+              type="button"
+              title="Удалить ссылку"
+              class="shrink-0 rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+              @click="removeExtraLink(index)"
+            >
+              ✕
+            </button>
+          </div>
+          <button
+            v-if="extraLinksInput.length < 10"
+            type="button"
+            class="w-fit rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+            @click="addExtraLink"
+          >
+            + Добавить ссылку
+          </button>
+        </div>
+      </div>
+
       <div class="flex flex-col gap-1 text-sm">
         О себе
         <RichTextEditor v-model="profile.about" :upload-image="uploadAboutImage" />
@@ -211,6 +316,7 @@ onMounted(load);
           Сохранить
         </button>
         <span v-if="savedMessage" class="text-sm text-green-600 dark:text-green-400">{{ savedMessage }}</span>
+        <span v-if="saveError" class="text-sm text-red-600 dark:text-red-400">{{ saveError }}</span>
       </div>
     </section>
 

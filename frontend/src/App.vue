@@ -35,7 +35,7 @@ onBeforeUnmount(() => notifications.stopPolling());
 <template>
   <div class="flex min-h-full flex-col">
     <header class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-      <RouterLink to="/" class="text-lg font-semibold">it-tutor.pro</RouterLink>
+      <RouterLink to="/" class="text-lg font-semibold">my-tutor.ru</RouterLink>
       <nav class="flex items-center gap-4 text-sm">
         <template v-if="auth.isAuthenticated">
           <template v-if="auth.user?.role === 'admin'">

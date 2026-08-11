@@ -3,7 +3,7 @@ import { ref, watch } from "vue";
 
 type Theme = "light" | "dark";
 
-const STORAGE_KEY = "it-tutor.theme";
+const STORAGE_KEY = "my-tutor.theme";
 
 function getInitialTheme(): Theme {
   const stored = localStorage.getItem(STORAGE_KEY);
