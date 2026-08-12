@@ -25,3 +25,6 @@ Thumbs.db
 # Env
 .env
 .env.local
+
+# Server access credentials/keys - local only, never pushed
+ops/secrets/

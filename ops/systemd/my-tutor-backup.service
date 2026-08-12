@@ -1,0 +1,8 @@
+[Unit]
+Description=my-tutor.ru daily backup (DB + uploads + server-local config)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/my-tutor/ops/backup.sh
