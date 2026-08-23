@@ -13,6 +13,11 @@ services:
       - backend_storage:/app/storage
     expose:
       - "8000"
+    # Почта уходит через собственный Postfix, который стоит на самом хосте, а не в
+    # контейнере (см. ops/mail/). Отсюда SMTP_HOST=host.docker.internal в backend/.env:
+    # контейнер стучится на шлюз докер-моста, Postfix релеит письма своей сети.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   nginx:
     build: ./frontend

@@ -312,7 +312,7 @@ defineExpose({ loadThreads });
         :class="isSystemThreadActive ? 'bg-slate-100 dark:bg-slate-800' : ''"
         @click="openSystemThread"
       >
-        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm text-brand-700 dark:bg-brand-900 dark:text-brand-300">
           🔔
         </span>
         <span class="min-w-0 flex-1">
@@ -327,7 +327,7 @@ defineExpose({ loadThreads });
             </span>
             <span
               v-if="systemUnreadCount > 0"
-              class="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-slate-900 px-1 text-[10px] font-medium text-white dark:bg-white dark:text-slate-900"
+              class="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-500 px-1 text-[10px] font-medium text-white"
             >
               {{ systemUnreadCount }}
             </span>
@@ -359,7 +359,7 @@ defineExpose({ loadThreads });
             <span class="truncate text-xs text-slate-500">{{ thread.last_message_preview ?? "Нет сообщений" }}</span>
             <span
               v-if="thread.unread_count > 0"
-              class="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-slate-900 px-1 text-[10px] font-medium text-white dark:bg-white dark:text-slate-900"
+              class="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-500 px-1 text-[10px] font-medium text-white"
             >
               {{ thread.unread_count }}
             </span>
@@ -425,7 +425,7 @@ defineExpose({ loadThreads });
                 class="max-w-[80%] rounded-md px-3 py-1.5 text-sm"
                 :class="
                   message.sender_id === auth.user?.id
-                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                    ? 'bg-brand-500 text-white'
                     : 'bg-slate-100 dark:bg-slate-800'
                 "
               >
@@ -465,7 +465,7 @@ defineExpose({ loadThreads });
           <button
             type="submit"
             :disabled="isSending || (!draft.trim() && !file)"
-            class="shrink-0 rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+            class="shrink-0 rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white disabled:opacity-50"
           >
             Отправить
           </button>

@@ -27,6 +27,13 @@ class SubjectOut(BaseModel):
     directions: list[DirectionOut] = Field(default_factory=list)
 
 
+class SubjectCatalogOut(SubjectOut):
+    """Public subject list. Carries how many catalog-visible tutors teach the subject
+    so the home page can label its subject tiles and drop the ones nobody teaches."""
+
+    tutors_count: int = 0
+
+
 class SubjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 

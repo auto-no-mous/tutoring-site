@@ -205,3 +205,32 @@ async def test_catalog_filters_by_subject_and_normalizes_hourly_price(
     price_filtered_ids = {t["id"] for t in price_filtered.json()["items"]}
     assert math_tutor_id in price_filtered_ids
     assert music_tutor_id not in price_filtered_ids
+
+
+async def test_public_subjects_count_only_visible_tutors(client: AsyncClient, db_session: AsyncSession) -> None:
+    admin_headers = await _admin_headers(client, db_session, "subj-admin4@example.com")
+    ids = await _seed_subjects(client, admin_headers)
+
+    visible = await _register(client, "subj-tutor4@example.com", "tutor")
+    await client.put(
+        "/api/v1/tutors/me/subjects",
+        headers=visible["headers"],
+        json={"selections": [{"subject_id": ids["math_id"], "direction_ids": [ids["ege_id"], ids["oge_id"]]}]},
+    )
+
+    hidden = await _register(client, "subj-tutor5@example.com", "tutor")
+    await client.put(
+        "/api/v1/tutors/me/subjects",
+        headers=hidden["headers"],
+        json={"selections": [{"subject_id": ids["math_id"], "direction_ids": []}]},
+    )
+    hide_resp = await client.patch("/api/v1/tutors/me", headers=hidden["headers"], json={"is_hidden": True})
+    assert hide_resp.status_code == 200, hide_resp.text
+
+    body = (await client.get("/api/v1/subjects")).json()
+    math = next(s for s in body if s["id"] == ids["math_id"])
+    music = next(s for s in body if s["id"] == ids["music_id"])
+    # Two directions of the same subject must not double-count the same tutor, and the
+    # hidden profile is excluded exactly as it is from the catalog.
+    assert math["tutors_count"] == 1
+    assert music["tutors_count"] == 0

@@ -1,4 +1,5 @@
 export type UserRole = "tutor" | "student" | "admin";
+export type NotificationChannel = "off" | "email" | "telegram" | "both";
 
 export interface User {
   id: string;
@@ -13,7 +14,8 @@ export interface User {
   is_active: boolean;
   timezone: string;
   telegram_chat_id: string | null;
-  email_notifications_enabled: boolean;
+  // Куда слать уведомления и напоминания: off / email / telegram / both.
+  notification_channel: NotificationChannel;
   reminder_lead_minutes: number;
   created_at: string;
 }

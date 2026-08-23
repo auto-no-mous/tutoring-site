@@ -9,7 +9,7 @@ export interface UserSettingsUpdate {
   email?: string;
   timezone?: string;
   telegram_chat_id?: string | null;
-  email_notifications_enabled?: boolean;
+  notification_channel?: string;
   reminder_lead_minutes?: number;
 }
 

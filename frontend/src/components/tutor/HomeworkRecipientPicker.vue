@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from "lucide-vue-next";
 import { computed } from "vue";
 
 import type { Group } from "@/types/group";
@@ -75,7 +76,7 @@ function removeChip(chip: Chip): void {
           :aria-label="`Убрать ${chip.label}`"
           @click="removeChip(chip)"
         >
-          ✕
+          <X class="h-3.5 w-3.5" />
         </button>
       </span>
     </div>

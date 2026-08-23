@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DialogContent, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
 import { computed, onMounted, ref } from "vue";
 
 import { listMyGroups } from "@/api/groups";
@@ -246,7 +247,7 @@ onMounted(load);
     <div>
       <button
         type="button"
-        class="rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900"
+        class="rounded-md bg-brand-500 px-4 py-2 text-sm text-white"
         @click="toggleCreateForm"
       >
         {{ showCreateForm ? "Отмена" : "+ ДЗ" }}
@@ -284,7 +285,7 @@ onMounted(load);
               :key="mode.value"
               type="button"
               class="rounded px-2.5 py-1"
-              :class="createSubmissionMode === mode.value ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'text-slate-500'"
+              :class="createSubmissionMode === mode.value ? 'bg-brand-500 text-white' : 'text-slate-500'"
               @click="createSubmissionMode = mode.value"
             >
               {{ mode.label }}
@@ -302,11 +303,11 @@ onMounted(load);
         <input
           ref="createFileInputEl"
           type="file"
-          class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
+          class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
           @change="onCreateFileChange"
         />
         <p v-if="createError" class="text-sm text-red-600 dark:text-red-400">{{ createError }}</p>
-        <button type="submit" class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900">
+        <button type="submit" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white">
           Отправить
         </button>
       </form>
@@ -391,85 +392,105 @@ onMounted(load);
     </div>
 
     <!-- Edit modal -->
-    <div v-if="editing" class="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4" @click.self="closeEdit">
-      <div class="w-full max-w-md rounded-lg bg-white p-4 dark:bg-slate-900">
-        <h3 class="text-sm font-semibold">Изменить задание</h3>
-        <form class="mt-3 flex flex-col gap-3" @submit.prevent="submitEdit">
-          <label class="flex flex-col gap-1 text-sm">
-            Название задания
-            <input v-model="editTitle" placeholder="необязательно" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
-          </label>
-          <div class="flex flex-col gap-1 text-sm">
-            Что должен сделать ученик
-            <div class="inline-flex w-fit rounded-md border border-slate-300 p-0.5 text-xs dark:border-slate-700">
-              <button
-                v-for="mode in SUBMISSION_MODES"
-                :key="mode.value"
-                type="button"
-                class="rounded px-2.5 py-1"
-                :class="editSubmissionMode === mode.value ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'text-slate-500'"
-                @click="editSubmissionMode = mode.value"
-              >
-                {{ mode.label }}
-              </button>
-            </div>
-          </div>
-          <div class="text-sm">
-            <p class="text-slate-500">
-              Текущий материал:
-              <a v-if="editing.content_url" :href="editing.content_url" target="_blank" class="underline">ссылка</a>
-              <a v-else-if="editing.content_file_path" :href="editing.content_file_path" target="_blank" class="underline">файл</a>
-              <span v-else>не указан</span>
-            </p>
-            <label class="mt-1 flex items-center gap-2">
-              <input v-model="editReplaceContent" type="checkbox" />
-              Заменить материал
+    <DialogRoot :open="!!editing" @update:open="(open) => !open && closeEdit()">
+      <DialogPortal>
+        <DialogOverlay
+          class="fixed inset-0 z-20 bg-black/40 data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in"
+        />
+        <DialogContent
+          v-if="editing"
+          class="fixed left-1/2 top-1/2 z-20 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-xl
+            data-[state=closed]:animate-pop-out data-[state=open]:animate-pop-in dark:bg-slate-900"
+          :aria-describedby="undefined"
+        >
+          <DialogTitle class="text-sm font-semibold">Изменить задание</DialogTitle>
+          <form class="mt-3 flex flex-col gap-3" @submit.prevent="submitEdit">
+            <label class="flex flex-col gap-1 text-sm">
+              Название задания
+              <input v-model="editTitle" placeholder="необязательно" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
             </label>
-            <template v-if="editReplaceContent">
-              <input
-                v-model="editContentUrl"
-                placeholder="Ссылка на материал (необязательно)"
-                class="mt-2 w-full rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
-              />
-              <input
-                type="file"
-                class="mt-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
-                @change="onEditFileChange"
-              />
-            </template>
-          </div>
-          <p v-if="editError" class="text-sm text-red-600 dark:text-red-400">{{ editError }}</p>
-          <div class="flex gap-2">
-            <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900">Сохранить</button>
-            <button type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700" @click="closeEdit">Отмена</button>
-          </div>
-        </form>
-      </div>
-    </div>
+            <div class="flex flex-col gap-1 text-sm">
+              Что должен сделать ученик
+              <div class="inline-flex w-fit rounded-md border border-slate-300 p-0.5 text-xs dark:border-slate-700">
+                <button
+                  v-for="mode in SUBMISSION_MODES"
+                  :key="mode.value"
+                  type="button"
+                  class="rounded px-2.5 py-1"
+                  :class="editSubmissionMode === mode.value ? 'bg-brand-500 text-white' : 'text-slate-500'"
+                  @click="editSubmissionMode = mode.value"
+                >
+                  {{ mode.label }}
+                </button>
+              </div>
+            </div>
+            <div class="text-sm">
+              <p class="text-slate-500">
+                Текущий материал:
+                <a v-if="editing.content_url" :href="editing.content_url" target="_blank" class="underline">ссылка</a>
+                <a v-else-if="editing.content_file_path" :href="editing.content_file_path" target="_blank" class="underline">файл</a>
+                <span v-else>не указан</span>
+              </p>
+              <label class="mt-1 flex items-center gap-2">
+                <input v-model="editReplaceContent" type="checkbox" />
+                Заменить материал
+              </label>
+              <template v-if="editReplaceContent">
+                <input
+                  v-model="editContentUrl"
+                  placeholder="Ссылка на материал (необязательно)"
+                  class="mt-2 w-full rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
+                />
+                <input
+                  type="file"
+                  class="mt-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
+                  @change="onEditFileChange"
+                />
+              </template>
+            </div>
+            <p v-if="editError" class="text-sm text-red-600 dark:text-red-400">{{ editError }}</p>
+            <div class="flex gap-2">
+              <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm text-white">Сохранить</button>
+              <button type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700" @click="closeEdit">Отмена</button>
+            </div>
+          </form>
+        </DialogContent>
+      </DialogPortal>
+    </DialogRoot>
 
     <!-- Duplicate modal -->
-    <div v-if="duplicating" class="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4" @click.self="closeDuplicate">
-      <div class="w-full max-w-md rounded-lg bg-white p-4 dark:bg-slate-900">
-        <h3 class="text-sm font-semibold">Отправить копию: «{{ duplicating.title || "Без названия" }}»</h3>
-        <p class="mt-1 text-xs text-slate-500">Содержимое задания останется таким же, выберите новых получателей.</p>
-        <div class="mt-3">
-          <HomeworkRecipientPicker
-            :students="students"
-            :groups="groups"
-            :student-ids="duplicateStudentIds"
-            :group-ids="duplicateGroupIds"
-            @update:student-ids="duplicateStudentIds = $event"
-            @update:group-ids="duplicateGroupIds = $event"
-          />
-        </div>
-        <p v-if="duplicateError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ duplicateError }}</p>
-        <div class="mt-3 flex gap-2">
-          <button type="button" class="rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900" @click="submitDuplicate">
-            Отправить копию
-          </button>
-          <button type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700" @click="closeDuplicate">Отмена</button>
-        </div>
-      </div>
-    </div>
+    <DialogRoot :open="!!duplicating" @update:open="(open) => !open && closeDuplicate()">
+      <DialogPortal>
+        <DialogOverlay
+          class="fixed inset-0 z-20 bg-black/40 data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in"
+        />
+        <DialogContent
+          v-if="duplicating"
+          class="fixed left-1/2 top-1/2 z-20 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-xl
+            data-[state=closed]:animate-pop-out data-[state=open]:animate-pop-in dark:bg-slate-900"
+          :aria-describedby="undefined"
+        >
+          <DialogTitle class="text-sm font-semibold">Отправить копию: «{{ duplicating.title || "Без названия" }}»</DialogTitle>
+          <p class="mt-1 text-xs text-slate-500">Содержимое задания останется таким же, выберите новых получателей.</p>
+          <div class="mt-3">
+            <HomeworkRecipientPicker
+              :students="students"
+              :groups="groups"
+              :student-ids="duplicateStudentIds"
+              :group-ids="duplicateGroupIds"
+              @update:student-ids="duplicateStudentIds = $event"
+              @update:group-ids="duplicateGroupIds = $event"
+            />
+          </div>
+          <p v-if="duplicateError" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ duplicateError }}</p>
+          <div class="mt-3 flex gap-2">
+            <button type="button" class="rounded-md bg-brand-500 px-4 py-2 text-sm text-white" @click="submitDuplicate">
+              Отправить копию
+            </button>
+            <button type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700" @click="closeDuplicate">Отмена</button>
+          </div>
+        </DialogContent>
+      </DialogPortal>
+    </DialogRoot>
   </div>
 </template>

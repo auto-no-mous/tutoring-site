@@ -122,7 +122,7 @@ onMounted(load);
             <button
               type="button"
               :disabled="savingId === template.id"
-              class="rounded-md bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+              class="rounded-md bg-brand-500 px-3 py-1.5 text-xs text-white disabled:opacity-50"
               @click="save(template)"
             >
               Сохранить

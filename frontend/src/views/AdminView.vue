@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
+import BlogTab from "@/components/admin/BlogTab.vue";
 import BookingsTab from "@/components/admin/BookingsTab.vue";
 import GroupsTab from "@/components/admin/GroupsTab.vue";
+import MailTab from "@/components/admin/MailTab.vue";
 import NotificationsTab from "@/components/admin/NotificationsTab.vue";
 import StudentsTab from "@/components/admin/StudentsTab.vue";
 import SubjectsTab from "@/components/admin/SubjectsTab.vue";
@@ -14,7 +16,9 @@ const tabs = [
   { key: "bookings", label: "Занятия" },
   { key: "groups", label: "Группы" },
   { key: "subjects", label: "Предметы" },
+  { key: "blog", label: "Блог" },
   { key: "notifications", label: "Уведомления" },
+  { key: "mail", label: "Почта" },
 ];
 
 const activeTab = ref(tabs[0].key);
@@ -31,7 +35,7 @@ const activeTab = ref(tabs[0].key);
         :key="tab.key"
         type="button"
         class="rounded-t-md px-3 py-2 text-sm"
-        :class="activeTab === tab.key ? 'border-b-2 border-slate-900 font-medium dark:border-white' : 'text-slate-500'"
+        :class="activeTab === tab.key ? 'border-b-2 border-brand-500 font-medium dark:border-brand-400' : 'text-slate-500'"
         @click="activeTab = tab.key"
       >
         {{ tab.label }}
@@ -44,7 +48,9 @@ const activeTab = ref(tabs[0].key);
       <BookingsTab v-else-if="activeTab === 'bookings'" />
       <GroupsTab v-else-if="activeTab === 'groups'" />
       <SubjectsTab v-else-if="activeTab === 'subjects'" />
+      <BlogTab v-else-if="activeTab === 'blog'" />
       <NotificationsTab v-else-if="activeTab === 'notifications'" />
+      <MailTab v-else-if="activeTab === 'mail'" />
     </div>
   </div>
 </template>

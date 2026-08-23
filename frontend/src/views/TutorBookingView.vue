@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowLeft } from "lucide-vue-next";
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 
@@ -32,11 +33,13 @@ onMounted(load);
 
 <template>
   <div class="mx-auto max-w-2xl px-4 py-10">
-    <RouterLink :to="`/tutors/${routeTutorId}`" class="text-sm text-slate-500 hover:underline">← Анкета репетитора</RouterLink>
-    <p v-if="isLoading" class="mt-4 text-slate-400">Загрузка…</p>
+    <RouterLink :to="`/tutors/${routeTutorId}`" class="back-link"><ArrowLeft class="h-4 w-4" />Анкета репетитора</RouterLink>
+    <p v-if="isLoading" class="mt-4 text-base text-slate-400">Загрузка…</p>
     <template v-else-if="profile">
-      <h1 class="mt-2 text-2xl font-semibold">Запись к репетитору {{ profile.display_name }}</h1>
-      <div class="mt-6">
+      <h1 class="mt-3 text-3xl font-bold tracking-tight">
+        Запись к репетитору <span class="text-brand-600 dark:text-brand-400">{{ profile.display_name }}</span>
+      </h1>
+      <div class="animate-fade-in-up mt-6">
         <BookingWizard :tutor-id="profile.id" :tutor-name="profile.display_name" :lesson-types="lessonTypes" />
       </div>
     </template>

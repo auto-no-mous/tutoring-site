@@ -7,7 +7,15 @@ import { getMyProfile, updateMyProfile } from "@/api/tutors";
 import { getTelegramLinkToken, resendVerificationEmail, updateMySettings } from "@/api/users";
 import { useAuthStore } from "@/stores/auth";
 import type { RecurringSeriesDetail } from "@/types/booking";
+import type { NotificationChannel } from "@/types/user";
 import type { TutorProfile } from "@/types/tutor";
+
+const NOTIFICATION_CHANNELS: { value: NotificationChannel; label: string }[] = [
+  { value: "both", label: "Почта и мессенджер" },
+  { value: "email", label: "Только почта" },
+  { value: "telegram", label: "Только мессенджер" },
+  { value: "off", label: "Не присылать" },
+];
 
 const WEEKDAY_NAMES = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
 
@@ -18,7 +26,7 @@ const patronymic = ref(auth.user?.patronymic ?? "");
 const grade = ref<number | null>(auth.user?.grade ?? null);
 const email = ref(auth.user?.email ?? "");
 const timezone = ref(auth.user?.timezone ?? "Europe/Moscow");
-const emailNotifications = ref(auth.user?.email_notifications_enabled ?? true);
+const notificationChannel = ref<NotificationChannel>(auth.user?.notification_channel ?? "both");
 const reminderLeadMinutes = ref(auth.user?.reminder_lead_minutes ?? 60);
 const savedMessage = ref("");
 const emailError = ref("");
@@ -62,7 +70,7 @@ async function save(): Promise<void> {
       grade: grade.value,
       email: email.value || undefined,
       timezone: timezone.value,
-      email_notifications_enabled: emailNotifications.value,
+      notification_channel: notificationChannel.value,
       reminder_lead_minutes: reminderLeadMinutes.value,
     });
     auth.user = updated;
@@ -229,13 +237,37 @@ onMounted(load);
         <span class="text-xs text-slate-400">Придёт в Telegram/на почту и в «Системные уведомления». По умолчанию — 60 минут.</span>
       </label>
 
-      <label class="flex items-center gap-2 text-sm">
-        <input v-model="emailNotifications" type="checkbox" />
-        Получать уведомления на почту
-      </label>
+      <div class="flex flex-col gap-2 text-sm">
+        <span>Напоминания о занятиях и уведомления</span>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="option in NOTIFICATION_CHANNELS"
+            :key="option.value"
+            type="button"
+            class="rounded-lg border px-3 py-1.5 transition-colors"
+            :class="
+              notificationChannel === option.value
+                ? 'border-brand-500 bg-brand-50 font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'
+                : 'border-slate-300 text-slate-600 hover:border-brand-400 dark:border-slate-700 dark:text-slate-300'
+            "
+            @click="notificationChannel = option.value"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <p class="text-xs text-slate-500">
+          {{
+            notificationChannel === "off"
+              ? "Напоминания и уведомления о занятиях приходить не будут. Письма о регистрации и сбросе пароля отправляются всегда."
+              : notificationChannel === "telegram" && !auth.user?.telegram_chat_id
+                ? "Мессенджер ещё не подключён — нажмите «Подключить Telegram» выше, иначе уведомления приходить не будут."
+                : "Письма о регистрации и сбросе пароля отправляются всегда, независимо от этой настройки."
+          }}
+        </p>
+      </div>
 
       <div class="flex items-center gap-3">
-        <button type="button" class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900" @click="save">
+        <button type="button" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white" @click="save">
           Сохранить
         </button>
         <span v-if="savedMessage" class="text-sm text-green-600 dark:text-green-400">{{ savedMessage }}</span>
@@ -287,7 +319,7 @@ onMounted(load);
         </label>
       </div>
       <div class="flex items-center gap-3">
-        <button type="button" :disabled="isSavingPolicy" class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900" @click="savePolicy">
+        <button type="button" :disabled="isSavingPolicy" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50" @click="savePolicy">
           Сохранить
         </button>
         <span v-if="policySavedMessage" class="text-sm text-green-600 dark:text-green-400">{{ policySavedMessage }}</span>

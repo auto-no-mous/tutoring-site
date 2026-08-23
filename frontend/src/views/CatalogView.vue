@@ -1,10 +1,17 @@
 <script setup lang="ts">
+import { ChevronDown, SlidersHorizontal, Star } from "lucide-vue-next";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import { listSubjects } from "@/api/subjects";
 import { getCatalog } from "@/api/tutors";
-import type { Subject } from "@/types/subject";
+import HomeBlog from "@/components/home/HomeBlog.vue";
+import HomeFaq from "@/components/home/HomeFaq.vue";
+import HomeHero from "@/components/home/HomeHero.vue";
+import HowItWorks from "@/components/home/HowItWorks.vue";
+import PlatformFeatures from "@/components/home/PlatformFeatures.vue";
+import SubjectTiles from "@/components/home/SubjectTiles.vue";
+import type { CatalogSubject } from "@/types/subject";
 import type { TutorCatalogItem } from "@/types/tutor";
 
 const router = useRouter();
@@ -19,13 +26,14 @@ const MAX_OPTIONS = [{ label: "менее 500 ₽", value: 499.99 }, ...PRICE_ST
 const tutors = ref<TutorCatalogItem[]>([]);
 const total = ref(0);
 const page = ref(0);
-const subjects = ref<Subject[]>([]);
+const subjects = ref<CatalogSubject[]>([]);
 const subjectId = ref("");
 const priceMin = ref("");
 const priceMax = ref("");
 const isLoading = ref(false);
 const isLoadingMore = ref(false);
 const sentinel = ref<HTMLElement | null>(null);
+const catalogSection = ref<HTMLElement | null>(null);
 const showFilters = ref(false);
 
 let observer: IntersectionObserver | null = null;
@@ -72,6 +80,19 @@ async function search(): Promise<void> {
 // `immediate`, so this doesn't double up with the explicit search() in onMounted.
 watch([subjectId, priceMin, priceMax], search);
 
+function scrollToCatalog(): void {
+  const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  catalogSection.value?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+}
+
+// Плитка предмета - это тот же фильтр, что и в панели фильтров. Раскрываем панель,
+// иначе выбранный предмет нигде не виден и снять фильтр неоткуда.
+function onSubjectTileSelect(id: string): void {
+  subjectId.value = id;
+  showFilters.value = true;
+  scrollToCatalog();
+}
+
 // The card itself is a RouterLink to the tutor's profile; this button sits inside it
 // for a direct shortcut to booking, so its click must not also trigger the card's
 // own navigation.
@@ -97,83 +118,112 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl px-4 py-10">
-    <h1 class="text-2xl font-semibold">Каталог репетиторов</h1>
+  <div class="pb-16">
+    <HomeHero @find-tutor="scrollToCatalog" />
 
-    <div class="mt-6">
-      <button
-        type="button"
-        class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
-        @click="showFilters = !showFilters"
-      >
-        {{ showFilters ? "Скрыть фильтры" : "Фильтры" }}
-      </button>
-      <div v-if="showFilters" class="mt-3 flex flex-wrap gap-3">
-        <select
-          v-model="subjectId"
-          class="min-w-48 flex-1 rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700"
+    <SubjectTiles :subjects="subjects" :selected-id="subjectId" @select="onSubjectTileSelect" />
+
+    <!-- scroll-mt компенсирует липкую шапку, когда сюда скроллят из хиро или с плиток. -->
+    <section ref="catalogSection" class="mx-auto w-full max-w-3xl scroll-mt-20 px-4 pt-16">
+      <h2 class="text-2xl font-semibold tracking-tight">Каталог репетиторов</h2>
+      <p class="mt-1.5 text-base text-slate-500 dark:text-slate-400">
+        Выберите преподавателя и запишитесь на занятие в пару кликов.
+      </p>
+
+      <div class="mt-6">
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white/70 px-3.5 py-2 text-base font-medium transition-colors hover:border-brand-400 hover:text-brand-700 dark:border-slate-700 dark:bg-transparent dark:hover:border-brand-500 dark:hover:text-brand-300"
+          @click="showFilters = !showFilters"
         >
-          <option value="">Все предметы</option>
-          <option v-for="subject in subjects" :key="subject.id" :value="subject.id">{{ subject.name }}</option>
-        </select>
-        <select v-model="priceMin" class="w-40 rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700">
-          <option value="">Цена от</option>
-          <option v-for="opt in MIN_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-        </select>
-        <select v-model="priceMax" class="w-40 rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700">
-          <option value="">Цена до</option>
-          <option v-for="opt in MAX_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-        </select>
+          <SlidersHorizontal class="h-4 w-4" />
+          Фильтры
+          <ChevronDown class="h-4 w-4 transition-transform duration-300" :class="{ 'rotate-180': showFilters }" />
+        </button>
+        <Transition name="collapse">
+          <div v-if="showFilters">
+            <div class="collapse-inner">
+              <div class="mt-3 flex flex-wrap gap-3">
+                <select v-model="subjectId" class="filter-select min-w-48 flex-1">
+                  <option value="">Все предметы</option>
+                  <option v-for="subject in subjects" :key="subject.id" :value="subject.id">{{ subject.name }}</option>
+                </select>
+                <select v-model="priceMin" class="filter-select w-40">
+                  <option value="">Цена от</option>
+                  <option v-for="opt in MIN_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+                <select v-model="priceMax" class="filter-select w-40">
+                  <option value="">Цена до</option>
+                  <option v-for="opt in MAX_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </Transition>
       </div>
-    </div>
 
-    <p v-if="isLoading" class="mt-8 text-slate-400">Загрузка…</p>
-    <p v-else-if="tutors.length === 0" class="mt-8 text-slate-400">Репетиторы не найдены.</p>
+      <p v-if="isLoading" class="mt-8 text-base text-slate-400">Загрузка…</p>
+      <p v-else-if="tutors.length === 0" class="mt-8 text-base text-slate-400">Репетиторы не найдены.</p>
 
-    <div v-else class="mt-8 flex flex-col gap-4">
-      <RouterLink
-        v-for="tutor in tutors"
-        :key="tutor.id"
-        :to="`/tutors/${tutor.slug ?? tutor.id}`"
-        class="flex gap-5 rounded-lg border border-slate-200 p-5 transition-transform duration-150 ease-out hover:z-10 hover:scale-[1.02] hover:border-slate-400 hover:shadow-lg dark:border-slate-800 dark:hover:border-slate-600"
-      >
-        <img v-if="tutor.photo_url" :src="tutor.photo_url" alt="" class="h-28 w-28 shrink-0 rounded-md object-cover" />
-        <div v-else class="h-28 w-28 shrink-0 rounded-md bg-slate-200 dark:bg-slate-800"></div>
-        <div class="flex-1">
-          <div class="text-lg font-medium">{{ tutor.name_patronymic }}</div>
-          <div v-if="tutor.hourly_price != null" class="mt-1 text-sm text-slate-500">
-            от {{ tutor.hourly_price }} ₽/час
-          </div>
-          <div v-if="tutor.avg_rating != null" class="mt-1 text-sm text-slate-500">
-            ★ {{ tutor.avg_rating.toFixed(1) }} ({{ tutor.reviews_count }} отзывов)
-          </div>
-          <div v-if="tutor.subjects.length > 0" class="mt-2 flex flex-wrap gap-1.5">
-            <span
-              v-for="subjectName in tutor.subjects"
-              :key="subjectName"
-              class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+      <TransitionGroup v-else name="list" tag="div" class="relative mt-8 flex flex-col gap-4">
+        <RouterLink
+          v-for="(tutor, index) in tutors"
+          :key="tutor.id"
+          :to="`/tutors/${tutor.slug ?? tutor.id}`"
+          :style="{ '--stagger': `${(index % PAGE_SIZE) * 35}ms` }"
+          class="surface-card flex gap-5 p-5 transition-all duration-200 ease-out hover:z-10 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg dark:hover:border-brand-700"
+        >
+          <img
+            v-if="tutor.photo_url"
+            :src="tutor.photo_url"
+            alt=""
+            class="h-28 w-28 shrink-0 rounded-xl object-cover ring-2 ring-brand-100 dark:ring-brand-900/50"
+          />
+          <div v-else class="h-28 w-28 shrink-0 rounded-xl bg-brand-50 ring-2 ring-brand-100 dark:bg-slate-800 dark:ring-brand-900/50"></div>
+          <div class="flex-1">
+            <div class="text-xl font-semibold">{{ tutor.name_patronymic }}</div>
+            <div v-if="tutor.hourly_price != null" class="mt-1 text-base font-medium text-brand-700 dark:text-brand-300">
+              от {{ tutor.hourly_price }} ₽/час
+            </div>
+            <div v-if="tutor.avg_rating != null" class="mt-1 flex items-center gap-1 text-base text-slate-500 dark:text-slate-400">
+              <Star class="h-4 w-4 fill-aqua-400 text-aqua-400" />
+              {{ tutor.avg_rating.toFixed(1) }} ({{ tutor.reviews_count }} отзывов)
+            </div>
+            <div v-if="tutor.subjects.length > 0" class="mt-2 flex flex-wrap gap-1.5">
+              <span
+                v-for="subjectName in tutor.subjects"
+                :key="subjectName"
+                class="rounded-full bg-brand-50 px-3 py-1 text-sm font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200"
+              >
+                {{ subjectName }}
+              </span>
+            </div>
+            <p v-if="tutor.about_snippet" class="mt-2 text-base leading-relaxed text-slate-600 dark:text-slate-300">
+              {{ tutor.about_snippet }}
+            </p>
+            <button
+              v-if="tutor.show_individual_booking"
+              type="button"
+              class="btn-primary mt-3 px-3.5 py-1.5 text-sm"
+              @click="goToBooking(tutor.id, $event)"
             >
-              {{ subjectName }}
-            </span>
+              Запись на индивидуальное занятие
+            </button>
           </div>
-          <p v-if="tutor.about_snippet" class="mt-2 text-sm text-slate-600 dark:text-slate-300">{{ tutor.about_snippet }}</p>
-          <button
-            v-if="tutor.show_individual_booking"
-            type="button"
-            class="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-xs text-white dark:bg-white dark:text-slate-900"
-            @click="goToBooking(tutor.id, $event)"
-          >
-            Запись на индивидуальное занятие
-          </button>
-        </div>
-      </RouterLink>
-    </div>
+        </RouterLink>
+      </TransitionGroup>
 
-    <!-- Sentinel: as soon as this scrolls into view, the IntersectionObserver loads
-    the next page. Kept mounted (not v-if) even after everything's loaded so the
-    observer stays attached to a stable element - hasMore() inside loadMore() is what
-    actually stops further requests once total is reached. -->
-    <div ref="sentinel" class="mt-4 h-px"></div>
-    <p v-if="isLoadingMore" class="text-center text-sm text-slate-400">Загружаем ещё…</p>
+      <!-- Sentinel: as soon as this scrolls into view, the IntersectionObserver loads
+      the next page. Kept mounted (not v-if) even after everything's loaded so the
+      observer stays attached to a stable element - hasMore() inside loadMore() is what
+      actually stops further requests once total is reached. -->
+      <div ref="sentinel" class="mt-4 h-px"></div>
+      <p v-if="isLoadingMore" class="text-center text-base text-slate-400">Загружаем ещё…</p>
+    </section>
+
+    <HowItWorks />
+    <PlatformFeatures />
+    <HomeBlog />
+    <HomeFaq />
   </div>
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from "lucide-vue-next";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -251,7 +252,7 @@ onMounted(load);
           </div>
           <button type="button" class="mt-1 text-xs text-slate-500 underline" @click="addSlot">+ день</button>
         </div>
-        <button type="submit" class="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-slate-900">Создать группу</button>
+        <button type="submit" class="w-fit rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white">Создать группу</button>
       </form>
 
       <p v-if="groups.length === 0" class="text-sm text-slate-400">У вас пока нет групп.</p>
@@ -277,11 +278,18 @@ onMounted(load);
               <option v-for="(wd, idx) in WEEKDAY_ABBR" :key="idx" :value="idx">{{ wd }}</option>
             </select>
             <input v-model="slot.start_time" type="time" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700" />
-            <button type="button" class="text-xs text-red-600 underline dark:text-red-400" @click="removeScheduleEditSlot(i)">✕</button>
+            <button
+              type="button"
+              class="rounded-md p-1 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+              aria-label="Убрать день"
+              @click="removeScheduleEditSlot(i)"
+            >
+              <X class="h-3.5 w-3.5" />
+            </button>
           </div>
           <div class="mt-2 flex items-center gap-3">
             <button type="button" class="text-xs text-slate-500 underline" @click="addScheduleEditSlot">+ день</button>
-            <button type="button" class="rounded-md bg-slate-900 px-3 py-1 text-xs text-white dark:bg-white dark:text-slate-900" @click="saveSchedule">
+            <button type="button" class="rounded-md bg-brand-500 px-3 py-1 text-xs text-white" @click="saveSchedule">
               Сохранить
             </button>
             <button type="button" class="text-xs text-slate-500 underline" @click="scheduleEditGroupId = null">Отмена</button>
@@ -365,7 +373,7 @@ onMounted(load);
                 <button
                   type="button"
                   :disabled="isSavingAttendance"
-                  class="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                  class="w-fit rounded-md bg-brand-500 px-3 py-1.5 text-xs text-white disabled:opacity-50"
                   @click="saveAttendance(occ)"
                 >
                   Сохранить

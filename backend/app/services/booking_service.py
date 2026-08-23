@@ -286,6 +286,9 @@ async def create_student_booking(
     if not await schedule_service.is_slot_available(db, tutor, lesson_type, start_at):
         raise HTTPException(status.HTTP_409_CONFLICT, "Выбранное время уже недоступно")
 
+    # Проверяем ДО вставки: сразу после неё "первая запись" перестала бы быть первой.
+    is_first_with_tutor = not await has_had_booking(db, tutor_id, student.id)
+
     end_at = start_at + dt.timedelta(minutes=lesson_type.duration_minutes)
     booking = Booking(
         tutor_id=tutor_id,
@@ -300,13 +303,24 @@ async def create_student_booking(
     await db.commit()
     await db.refresh(booking)
 
-    await notification_service.notify_tutor(
-        db,
-        tutor_id,
-        NotificationEvent.NEW_BOOKING,
-        "Новая запись на занятие",
-        f"{student.display_name} записался(-ась) на {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
-    )
+    tutor_user = await db.get(User, tutor.user_id)
+    if is_first_with_tutor and tutor_user is not None:
+        # Первое занятие пары - развёрнутое письмо обоим (см. notify_first_booking).
+        await notification_service.notify_first_booking(
+            db,
+            student=student,
+            tutor_user=tutor_user,
+            start_at=start_at,
+            lesson_name=lesson_type.name,
+        )
+    else:
+        await notification_service.notify_tutor(
+            db,
+            tutor_id,
+            NotificationEvent.NEW_BOOKING,
+            "Новая запись на занятие",
+            f"{student.display_name} записался(-ась) на {start_at.astimezone(MSK):%d.%m.%Y %H:%M} (МСК).",
+        )
 
     if repeat_weekly:
         start_msk = start_at.astimezone(MSK)
@@ -333,10 +347,14 @@ async def create_student_booking(
 
 
 async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: ManualBookingCreate) -> Booking:
+    student = None
+    is_first_with_tutor = False
     if payload.student_id is not None:
         student = await db.get(User, payload.student_id)
         if student is None or student.role != "student":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не найден")
+        # Как и в записи ученика: считаем до вставки самой записи.
+        is_first_with_tutor = not await has_had_booking(db, tutor.id, student.id)
 
     lesson_type = None
     if payload.lesson_type_id is not None:
@@ -377,6 +395,19 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
     db.add(booking)
     await db.commit()
     await db.refresh(booking)
+
+    # Занятие, назначенное репетитором вручную, для ученика такая же новость, как
+    # и своя запись - если это их первое занятие, письмо получают оба.
+    if is_first_with_tutor and student is not None:
+        tutor_user = await db.get(User, tutor.user_id)
+        if tutor_user is not None:
+            await notification_service.notify_first_booking(
+                db,
+                student=student,
+                tutor_user=tutor_user,
+                start_at=payload.start_at,
+                lesson_name=lesson_type.name if lesson_type else None,
+            )
 
     if payload.repeat_weekly and payload.student_id is not None and lesson_type is not None:
         start_msk = payload.start_at.astimezone(MSK)

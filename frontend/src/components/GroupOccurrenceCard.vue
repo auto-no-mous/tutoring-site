@@ -50,7 +50,12 @@ async function markNoShow(): Promise<void> {
         </div>
         <div class="text-xs text-slate-400">Групповое · {{ durationMinutes }} мин</div>
       </div>
-      <a v-if="occurrence.meeting_link" :href="occurrence.meeting_link" target="_blank" class="text-xs underline">
+      <a
+        v-if="occurrence.meeting_link"
+        :href="occurrence.meeting_link"
+        target="_blank"
+        class="rounded-md bg-brand-500 px-2 py-1 text-xs text-white"
+      >
         Перейти на занятие
       </a>
     </div>

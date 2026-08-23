@@ -346,17 +346,19 @@ onMounted(load);
 
           <label class="flex flex-col gap-1 text-sm">
             Длительность
-            <select v-model="durationSelection" class="w-40 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700">
-              <option v-for="d in standardDurations" :key="d" :value="String(d)">{{ d }} мин</option>
-              <option :value="CUSTOM_DURATION">Другое (вручную)</option>
-            </select>
-            <input
-              v-if="durationSelection === CUSTOM_DURATION"
-              v-model.number="customDurationMinutes"
-              type="number"
-              min="1"
-              class="w-40 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
-            />
+            <div class="flex gap-2">
+              <select v-model="durationSelection" class="w-40 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700">
+                <option v-for="d in standardDurations" :key="d" :value="String(d)">{{ d }} мин</option>
+                <option :value="CUSTOM_DURATION">Другое (вручную)</option>
+              </select>
+              <input
+                v-if="durationSelection === CUSTOM_DURATION"
+                v-model.number="customDurationMinutes"
+                type="number"
+                min="1"
+                class="w-24 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
+              />
+            </div>
           </label>
         </div>
 
@@ -378,7 +380,7 @@ onMounted(load);
                   v-for="d in availableDates"
                   :key="d"
                   type="button"
-                  class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:border-slate-500 dark:border-slate-700"
+                  class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:border-brand-400 dark:border-slate-700"
                   @click="pickAvailableDate(d)"
                 >
                   {{ formatDate(d + "T00:00:00Z") }}
@@ -417,7 +419,7 @@ onMounted(load);
                   class="rounded-md border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-30"
                   :class="
                     slot.available
-                      ? 'border-slate-300 hover:border-slate-500 dark:border-slate-700'
+                      ? 'border-slate-300 hover:border-brand-400 dark:border-slate-700'
                       : 'border-slate-200 dark:border-slate-800'
                   "
                   @click="pickAvailableSlot(slot)"
@@ -449,7 +451,7 @@ onMounted(load);
           </label>
         </div>
 
-        <button type="submit" class="self-start rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-slate-900">
+        <button type="submit" class="self-start rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white">
           Создать
         </button>
       </form>

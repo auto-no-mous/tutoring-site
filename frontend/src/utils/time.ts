@@ -66,3 +66,11 @@ export function formatThreadTimestamp(isoUtc: string): string {
   if (isSameLocalDay(date, new Date())) return formatTime(isoUtc);
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(date);
 }
+
+// Дата статьи в блоге: длинная форма читается лучше, чем 23.08.2026, и у публикации
+// нет привязки ко времени занятия, поэтому без часов и МСК.
+export function formatArticleDate(isoUtc: string): string {
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" }).format(
+    new Date(isoUtc),
+  );
+}

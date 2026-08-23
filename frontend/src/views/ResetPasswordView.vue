@@ -32,49 +32,63 @@ async function onSubmit(): Promise<void> {
 </script>
 
 <template>
-  <div class="mx-auto flex max-w-sm flex-col gap-4 px-4 py-16">
-    <h1 class="text-2xl font-semibold">Новый пароль</h1>
-
-    <template v-if="status === 'success'">
-      <p class="text-sm text-green-600 dark:text-green-400">Пароль обновлён.</p>
-      <RouterLink
-        to="/login"
-        class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900"
-      >
-        Войти
-      </RouterLink>
-    </template>
-
-    <template v-else-if="!token">
-      <p class="text-sm text-red-600 dark:text-red-400">В ссылке нет кода сброса пароля.</p>
-      <RouterLink to="/forgot-password" class="text-sm text-slate-500 hover:underline">Запросить новую ссылку</RouterLink>
-    </template>
-
-    <form v-else class="flex flex-col gap-3" @submit.prevent="onSubmit">
-      <input
-        v-model="newPassword"
-        type="password"
-        required
-        minlength="8"
-        placeholder="Новый пароль (минимум 8 символов)"
-        class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+  <div class="mx-auto w-full max-w-sm px-4 py-12">
+    <RouterLink to="/" class="block">
+      <img
+        src="/logo-mark.svg"
+        alt="my-tutor.ru"
+        class="mx-auto h-16 w-auto transition-transform duration-300 hover:scale-105 dark:hidden"
       />
-      <input
-        v-model="confirmPassword"
-        type="password"
-        required
-        minlength="8"
-        placeholder="Повторите новый пароль"
-        class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+      <img
+        src="/logo-mark-dark.svg"
+        alt=""
+        class="mx-auto hidden h-16 w-auto transition-transform duration-300 hover:scale-105 dark:block"
       />
-      <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-      <button
-        type="submit"
-        :disabled="isSubmitting"
-        class="rounded-md bg-slate-900 px-3 py-2 text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
-      >
-        Сохранить пароль
-      </button>
-    </form>
+    </RouterLink>
+    <div class="surface-card animate-pop-in mt-6 flex flex-col gap-4 p-6">
+      <h1 class="text-2xl font-semibold">Новый пароль</h1>
+
+      <template v-if="status === 'success'">
+        <p class="text-sm text-green-600 dark:text-green-400">Пароль обновлён.</p>
+        <RouterLink
+          to="/login"
+          class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white"
+        >
+          Войти
+        </RouterLink>
+      </template>
+
+      <template v-else-if="!token">
+        <p class="text-sm text-red-600 dark:text-red-400">В ссылке нет кода сброса пароля.</p>
+        <RouterLink to="/forgot-password" class="text-sm text-slate-500 hover:underline">Запросить новую ссылку</RouterLink>
+      </template>
+
+      <form v-else class="flex flex-col gap-3" @submit.prevent="onSubmit">
+        <input
+          v-model="newPassword"
+          type="password"
+          required
+          minlength="8"
+          placeholder="Новый пароль (минимум 8 символов)"
+          class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+        />
+        <input
+          v-model="confirmPassword"
+          type="password"
+          required
+          minlength="8"
+          placeholder="Повторите новый пароль"
+          class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+        />
+        <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+        <button
+          type="submit"
+          :disabled="isSubmitting"
+          class="btn-primary w-full"
+        >
+          Сохранить пароль
+        </button>
+      </form>
+    </div>
   </div>
 </template>

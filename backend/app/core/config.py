@@ -27,13 +27,26 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
 
-    # Email
+    # Email. In production these point at our own Postfix on the host (see ops/mail/):
+    # SMTP_HOST=host.docker.internal, SMTP_PORT=25, no user/password and no STARTTLS -
+    # the hop is container -> host over the docker bridge, and Postfix only relays for
+    # its own networks. For an external provider set user/password and keep STARTTLS on.
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_user: str | None = None
     smtp_password: str | None = None
+    smtp_starttls: bool = True
+    smtp_timeout_seconds: int = 20
     smtp_from: str = "no-reply@my-tutor.ru"
+    # Display name in the From header and the address users get when they hit "reply"
+    # (no-reply@ is not read by anyone - see ops/mail/README.md).
+    mail_from_name: str = "my-tutor.ru"
+    mail_reply_to: str | None = None
     email_enabled: bool = False
+    # Общий секрет для ручки /mail/inbound: почтовый сервер отдаёт по ней копии
+    # входящих писем в журнал админки (см. ops/mail/ingest-mail.py). Пусто -
+    # приём входящих в журнал выключен.
+    mail_ingest_token: str | None = None
 
     # Telegram
     telegram_bot_token: str | None = None

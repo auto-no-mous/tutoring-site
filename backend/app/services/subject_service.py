@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -15,6 +15,21 @@ from app.schemas.subject import DirectionOut, SubjectCreate, SubjectUpdate, Tuto
 async def list_subjects(db: AsyncSession) -> list[Subject]:
     result = await db.execute(select(Subject).options(selectinload(Subject.directions)).order_by(Subject.name))
     return list(result.scalars().all())
+
+
+async def get_visible_tutor_counts(db: AsyncSession) -> dict[uuid.UUID, int]:
+    """How many catalog-visible tutors teach each subject, keyed by subject id.
+
+    Repeats search_catalog's is_hidden filter on purpose: the home page uses these
+    counts to decide which subject tiles to show, so a tile must never lead to an
+    empty catalog."""
+    result = await db.execute(
+        select(TutorSubject.subject_id, func.count(func.distinct(TutorSubject.tutor_id)))
+        .join(TutorProfile, TutorProfile.id == TutorSubject.tutor_id)
+        .where(TutorProfile.is_hidden.is_(False))
+        .group_by(TutorSubject.subject_id)
+    )
+    return {subject_id: count for subject_id, count in result.all()}
 
 
 async def get_subject_or_404(db: AsyncSession, subject_id: uuid.UUID) -> Subject:

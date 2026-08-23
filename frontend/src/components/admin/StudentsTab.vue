@@ -105,7 +105,7 @@ onMounted(load);
 
           <p v-if="error" class="text-xs text-red-600 dark:text-red-400">{{ error }}</p>
           <div class="flex gap-2">
-            <button type="button" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs text-white dark:bg-white dark:text-slate-900" @click="saveEdit(student)">
+            <button type="button" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs text-white" @click="saveEdit(student)">
               Сохранить
             </button>
             <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-xs dark:border-slate-700" @click="cancelEdit">

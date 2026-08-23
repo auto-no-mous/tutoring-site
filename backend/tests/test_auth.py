@@ -140,7 +140,7 @@ async def test_update_my_settings(client: AsyncClient) -> None:
     headers = {"Authorization": f"Bearer {access_token}"}
 
     assert resp.json()["user"]["telegram_chat_id"] is None
-    assert resp.json()["user"]["email_notifications_enabled"] is True
+    assert resp.json()["user"]["notification_channel"] == "both"
 
     patch_resp = await client.patch(
         "/api/v1/auth/me",
@@ -151,7 +151,7 @@ async def test_update_my_settings(client: AsyncClient) -> None:
             "patronymic": "Ivanovich",
             "timezone": "Europe/Samara",
             "telegram_chat_id": "123456789",
-            "email_notifications_enabled": False,
+            "notification_channel": "telegram",
         },
     )
     assert patch_resp.status_code == 200, patch_resp.text
@@ -159,7 +159,7 @@ async def test_update_my_settings(client: AsyncClient) -> None:
     assert body["display_name"] == "Name Updated Ivanovich"
     assert body["timezone"] == "Europe/Samara"
     assert body["telegram_chat_id"] == "123456789"
-    assert body["email_notifications_enabled"] is False
+    assert body["notification_channel"] == "telegram"
 
 
 async def test_change_email_requires_reverification_and_rejects_duplicates(client: AsyncClient) -> None:

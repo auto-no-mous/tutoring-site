@@ -32,23 +32,37 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto flex max-w-sm flex-col gap-4 px-4 py-16 text-center">
-    <p v-if="status === 'loading'" class="text-sm text-slate-400">Подтверждаем почту…</p>
+  <div class="mx-auto w-full max-w-sm px-4 py-12">
+    <RouterLink to="/" class="block">
+      <img
+        src="/logo-mark.svg"
+        alt="my-tutor.ru"
+        class="mx-auto h-16 w-auto transition-transform duration-300 hover:scale-105 dark:hidden"
+      />
+      <img
+        src="/logo-mark-dark.svg"
+        alt=""
+        class="mx-auto hidden h-16 w-auto transition-transform duration-300 hover:scale-105 dark:block"
+      />
+    </RouterLink>
+    <div class="surface-card animate-pop-in mt-6 flex flex-col gap-4 p-6 text-center">
+      <p v-if="status === 'loading'" class="text-sm text-slate-400">Подтверждаем почту…</p>
 
-    <template v-else-if="status === 'success'">
-      <h1 class="text-xl font-semibold text-green-600 dark:text-green-400">Почта подтверждена</h1>
-      <RouterLink
-        :to="auth.isAuthenticated ? '/cabinet' : '/login'"
-        class="rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900"
-      >
-        {{ auth.isAuthenticated ? "В личный кабинет" : "Войти" }}
-      </RouterLink>
-    </template>
+      <template v-else-if="status === 'success'">
+        <h1 class="text-xl font-semibold text-green-600 dark:text-green-400">Почта подтверждена</h1>
+        <RouterLink
+          :to="auth.isAuthenticated ? '/cabinet' : '/login'"
+          class="btn-primary"
+        >
+          {{ auth.isAuthenticated ? "В личный кабинет" : "Войти" }}
+        </RouterLink>
+      </template>
 
-    <template v-else>
-      <h1 class="text-xl font-semibold text-red-600 dark:text-red-400">Не удалось подтвердить почту</h1>
-      <p class="text-sm text-slate-500">{{ errorMessage }}</p>
-      <RouterLink to="/" class="text-sm text-slate-500 underline">На главную</RouterLink>
-    </template>
+      <template v-else>
+        <h1 class="text-xl font-semibold text-red-600 dark:text-red-400">Не удалось подтвердить почту</h1>
+        <p class="text-sm text-slate-500">{{ errorMessage }}</p>
+        <RouterLink to="/" class="text-sm text-slate-500 underline">На главную</RouterLink>
+      </template>
+    </div>
   </div>
 </template>

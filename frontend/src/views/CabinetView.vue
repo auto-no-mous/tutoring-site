@@ -109,8 +109,12 @@ onMounted(loadGroupHistory);
         v-for="tab in tabs"
         :key="tab.key"
         type="button"
-        class="rounded-t-md px-3 py-2 text-sm"
-        :class="activeTab === tab.key ? 'border-b-2 border-slate-900 font-medium dark:border-white' : 'text-slate-500'"
+        class="rounded-t-lg px-3 py-2 text-sm transition-colors hover:text-brand-700 dark:hover:text-brand-300"
+        :class="
+          activeTab === tab.key
+            ? 'border-b-2 border-brand-500 font-semibold text-brand-700 dark:border-brand-400 dark:text-brand-300'
+            : 'text-slate-500'
+        "
         @click="activeTab = tab.key"
       >
         {{ tab.label }}
@@ -123,25 +127,27 @@ onMounted(loadGroupHistory);
       </button>
     </nav>
 
-    <div class="mt-6">
-      <template v-if="auth.user?.role === 'tutor'">
-        <ProfileTab v-if="activeTab === 'profile'" />
-        <ScheduleTab v-else-if="activeTab === 'schedule'" />
-        <BookingsTabTutor v-else-if="activeTab === 'bookings'" />
-        <GroupsTabTutor v-else-if="activeTab === 'groups'" />
-        <HomeworkTabTutor v-else-if="activeTab === 'homework'" />
-        <ChatPanel v-else-if="activeTab === 'chat'" :initial-thread-id="chatThreadId" />
-        <StatsTabTutor v-else-if="activeTab === 'stats'" />
-        <SettingsTab v-else-if="activeTab === 'settings'" />
-      </template>
-      <template v-else>
-        <BookingsTabStudent v-if="activeTab === 'bookings'" />
-        <GroupsTabStudent v-else-if="activeTab === 'groups'" />
-        <HomeworkTabStudent v-else-if="activeTab === 'homework'" />
-        <ChatPanel v-else-if="activeTab === 'chat'" :initial-thread-id="chatThreadId" />
-        <StatsTabStudent v-else-if="activeTab === 'stats'" />
-        <SettingsTab v-else-if="activeTab === 'settings'" />
-      </template>
-    </div>
+    <Transition name="fade" mode="out-in">
+      <div :key="activeTab" class="mt-6">
+        <template v-if="auth.user?.role === 'tutor'">
+          <ProfileTab v-if="activeTab === 'profile'" />
+          <ScheduleTab v-else-if="activeTab === 'schedule'" />
+          <BookingsTabTutor v-else-if="activeTab === 'bookings'" />
+          <GroupsTabTutor v-else-if="activeTab === 'groups'" />
+          <HomeworkTabTutor v-else-if="activeTab === 'homework'" />
+          <ChatPanel v-else-if="activeTab === 'chat'" :initial-thread-id="chatThreadId" />
+          <StatsTabTutor v-else-if="activeTab === 'stats'" />
+          <SettingsTab v-else-if="activeTab === 'settings'" />
+        </template>
+        <template v-else>
+          <BookingsTabStudent v-if="activeTab === 'bookings'" />
+          <GroupsTabStudent v-else-if="activeTab === 'groups'" />
+          <HomeworkTabStudent v-else-if="activeTab === 'homework'" />
+          <ChatPanel v-else-if="activeTab === 'chat'" :initial-thread-id="chatThreadId" />
+          <StatsTabStudent v-else-if="activeTab === 'stats'" />
+          <SettingsTab v-else-if="activeTab === 'settings'" />
+        </template>
+      </div>
+    </Transition>
   </div>
 </template>

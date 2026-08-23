@@ -2,6 +2,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.models.enums import NotificationChannelPref
 from app.schemas.common import UTCDateTime
 
 
@@ -20,7 +21,7 @@ class UserOut(BaseModel):
     is_active: bool
     timezone: str
     telegram_chat_id: str | None
-    email_notifications_enabled: bool
+    notification_channel: str
     reminder_lead_minutes: int
     created_at: UTCDateTime
 
@@ -37,7 +38,8 @@ class UserSettingsUpdate(BaseModel):
     # cabinet always shows MSK regardless.
     timezone: str | None = None
     telegram_chat_id: str | None = None
-    email_notifications_enabled: bool | None = None
+    # off / email / telegram / both - см. NotificationChannelPref.
+    notification_channel: NotificationChannelPref | None = None
     # How long before a lesson to send the "Скоро занятие" reminder (section 2.7) -
     # capped at a week (see notification_service.MAX_REMINDER_LEAD_MINUTES, which
     # send_upcoming_reminders' scan window is sized against).

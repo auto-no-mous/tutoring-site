@@ -1,6 +1,8 @@
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 
+import "@fontsource-variable/nunito/wght.css";
+
 import App from "./App.vue";
 import router from "./router";
 import "./style.css";

@@ -2,6 +2,108 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Фирменная палитра (снята с логотипа, см. public/logo.svg):
+   #0EBCBD - основной бирюзовый   -> brand-500
+   #72C4EE - основной голубой     -> aqua-400
+   #E4F7F8 - фон бледно-голубой   -> brand-50 / --color-mist
+   #FBFDFE - фон бледно-серый     -> slate-50 / --color-paper
+   #50504F - основной темно-серый -> slate-600 / --color-ash
+   #090909 - основной черный      -> slate-950 / --color-ink
+   Нейтральная шкала slate переопределена целиком: почти весь UI написан на
+   slate-*, поэтому один этот блок приводит к фирменным серым весь сайт. */
+@theme {
+  --font-sans: "Nunito Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-brand-50: #e4f7f8;
+  --color-brand-100: #cbeff1;
+  --color-brand-200: #a3e4e6;
+  --color-brand-300: #6ed6d8;
+  --color-brand-400: #33c7c9;
+  --color-brand-500: #0ebcbd;
+  --color-brand-600: #0ba1a2;
+  --color-brand-700: #0a8183;
+  --color-brand-800: #0b6668;
+  --color-brand-900: #0c5355;
+
+  --color-aqua-50: #eff8fd;
+  --color-aqua-100: #dcf0fb;
+  --color-aqua-200: #bee3f8;
+  --color-aqua-300: #97d2f2;
+  --color-aqua-400: #72c4ee;
+  --color-aqua-500: #4aabdf;
+  --color-aqua-600: #2e8dc2;
+  --color-aqua-700: #26719b;
+  --color-aqua-800: #235d7d;
+  --color-aqua-900: #224e68;
+
+  --color-slate-50: #fbfdfe;
+  --color-slate-100: #f1f7f9;
+  --color-slate-200: #e2eaec;
+  --color-slate-300: #cbd4d6;
+  --color-slate-400: #9aa2a3;
+  --color-slate-500: #6d7273;
+  --color-slate-600: #50504f;
+  --color-slate-700: #3a3d3e;
+  --color-slate-800: #24282a;
+  --color-slate-900: #0e1112;
+  --color-slate-950: #090909;
+
+  --color-ink: #090909;
+  --color-ash: #50504f;
+  --color-mist: #e4f7f8;
+  --color-paper: #fbfdfe;
+
+  --animate-fade-in: fade-in 0.3s ease-out both;
+  --animate-fade-in-up: fade-in-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-pop-in: pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-pop-out: pop-out 0.14s ease-in both;
+  --animate-fade-out: fade-out 0.15s ease-in both;
+  --animate-float: float 6s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
 html,
 body,
 #app {
@@ -9,7 +111,206 @@ body,
 }
 
 body {
-  @apply bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100;
+  @apply bg-paper text-ink dark:bg-slate-950 dark:text-slate-100;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Общий фон страницы: очень мягкий бирюзовый градиент от фирменного #E4F7F8,
+   чтобы белые карточки на нём читались как отдельный слой. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 80% -10%, var(--color-brand-50), transparent 70%),
+    radial-gradient(50rem 35rem at 0% 0%, var(--color-aqua-50), transparent 65%);
+}
+.dark body::before {
+  background:
+    radial-gradient(60rem 40rem at 80% -10%, rgb(12 83 85 / 0.35), transparent 70%),
+    radial-gradient(50rem 35rem at 0% 0%, rgb(34 78 104 / 0.28), transparent 65%);
+}
+
+@layer base {
+  /* Плавные ховеры для всех интерактивных элементов - иначе пришлось бы дописывать
+     transition-colors в каждый из ~300 классов кнопок/ссылок. */
+  a,
+  button,
+  select,
+  input,
+  textarea,
+  summary {
+    transition:
+      color 0.15s ease,
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  /* Фирменные чекбоксы/радио и фокус на полях ввода. */
+  input,
+  textarea,
+  select {
+    accent-color: var(--color-brand-500);
+  }
+
+  input:not([type="checkbox"], [type="radio"]):focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [contenteditable]:focus-visible {
+    outline: none;
+    border-color: var(--color-brand-400);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand-400) 28%, transparent);
+  }
+}
+
+/* Кнопки записи/подтверждения - единый фирменный вид (используются в публичной
+   части: каталог, анкета репетитора, мастер записи, страницы входа). */
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2 font-semibold text-white shadow-sm
+    transition duration-200 hover:-translate-y-0.5 hover:bg-brand-600 hover:shadow-md
+    focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600
+    active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm;
+}
+
+.btn-outline {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-brand-200 bg-white/70 px-4 py-2 font-medium text-brand-800
+    transition duration-200 hover:-translate-y-0.5 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-900
+    focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500
+    active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0
+    dark:border-brand-800 dark:bg-transparent dark:text-brand-200 dark:hover:border-brand-600 dark:hover:bg-brand-900/30 dark:hover:text-brand-100;
+}
+
+/* Ссылки в шапке. */
+.nav-link {
+  @apply rounded-md px-2.5 py-1.5 font-medium text-slate-600 transition-colors
+    hover:bg-brand-50 hover:text-brand-700
+    dark:text-slate-300 dark:hover:bg-brand-900/30 dark:hover:text-brand-200;
+}
+
+/* Кнопка "назад" в пошаговых сценариях (мастер записи, перенос занятия). */
+.back-link {
+  @apply inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition-colors
+    hover:text-brand-600 dark:text-slate-400 dark:hover:text-brand-300;
+}
+
+/* Селекты фильтров каталога. */
+.filter-select {
+  @apply rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-base transition-colors
+    hover:border-brand-300 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-brand-700;
+}
+
+/* Карточка-поверхность публичных страниц. */
+.surface-card {
+  @apply rounded-2xl border border-slate-200 bg-white/80 shadow-sm backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/70;
+}
+
+/* --- Переходы Vue, общие для всего приложения ------------------------------
+   Подключаются как <Transition name="fade|pop|collapse|step|list">. */
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Выпадающие меню и всплывающие панели. */
+.pop-enter-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pop-leave-active {
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease-in;
+}
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: scale(0.96) translateY(-4px);
+}
+
+/* Раскрытие блока по высоте (фильтры, свёрнутые секции). Требует обёртки
+   .collapse-inner внутри - без неё grid-строке нечего измерять. */
+.collapse-enter-active,
+.collapse-leave-active {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.24s ease;
+}
+.collapse-enter-from,
+.collapse-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.collapse-enter-active > .collapse-inner,
+.collapse-leave-active > .collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Шаги мастера записи (используется с mode="out-in"). */
+.step-enter-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.step-leave-active {
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease-in;
+}
+.step-enter-from {
+  opacity: 0;
+  transform: translateX(14px);
+}
+.step-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+/* Списки (каталог, слоты) - плавное появление и перестроение. */
+.list-enter-active {
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Каскадное появление карточек: задержку задаёт сам список через --stagger.
+     Объявлено после сокращённого transition, иначе оно сбросит delay в 0. */
+  transition-delay: var(--stagger, 0ms);
+}
+.list-leave-active {
+  position: absolute;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease-in;
+}
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.list-move {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Уважаем системную настройку "уменьшить движение". */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Rich text image alignment (see utils/richText.ts's IMG_ALIGN_CLASSES) - shared by
@@ -39,4 +340,38 @@ body {
   display: block;
   width: 100%;
   margin: 0.5rem 0;
+}
+
+/* Оформление тела статьи блога (views/BlogPostView.vue). Tailwind сбрасывает отступы
+   и размеры заголовков/списков, а редактор умеет ровно этот набор тегов - см.
+   ALLOWED_TAGS в utils/richText.ts. Готовый @tailwindcss/typography сюда не берём:
+   он стилизует куда более широкий набор тегов, чем разрешает санитайзер. */
+.prose-article > :first-child {
+  margin-top: 0;
+}
+.prose-article p {
+  margin: 0.85em 0;
+}
+.prose-article h2 {
+  @apply mt-8 mb-3 text-2xl font-semibold tracking-tight text-ink dark:text-slate-100;
+}
+.prose-article h3 {
+  @apply mt-6 mb-2 text-xl font-semibold text-ink dark:text-slate-100;
+}
+.prose-article ul,
+.prose-article ol {
+  margin: 0.85em 0;
+  padding-left: 1.5rem;
+}
+.prose-article ul {
+  list-style: disc;
+}
+.prose-article ol {
+  list-style: decimal;
+}
+.prose-article li {
+  margin: 0.35em 0;
+}
+.prose-article a {
+  @apply font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200;
 }

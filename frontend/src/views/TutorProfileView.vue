@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { CalendarPlus, MessageCircle, Star, Users } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -55,86 +56,94 @@ onMounted(load);
 
 <template>
   <div class="mx-auto max-w-3xl px-4 py-10">
-    <p v-if="isLoading" class="text-slate-400">Загрузка…</p>
+    <p v-if="isLoading" class="text-base text-slate-400">Загрузка…</p>
     <template v-else-if="profile">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-start">
-        <img
-          v-if="profile.photo_url"
-          :src="profile.photo_url"
-          alt=""
-          class="h-32 w-32 shrink-0 self-center rounded-lg object-cover sm:h-36 sm:w-36 sm:self-start"
-        />
-        <div
-          v-else
-          class="h-32 w-32 shrink-0 self-center rounded-lg bg-slate-200 dark:bg-slate-800 sm:h-36 sm:w-36 sm:self-start"
-        ></div>
-        <div class="flex flex-1 flex-col items-center text-center sm:items-start sm:text-left">
-          <h1 class="text-2xl font-semibold">{{ profile.display_name }}</h1>
-          <p v-if="profile.avg_rating != null" class="mt-1 text-sm text-slate-500">
-            ★ {{ profile.avg_rating.toFixed(1) }} ({{ profile.reviews_count }} отзывов)
-          </p>
-          <SocialLinks
-            v-if="hasSocialLinks"
-            class="mt-3 justify-center sm:justify-start"
-            :telegram-url="profile.telegram_url"
-            :vk-url="profile.vk_url"
-            :youtube-url="profile.youtube_url"
-            :extra-links="profile.extra_links"
+      <div class="surface-card animate-fade-in-up p-5 sm:p-6">
+        <div class="flex flex-col gap-5 sm:flex-row sm:items-start">
+          <img
+            v-if="profile.photo_url"
+            :src="profile.photo_url"
+            alt=""
+            class="h-32 w-32 shrink-0 self-center rounded-2xl object-cover ring-4 ring-brand-100 dark:ring-brand-900/50 sm:h-36 sm:w-36 sm:self-start"
           />
           <div
-            v-if="profile.show_individual_booking || profile.show_group_booking || auth.user?.role === 'student'"
-            class="mt-4 flex flex-wrap justify-center gap-3 sm:justify-start"
-          >
-            <RouterLink
-              v-if="profile.show_individual_booking"
-              :to="`/tutors/${profile.id}/book`"
-              class="rounded-md bg-slate-900 px-4 py-2 text-sm text-white dark:bg-white dark:text-slate-900"
+            v-else
+            class="h-32 w-32 shrink-0 self-center rounded-2xl bg-brand-50 ring-4 ring-brand-100 dark:bg-slate-800 dark:ring-brand-900/50 sm:h-36 sm:w-36 sm:self-start"
+          ></div>
+          <div class="flex flex-1 flex-col items-center text-center sm:items-start sm:text-left">
+            <h1 class="text-3xl font-bold tracking-tight">{{ profile.display_name }}</h1>
+            <p
+              v-if="profile.avg_rating != null"
+              class="mt-2 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-base font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200"
             >
-              Запись на индивидуальное занятие
-            </RouterLink>
-            <RouterLink
-              v-if="profile.show_group_booking"
-              :to="`/tutors/${profile.id}/groups`"
-              class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700"
+              <Star class="h-4 w-4 fill-aqua-400 text-aqua-400" /> {{ profile.avg_rating.toFixed(1) }}
+              <span class="font-normal text-slate-500 dark:text-slate-400">({{ profile.reviews_count }} отзывов)</span>
+            </p>
+            <SocialLinks
+              v-if="hasSocialLinks"
+              class="mt-3 justify-center sm:justify-start"
+              :telegram-url="profile.telegram_url"
+              :vk-url="profile.vk_url"
+              :youtube-url="profile.youtube_url"
+              :extra-links="profile.extra_links"
+            />
+            <div
+              v-if="profile.show_individual_booking || profile.show_group_booking || auth.user?.role === 'student'"
+              class="mt-5 flex flex-wrap justify-center gap-3 sm:justify-start"
             >
-              Запись на групповое занятие
-            </RouterLink>
-            <button
-              v-if="auth.user?.role === 'student'"
-              type="button"
-              class="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700"
-              @click="openChat"
-            >
-              Написать сообщение
-            </button>
+              <RouterLink v-if="profile.show_individual_booking" :to="`/tutors/${profile.id}/book`" class="btn-primary text-base">
+                <CalendarPlus class="h-4 w-4" />
+                Запись на индивидуальное занятие
+              </RouterLink>
+              <RouterLink v-if="profile.show_group_booking" :to="`/tutors/${profile.id}/groups`" class="btn-outline text-base">
+                <Users class="h-4 w-4" />
+                Запись на групповое занятие
+              </RouterLink>
+              <button v-if="auth.user?.role === 'student'" type="button" class="btn-outline text-base" @click="openChat">
+                <MessageCircle class="h-4 w-4" />
+                Написать сообщение
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <section v-if="profile.subjects.length > 0" class="mt-6">
-        <h2 class="text-lg font-medium">Предметы и направления</h2>
-        <div class="mt-2 flex flex-col gap-1.5">
-          <div v-for="subject in profile.subjects" :key="subject.subject_id" class="text-sm">
-            <span class="font-medium">{{ subject.subject_name }}</span>
-            <span v-if="subject.directions.length > 0" class="text-slate-500">
+      <section v-if="profile.subjects.length > 0" class="surface-card animate-fade-in-up mt-5 p-5 [animation-delay:60ms]">
+        <h2 class="text-xl font-semibold">Предметы и направления</h2>
+        <div class="mt-3 flex flex-col gap-2">
+          <div v-for="subject in profile.subjects" :key="subject.subject_id" class="text-base">
+            <span class="font-semibold">{{ subject.subject_name }}</span>
+            <span v-if="subject.directions.length > 0" class="text-slate-500 dark:text-slate-400">
               — {{ subject.directions.map((d) => d.name).join(", ") }}
             </span>
           </div>
         </div>
       </section>
 
-      <section class="mt-6">
-        <h2 class="text-lg font-medium">О себе</h2>
-        <div v-if="aboutHtml" class="mt-1 flow-root text-sm text-slate-600 dark:text-slate-300" v-html="aboutHtml"></div>
-        <p v-else class="mt-1 text-sm text-slate-600 dark:text-slate-300">—</p>
+      <section class="surface-card animate-fade-in-up mt-5 p-5 [animation-delay:120ms]">
+        <h2 class="text-xl font-semibold">О себе</h2>
+        <div
+          v-if="aboutHtml"
+          class="mt-2 flow-root text-base leading-relaxed text-slate-600 dark:text-slate-300"
+          v-html="aboutHtml"
+        ></div>
+        <p v-else class="mt-2 text-base text-slate-600 dark:text-slate-300">—</p>
       </section>
 
       <section v-if="reviews.length > 0" class="mt-8">
-        <h2 class="text-lg font-medium">Отзывы</h2>
-        <div class="mt-2 flex flex-col gap-3">
-          <div v-for="review in reviews" :key="review.id" class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
-            <div class="font-medium">{{ review.student_display_name }} · ★ {{ review.rating }}</div>
-            <p v-if="review.text" class="mt-1 text-slate-600 dark:text-slate-300">{{ review.text }}</p>
+        <h2 class="text-xl font-semibold">Отзывы</h2>
+        <div class="mt-3 flex flex-col gap-3">
+          <div
+            v-for="review in reviews"
+            :key="review.id"
+            class="surface-card animate-fade-in-up p-4 text-base transition-shadow hover:shadow-md"
+          >
+            <div class="flex items-center gap-1.5 font-semibold">
+              {{ review.student_display_name }} ·
+              <Star class="h-4 w-4 fill-aqua-400 text-aqua-400" />
+              {{ review.rating }}
+            </div>
+            <p v-if="review.text" class="mt-1 leading-relaxed text-slate-600 dark:text-slate-300">{{ review.text }}</p>
           </div>
         </div>
       </section>

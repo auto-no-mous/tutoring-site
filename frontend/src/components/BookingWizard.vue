@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { ArrowLeft, CircleCheck, Clock } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 
 import { createBooking } from "@/api/bookings";
+import BookingCalendar from "@/components/BookingCalendar.vue";
 import { getAvailableDates, getDaySlots } from "@/api/tutors";
 import { useAuthStore } from "@/stores/auth";
 import type { LessonType, Slot } from "@/types/tutor";
-import { addDaysIso, formatDate, formatDateTimeWithMsk, formatTime, todayIso } from "@/utils/time";
+import { addDaysIso, formatDateTimeWithMsk, formatTime, todayIso } from "@/utils/time";
 
 const props = defineProps<{
   tutorId: string;
@@ -87,110 +89,128 @@ function restart(): void {
   error.value = null;
 }
 
+const STEPS = [
+  { n: 1, label: "Занятие" },
+  { n: 2, label: "Дата" },
+  { n: 3, label: "Время" },
+  { n: 4, label: "Подтверждение" },
+] as const;
+
 watch(() => props.tutorId, restart);
 </script>
 
 <template>
-  <div class="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
-    <h2 class="text-lg font-medium">Записаться на занятие</h2>
+  <div class="surface-card p-5 sm:p-6">
+    <h2 class="text-xl font-semibold">Записаться на занятие</h2>
 
-    <div v-if="success" class="mt-4 text-sm text-green-600 dark:text-green-400">
-      Вы записаны на занятие! Подробности — в личном кабинете.
-      <button type="button" class="mt-2 block underline" @click="restart">Записаться ещё раз</button>
+    <!-- Полоса шагов: показывает, где ученик находится в записи. -->
+    <ol v-if="!success" class="mt-4 flex items-center gap-2">
+      <li v-for="s in STEPS" :key="s.n" class="flex flex-1 flex-col gap-1.5">
+        <span
+          class="h-1.5 rounded-full transition-colors duration-300"
+          :class="step >= s.n ? 'bg-brand-500' : 'bg-slate-200 dark:bg-slate-800'"
+        ></span>
+        <span
+          class="text-xs font-medium transition-colors duration-300"
+          :class="step >= s.n ? 'text-brand-700 dark:text-brand-300' : 'text-slate-400'"
+        >
+          {{ s.label }}
+        </span>
+      </li>
+    </ol>
+
+    <div v-if="success" class="animate-pop-in mt-5 rounded-xl bg-brand-50 p-4 text-base text-brand-900 dark:bg-brand-900/40 dark:text-brand-100">
+      <div class="flex items-center gap-2 text-lg font-semibold">
+        <CircleCheck class="h-5 w-5" />
+        Вы записаны на занятие!
+      </div>
+      <p class="mt-1">Подробности — в личном кабинете.</p>
+      <button type="button" class="btn-outline mt-3 text-base" @click="restart">Записаться ещё раз</button>
     </div>
 
     <template v-else>
-      <!-- Step 1: lesson type -->
-      <div v-if="step === 1" class="mt-4">
-        <p v-if="individualTypes.length === 0" class="text-sm text-slate-400">
-          У репетитора пока нет индивидуальных типов занятий.
-        </p>
-        <div v-else class="flex flex-col gap-2">
-          <button
-            v-for="type in individualTypes"
-            :key="type.id"
-            type="button"
-            class="rounded-md border border-slate-300 px-3 py-2 text-left text-sm hover:border-slate-500 dark:border-slate-700"
-            @click="pickType(type)"
-          >
-            <div class="font-medium">{{ type.name }}</div>
-            <div class="text-slate-500">{{ type.duration_minutes }} мин · {{ type.price }} ₽</div>
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 2: date -->
-      <div v-else-if="step === 2" class="mt-4">
-        <button type="button" class="mb-3 text-sm text-slate-500 underline" @click="step = 1">← Тип занятия</button>
-        <p v-if="isLoading" class="text-sm text-slate-400">Загрузка дат…</p>
-        <p v-else-if="availableDates.length === 0" class="text-sm text-slate-400">
-          Нет свободных дат в ближайший месяц.
-        </p>
-        <div v-else class="flex flex-wrap gap-2">
-          <button
-            v-for="date in availableDates"
-            :key="date"
-            type="button"
-            class="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:border-slate-500 dark:border-slate-700"
-            @click="pickDate(date)"
-          >
-            {{ formatDate(date + "T00:00:00Z") }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 3: slot -->
-      <div v-else-if="step === 3" class="mt-4">
-        <button type="button" class="mb-3 text-sm text-slate-500 underline" @click="step = 2">← Дата</button>
-        <p v-if="isLoading" class="text-sm text-slate-400">Загрузка времени…</p>
-        <div v-else class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-          <button
-            v-for="slot in slots"
-            :key="slot.start_at"
-            type="button"
-            :disabled="!slot.available"
-            class="rounded-md border px-2 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-30"
-            :class="
-              slot.available
-                ? 'border-slate-300 hover:border-slate-500 dark:border-slate-700'
-                : 'border-slate-200 dark:border-slate-800'
-            "
-            @click="pickSlot(slot)"
-          >
-            {{ formatTime(slot.start_at) }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 4: confirm -->
-      <div v-else-if="step === 4 && selectedSlot" class="mt-4 flex flex-col gap-3">
-        <button type="button" class="text-sm text-slate-500 underline" @click="step = 3">← Время</button>
-        <dl class="text-sm">
-          <div><dt class="inline font-medium">Репетитор: </dt><dd class="inline">{{ tutorName }}</dd></div>
-          <div>
-            <dt class="inline font-medium">Занятие: </dt>
-            <dd class="inline">{{ selectedType?.name }} ({{ selectedType?.duration_minutes }} мин, {{ selectedType?.price }} ₽)</dd>
+      <Transition name="step" mode="out-in">
+        <!-- Step 1: lesson type -->
+        <div v-if="step === 1" key="1" class="mt-5">
+          <p v-if="individualTypes.length === 0" class="text-base text-slate-400">
+            У репетитора пока нет индивидуальных типов занятий.
+          </p>
+          <div v-else class="flex flex-col gap-2.5">
+            <button
+              v-for="type in individualTypes"
+              :key="type.id"
+              type="button"
+              class="group rounded-xl border border-slate-200 px-4 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-400 hover:bg-brand-50/60 hover:shadow-md dark:border-slate-700 dark:hover:border-brand-500 dark:hover:bg-brand-900/20"
+              @click="pickType(type)"
+            >
+              <div class="text-base font-semibold">{{ type.name }}</div>
+              <div class="flex items-center gap-1.5 text-base text-slate-500 dark:text-slate-400">
+                <Clock class="h-4 w-4" />
+                {{ type.duration_minutes }} мин ·
+                <span class="font-medium text-brand-700 dark:text-brand-300">{{ type.price }} ₽</span>
+              </div>
+            </button>
           </div>
-          <div><dt class="inline font-medium">Время: </dt><dd class="inline">{{ formatDateTimeWithMsk(selectedSlot.start_at) }}</dd></div>
-        </dl>
-        <label class="flex items-center gap-2 text-sm">
-          <input v-model="repeatWeekly" type="checkbox" />
-          Повторять каждую неделю
-        </label>
-        <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-        <button
-          v-if="auth.isAuthenticated"
-          type="button"
-          :disabled="isLoading"
-          class="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
-          @click="confirm"
-        >
-          Записаться
-        </button>
-        <RouterLink v-else to="/login" class="rounded-md bg-slate-900 px-4 py-2 text-center text-sm text-white dark:bg-white dark:text-slate-900">
-          Войдите, чтобы записаться
-        </RouterLink>
-      </div>
+        </div>
+
+        <!-- Step 2: date -->
+        <div v-else-if="step === 2" key="2" class="mt-5">
+          <button type="button" class="back-link" @click="step = 1"><ArrowLeft class="h-4 w-4" />Тип занятия</button>
+          <p v-if="isLoading" class="mt-3 text-base text-slate-400">Загрузка дат…</p>
+          <p v-else-if="availableDates.length === 0" class="mt-3 text-base text-slate-400">
+            Нет свободных дат в ближайший месяц.
+          </p>
+          <BookingCalendar v-else class="mt-3" :available-dates="availableDates" @select="pickDate" />
+        </div>
+
+        <!-- Step 3: slot -->
+        <div v-else-if="step === 3" key="3" class="mt-5">
+          <button type="button" class="back-link" @click="step = 2"><ArrowLeft class="h-4 w-4" />Дата</button>
+          <p v-if="isLoading" class="mt-3 text-base text-slate-400">Загрузка времени…</p>
+          <div v-else class="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+            <button
+              v-for="slot in slots"
+              :key="slot.start_at"
+              type="button"
+              :disabled="!slot.available"
+              class="rounded-lg border px-2 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-30"
+              :class="
+                slot.available
+                  ? 'border-slate-200 hover:-translate-y-0.5 hover:border-brand-400 hover:bg-brand-50 hover:shadow-sm dark:border-slate-700 dark:hover:border-brand-500 dark:hover:bg-brand-900/20'
+                  : 'border-slate-200 dark:border-slate-800'
+              "
+              @click="pickSlot(slot)"
+            >
+              {{ formatTime(slot.start_at) }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 4: confirm -->
+        <div v-else-if="step === 4 && selectedSlot" key="4" class="mt-5 flex flex-col gap-4">
+          <button type="button" class="back-link self-start" @click="step = 3"><ArrowLeft class="h-4 w-4" />Время</button>
+          <dl class="flex flex-col gap-1 rounded-xl bg-slate-50 p-4 text-base dark:bg-slate-800/50">
+            <div><dt class="inline font-semibold">Репетитор: </dt><dd class="inline">{{ tutorName }}</dd></div>
+            <div>
+              <dt class="inline font-semibold">Занятие: </dt>
+              <dd class="inline">{{ selectedType?.name }} ({{ selectedType?.duration_minutes }} мин, {{ selectedType?.price }} ₽)</dd>
+            </div>
+            <div>
+              <dt class="inline font-semibold">Время: </dt>
+              <dd class="inline text-brand-700 dark:text-brand-300">{{ formatDateTimeWithMsk(selectedSlot.start_at) }}</dd>
+            </div>
+          </dl>
+          <label class="flex items-center gap-2 text-base">
+            <input v-model="repeatWeekly" type="checkbox" class="h-4 w-4 accent-brand-500" />
+            Повторять каждую неделю
+          </label>
+          <p v-if="error" class="text-base text-red-600 dark:text-red-400">{{ error }}</p>
+          <button v-if="auth.isAuthenticated" type="button" :disabled="isLoading" class="btn-primary self-start text-base" @click="confirm">
+            Записаться
+          </button>
+          <RouterLink v-else to="/login" class="btn-primary self-start text-base">Войдите, чтобы записаться</RouterLink>
+        </div>
+      </Transition>
     </template>
   </div>
 </template>

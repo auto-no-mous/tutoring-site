@@ -1,8 +1,10 @@
+from app.models.blog import BlogPost
 from app.models.booking import Booking, RecurringSeries
 from app.models.chat import ChatMessage, ChatThread, ChatThreadRead
 from app.models.group import Group, GroupApplication, GroupMembership, GroupOccurrence, GroupSchedule
 from app.models.homework import HomeworkAssignment, HomeworkSubmission
 from app.models.lesson_type import LessonType
+from app.models.email_log import EmailLog
 from app.models.notification import NotificationLog
 from app.models.review import Review
 from app.models.schedule import WeeklyAvailability
@@ -12,6 +14,7 @@ from app.models.tutor import TutorProfile
 from app.models.user import RefreshToken, User
 
 __all__ = [
+    "BlogPost",
     "Booking",
     "RecurringSeries",
     "ChatMessage",
@@ -25,6 +28,7 @@ __all__ = [
     "HomeworkAssignment",
     "HomeworkSubmission",
     "LessonType",
+    "EmailLog",
     "NotificationLog",
     "NotificationTemplate",
     "SystemNotification",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, StickyNote } from "lucide-vue-next";
 import { computed, ref } from "vue";
 
 import { cancelBooking, deleteBooking, updateBooking } from "@/api/bookings";
@@ -116,23 +117,21 @@ async function saveDuration(): Promise<void> {
         <div v-if="!booking.is_manual_block" class="text-xs text-slate-400">
           <template v-if="role === 'tutor'">{{ booking.lesson_type_name ?? "Занятие" }} · </template>{{ displayDurationMinutes }} мин<template v-if="formatLabel"> · {{ formatLabel }}</template>
         </div>
-        <div v-if="booking.notes" class="mt-1 text-xs text-slate-500">📝 {{ booking.notes }}</div>
+        <div v-if="booking.notes" class="mt-1 flex items-center gap-1 text-xs text-slate-500">
+          <StickyNote class="h-3.5 w-3.5" />{{ booking.notes }}
+        </div>
       </div>
       <div class="flex items-center gap-2">
-        <a v-if="booking.meeting_link" :href="booking.meeting_link" target="_blank" class="text-xs underline">
+        <a
+          v-if="booking.meeting_link"
+          :href="booking.meeting_link"
+          target="_blank"
+          class="rounded-md bg-brand-500 px-2 py-1 text-xs text-white"
+        >
           Перейти на занятие
         </a>
         <button
-          v-if="role === 'tutor' && booking.meeting_link"
-          type="button"
-          class="text-xs text-slate-400 underline"
-          :disabled="isBusy"
-          @click="showMeetingLinkModal = true"
-        >
-          Изменить
-        </button>
-        <button
-          v-else-if="role === 'tutor'"
+          v-if="role === 'tutor' && !booking.meeting_link"
           type="button"
           class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
           :disabled="isBusy"
@@ -152,70 +151,90 @@ async function saveDuration(): Promise<void> {
       </div>
     </div>
 
-    <button type="button" class="mt-2 text-xs text-slate-500 underline" @click="showActions = !showActions">
+    <button
+      type="button"
+      class="mt-2 inline-flex items-center gap-1 text-xs text-slate-500 underline transition-colors hover:text-brand-600 dark:hover:text-brand-300"
+      @click="showActions = !showActions"
+    >
       {{ showActions ? "Скрыть управление" : "Управление занятием" }}
+      <ChevronDown class="h-3.5 w-3.5 transition-transform duration-300" :class="{ 'rotate-180': showActions }" />
     </button>
 
-    <div v-if="showActions" class="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-2 dark:border-slate-800">
-      <template v-if="isManualBlock">
-        <button
-          type="button"
-          class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 disabled:opacity-50 dark:border-red-800"
-          :disabled="isBusy"
-          @click="removeBlock"
-        >
-          Удалить
-        </button>
-      </template>
-      <template v-else>
-        <button
-          type="button"
-          class="rounded-md border border-slate-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-slate-700"
-          :disabled="isBusy"
-          @click="openReschedule"
-        >
-          Перенести
-        </button>
-        <button
-          type="button"
-          class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 disabled:opacity-50 dark:border-red-800"
-          :disabled="isBusy"
-          @click="cancel"
-        >
-          Отменить
-        </button>
-        <template v-if="role === 'tutor'">
-          <button
-            v-if="!isEditingDuration"
-            type="button"
-            class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
-            @click="startEditDuration"
-          >
-            Изменить длительность
-          </button>
-          <div v-else class="flex items-center gap-2">
-            <input
-              v-model.number="durationMinutes"
-              type="number"
-              min="1"
-              class="w-20 rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
-            />
-            <span class="text-xs text-slate-500">мин</span>
+    <Transition name="collapse">
+      <div v-if="showActions">
+        <div class="collapse-inner">
+          <div class="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-2 dark:border-slate-800">
             <button
+              v-if="role === 'tutor' && booking.meeting_link"
               type="button"
-              class="rounded-md bg-slate-900 px-2 py-1 text-xs text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+              class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
               :disabled="isBusy"
-              @click="saveDuration"
+              @click="showMeetingLinkModal = true"
             >
-              Сохранить
+              Изменить ссылку на занятие
             </button>
-            <button type="button" class="text-xs text-slate-500 underline" @click="isEditingDuration = false">
-              Отмена
-            </button>
+            <template v-if="isManualBlock">
+              <button
+                type="button"
+                class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 disabled:opacity-50 dark:border-red-800"
+                :disabled="isBusy"
+                @click="removeBlock"
+              >
+                Удалить
+              </button>
+            </template>
+            <template v-else>
+              <button
+                type="button"
+                class="rounded-md border border-slate-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-slate-700"
+                :disabled="isBusy"
+                @click="openReschedule"
+              >
+                Перенести
+              </button>
+              <button
+                type="button"
+                class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 disabled:opacity-50 dark:border-red-800"
+                :disabled="isBusy"
+                @click="cancel"
+              >
+                Отменить
+              </button>
+              <template v-if="role === 'tutor'">
+                <button
+                  v-if="!isEditingDuration"
+                  type="button"
+                  class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
+                  @click="startEditDuration"
+                >
+                  Изменить длительность
+                </button>
+                <div v-else class="flex items-center gap-2">
+                  <input
+                    v-model.number="durationMinutes"
+                    type="number"
+                    min="1"
+                    class="w-20 rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
+                  />
+                  <span class="text-xs text-slate-500">мин</span>
+                  <button
+                    type="button"
+                    class="rounded-md bg-brand-500 px-2 py-1 text-xs text-white disabled:opacity-50"
+                    :disabled="isBusy"
+                    @click="saveDuration"
+                  >
+                    Сохранить
+                  </button>
+                  <button type="button" class="text-xs text-slate-500 underline" @click="isEditingDuration = false">
+                    Отмена
+                  </button>
+                </div>
+              </template>
+            </template>
           </div>
-        </template>
-      </template>
-    </div>
+        </div>
+      </div>
+    </Transition>
 
     <StudentHomeworkModal
       v-if="showHomeworkModal && booking.student_id"

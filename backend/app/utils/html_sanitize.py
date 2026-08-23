@@ -88,9 +88,15 @@ def sanitize_rich_text(value: str) -> str:
     return "".join(parser.out)
 
 
+# Теги, на границе которых в исходном тексте был перенос строки: без подстановки
+# пробела соседние блоки склеиваются ("Первый абзац.Второй абзац.").
+_BLOCK_TAGS = {"p", "div", "br", "li", "ul", "ol", "h2", "h3"}
+
+
 class _TextExtractor(HTMLParser):
     """Discards every tag, keeps only the text - used for the plain-text "about"
-    snippet shown on catalog cards (tutor_service.search_catalog)."""
+    snippet shown on catalog cards (tutor_service.search_catalog) and for a blog post's
+    auto-generated summary (blog_service)."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -98,6 +104,21 @@ class _TextExtractor(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self.parts.append(data)
+
+    def _break(self, tag: str) -> None:
+        # Только блочные: пробел вокруг инлайновых тегов разорвал бы слово, у
+        # которого выделена часть ("Сло<b>во</b>").
+        if tag in _BLOCK_TAGS:
+            self.parts.append(" ")
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._break(tag)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._break(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        self._break(tag)
 
 
 def strip_html_to_text(value: str) -> str:

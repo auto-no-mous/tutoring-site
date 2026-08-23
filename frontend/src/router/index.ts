@@ -73,6 +73,16 @@ const router = createRouter({
       component: () => import("@/views/TutorGroupBookingView.vue"),
     },
     {
+      path: "/blog",
+      name: "blog",
+      component: () => import("@/views/BlogListView.vue"),
+    },
+    {
+      path: "/blog/:slug",
+      name: "blog-post",
+      component: () => import("@/views/BlogPostView.vue"),
+    },
+    {
       path: "/legal/privacy",
       name: "privacy-policy",
       component: () => import("@/views/PrivacyPolicyView.vue"),

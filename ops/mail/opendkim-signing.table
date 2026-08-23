@@ -1,0 +1,2 @@
+# Любой отправитель нашего домена подписывается ключом из key.table.
+*@@MAIL_DOMAIN@ @DKIM_SELECTOR@._domainkey.@MAIL_DOMAIN@

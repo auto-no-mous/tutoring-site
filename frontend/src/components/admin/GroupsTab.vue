@@ -192,7 +192,7 @@ onMounted(load);
         v-for="group in groups"
         :key="group.id"
         class="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
-        :class="selectedGroupId === group.id ? 'border-slate-900 dark:border-white' : 'border-slate-200 dark:border-slate-800'"
+        :class="selectedGroupId === group.id ? 'border-brand-500 dark:border-brand-400' : 'border-slate-200 dark:border-slate-800'"
       >
         <button type="button" class="text-left" @click="selectGroup(group)">
           <div class="font-medium">
@@ -225,7 +225,7 @@ onMounted(load);
           </label>
           <button
             type="button"
-            class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-slate-900"
+            class="rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white"
             @click="saveName(selectedGroup)"
           >
             Сохранить название
@@ -303,7 +303,7 @@ onMounted(load);
           <button
             type="button"
             :disabled="!addStudentId"
-            class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+            class="rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white disabled:opacity-50"
             @click="addMember"
           >
             Добавить

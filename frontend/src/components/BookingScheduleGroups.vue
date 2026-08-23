@@ -65,16 +65,16 @@ function minutesUntilStart(item: T): number {
               class="rounded-md border px-3 py-2 transition-colors"
               :class="
                 isImminent(item)
-                  ? 'border-blue-500 bg-blue-100 ring-1 ring-blue-400 dark:border-blue-500 dark:bg-blue-950 dark:ring-blue-600'
+                  ? 'border-brand-500 bg-brand-100 ring-1 ring-brand-400 dark:border-brand-500 dark:bg-brand-900 dark:ring-brand-600'
                   : day.isToday
-                    ? 'border-blue-200 bg-blue-50/70 dark:border-blue-900 dark:bg-blue-950/30'
+                    ? 'border-brand-200 bg-brand-50/70 dark:border-brand-900 dark:bg-brand-900/30'
                     : week.isCurrentWeek
-                      ? 'border-blue-100 bg-blue-50/30 dark:border-blue-950/60 dark:bg-blue-950/10'
+                      ? 'border-brand-100 bg-brand-50/30 dark:border-brand-900/60 dark:bg-brand-900/10'
                       : 'border-slate-200 dark:border-slate-800'
               "
             >
-              <div v-if="isImminent(item)" class="mb-1 flex items-center gap-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
-                <span class="inline-block h-1.5 w-1.5 rounded-full bg-blue-600 dark:bg-blue-400"></span>
+              <div v-if="isImminent(item)" class="mb-1 flex items-center gap-1 text-xs font-semibold text-brand-700 dark:text-brand-300">
+                <span class="inline-block h-1.5 w-1.5 rounded-full bg-brand-600 dark:bg-brand-400"></span>
                 {{ isHappeningNow(item) ? "Идёт сейчас" : `Начинается через ${minutesUntilStart(item)} мин` }}
               </div>
               <slot :item="item" />

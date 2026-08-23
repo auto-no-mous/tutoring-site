@@ -94,7 +94,7 @@ onMounted(load);
         Новый предмет
         <input v-model="newSubjectName" placeholder="например, Математика" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
       </label>
-      <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-slate-900">Добавить</button>
+      <button type="submit" class="rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white">Добавить</button>
     </form>
     <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
@@ -104,7 +104,7 @@ onMounted(load);
           <template v-if="editingSubjectId === subject.id">
             <div class="flex flex-1 items-center gap-2">
               <input v-model="editingSubjectName" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700" />
-              <button type="button" class="rounded-md bg-slate-900 px-2 py-1 text-xs text-white dark:bg-white dark:text-slate-900" @click="saveSubject(subject)">
+              <button type="button" class="rounded-md bg-brand-500 px-2 py-1 text-xs text-white" @click="saveSubject(subject)">
                 Сохранить
               </button>
               <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="editingSubjectId = null">
@@ -130,7 +130,7 @@ onMounted(load);
             <template v-if="editingDirectionId === direction.id">
               <div class="flex flex-1 items-center gap-2">
                 <input v-model="editingDirectionName" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700" />
-                <button type="button" class="rounded-md bg-slate-900 px-2 py-0.5 text-xs text-white dark:bg-white dark:text-slate-900" @click="saveDirection(direction.id)">
+                <button type="button" class="rounded-md bg-brand-500 px-2 py-0.5 text-xs text-white" @click="saveDirection(direction.id)">
                   Сохранить
                 </button>
                 <button type="button" class="rounded-md border border-slate-300 px-2 py-0.5 text-xs dark:border-slate-700" @click="editingDirectionId = null">

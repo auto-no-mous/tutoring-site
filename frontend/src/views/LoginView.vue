@@ -29,35 +29,49 @@ async function onSubmit(): Promise<void> {
 </script>
 
 <template>
-  <div class="mx-auto flex max-w-sm flex-col gap-4 px-4 py-16">
-    <h1 class="text-2xl font-semibold">Вход</h1>
-    <form class="flex flex-col gap-3" @submit.prevent="onSubmit">
-      <input
-        v-model="email"
-        type="email"
-        required
-        placeholder="Почта"
-        class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+  <div class="mx-auto w-full max-w-sm px-4 py-12">
+    <RouterLink to="/" class="block">
+      <img
+        src="/logo-mark.svg"
+        alt="my-tutor.ru"
+        class="mx-auto h-16 w-auto transition-transform duration-300 hover:scale-105 dark:hidden"
       />
-      <input
-        v-model="password"
-        type="password"
-        required
-        placeholder="Пароль"
-        class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+      <img
+        src="/logo-mark-dark.svg"
+        alt=""
+        class="mx-auto hidden h-16 w-auto transition-transform duration-300 hover:scale-105 dark:block"
       />
-      <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-      <button
-        type="submit"
-        :disabled="isSubmitting"
-        class="rounded-md bg-slate-900 px-3 py-2 text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
-      >
-        Войти
-      </button>
-    </form>
-    <RouterLink to="/forgot-password" class="text-sm text-slate-500 hover:underline">Забыли пароль?</RouterLink>
-    <RouterLink to="/register" class="text-sm text-slate-500 hover:underline">
-      Нет аккаунта? Зарегистрироваться
     </RouterLink>
+    <div class="surface-card animate-pop-in mt-6 flex flex-col gap-4 p-6">
+      <h1 class="text-2xl font-semibold">Вход</h1>
+      <form class="flex flex-col gap-3" @submit.prevent="onSubmit">
+        <input
+          v-model="email"
+          type="email"
+          required
+          placeholder="Почта"
+          class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+        />
+        <input
+          v-model="password"
+          type="password"
+          required
+          placeholder="Пароль"
+          class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+        />
+        <p v-if="error" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+        <button
+          type="submit"
+          :disabled="isSubmitting"
+          class="btn-primary w-full"
+        >
+          Войти
+        </button>
+      </form>
+      <RouterLink to="/forgot-password" class="text-sm text-slate-500 hover:underline">Забыли пароль?</RouterLink>
+      <RouterLink to="/register" class="text-sm text-slate-500 hover:underline">
+        Нет аккаунта? Зарегистрироваться
+      </RouterLink>
+    </div>
   </div>
 </template>

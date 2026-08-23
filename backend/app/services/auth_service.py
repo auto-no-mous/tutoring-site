@@ -104,7 +104,7 @@ async def send_email_verification(user: User) -> None:
     if not user.email:
         return
     token = create_email_verification_token(str(user.id))
-    await send_verification_email(user.email, token)
+    await send_verification_email(user.email, token, user.id)
 
 
 async def update_user_settings(db: AsyncSession, user: User, payload: UserSettingsUpdate) -> User:
@@ -155,7 +155,7 @@ async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
     await db.refresh(user)
 
     token = create_email_verification_token(str(user.id))
-    await send_verification_email(user.email, token)
+    await send_verification_email(user.email, token, user.id)
 
     await system_notification_service.notify(
         db, user.id, SystemNotificationEvent.WELCOME, name=user.first_name
@@ -259,7 +259,7 @@ async def resend_verification_email(user: User) -> None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Почта уже подтверждена")
 
     token = create_email_verification_token(str(user.id))
-    await send_verification_email(user.email, token)
+    await send_verification_email(user.email, token, user.id)
 
 
 async def verify_email(db: AsyncSession, token: str) -> User:
@@ -286,7 +286,7 @@ async def request_password_reset(db: AsyncSession, email: str) -> None:
     if user is None or user.password_hash is None:
         return
     token = create_password_reset_token(str(user.id))
-    await send_password_reset_email(user.email, token)
+    await send_password_reset_email(user.email, token, user.id)
 
 
 async def confirm_password_reset(db: AsyncSession, payload: PasswordResetConfirm) -> None:

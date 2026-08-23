@@ -1,0 +1,2 @@
+# selector._domainkey.домен  домен:selector:путь-к-приватному-ключу
+@DKIM_SELECTOR@._domainkey.@MAIL_DOMAIN@ @MAIL_DOMAIN@:@DKIM_SELECTOR@:/etc/opendkim/keys/@MAIL_DOMAIN@/@DKIM_SELECTOR@.private

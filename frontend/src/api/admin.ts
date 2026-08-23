@@ -2,6 +2,8 @@ import { apiClient } from "@/api/client";
 import type { Booking } from "@/types/booking";
 import type { Group, GroupApplication, GroupMembership } from "@/types/group";
 import type { NotificationTemplate } from "@/types/notification";
+import type { AdminEmailSendResult, EmailLogPage, EmailStats } from "@/types/email";
+import type { BlogPostAdmin, BlogPostPayload } from "@/types/blog";
 import type { Direction, Subject } from "@/types/subject";
 import type { Slot, TutorProfile } from "@/types/tutor";
 import type { User } from "@/types/user";
@@ -219,4 +221,63 @@ export async function listNotificationTemplates() {
 export async function updateNotificationTemplate(id: string, title: string, body: string) {
   const { data } = await apiClient.put<NotificationTemplate>(`/admin/notification-templates/${id}`, { title, body });
   return data;
+}
+
+// --- Почта ------------------------------------------------------------------
+
+export interface EmailLogFilters {
+  direction?: string;
+  status?: string;
+  kind?: string;
+  q?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export async function listEmails(filters: EmailLogFilters = {}) {
+  const { data } = await apiClient.get<EmailLogPage>("/admin/emails", { params: filters });
+  return data;
+}
+
+export async function getEmailStats() {
+  const { data } = await apiClient.get<EmailStats>("/admin/emails/stats");
+  return data;
+}
+
+export async function sendAdminEmail(payload: {
+  user_ids: string[];
+  emails: string[];
+  subject: string;
+  body: string;
+}) {
+  const { data } = await apiClient.post<AdminEmailSendResult>("/admin/emails/send", payload);
+  return data;
+}
+
+// --- Blog --------------------------------------------------------------------
+
+export async function listBlogPostsAdmin() {
+  const { data } = await apiClient.get<BlogPostAdmin[]>("/admin/blog");
+  return data;
+}
+
+export async function createBlogPost(payload: Partial<BlogPostPayload>) {
+  const { data } = await apiClient.post<BlogPostAdmin>("/admin/blog", payload);
+  return data;
+}
+
+export async function updateBlogPost(id: string, payload: Partial<BlogPostPayload>) {
+  const { data } = await apiClient.patch<BlogPostAdmin>(`/admin/blog/${id}`, payload);
+  return data;
+}
+
+export async function deleteBlogPost(id: string) {
+  await apiClient.delete(`/admin/blog/${id}`);
+}
+
+export async function uploadBlogImage(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await apiClient.post<{ url: string }>("/admin/blog/images", form);
+  return data.url;
 }

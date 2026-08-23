@@ -1,10 +1,11 @@
 import datetime as dt
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
-from app.api.deps import DbSession, require_roles
+from app.api.deps import CurrentUser, DbSession, require_roles
 from app.models.enums import UserRole
+from app.models.blog import BlogPost
 from app.models.group import Group
 from app.models.user import User
 from app.schemas.admin import (
@@ -15,7 +16,14 @@ from app.schemas.admin import (
     AdminStudentUpdate,
     AdminTutorUpdate,
 )
+from app.schemas.blog import BlogPostAdminOut, BlogPostCreate, BlogPostUpdate
 from app.schemas.booking import BookingOut, BookingPageOut, BookingTutorUpdate, ManualBookingCreate
+from app.schemas.email import (
+    AdminEmailSend,
+    AdminEmailSendResult,
+    EmailLogPageOut,
+    EmailStatsOut,
+)
 from app.schemas.group import (
     GroupApplicationOut,
     GroupMembershipOut,
@@ -33,11 +41,14 @@ from app.schemas.subject import (
     SubjectUpdate,
 )
 from app.schemas.notification import NotificationTemplateOut, NotificationTemplateUpdate
-from app.schemas.tutor import TutorProfileOut
+from app.schemas.tutor import TutorProfileOut, UploadedImageOut
 from app.schemas.user import UserOut
 from app.services import (
     admin_service,
+    blog_service,
     booking_service,
+    email_log_service,
+    file_service,
     group_service,
     schedule_service,
     subject_service,
@@ -408,3 +419,80 @@ async def update_notification_template(
 ) -> NotificationTemplateOut:
     template = await system_notification_service.update_template(db, template_id, payload.title, payload.body)
     return NotificationTemplateOut.model_validate(template, from_attributes=True)
+
+
+# --- Почта ------------------------------------------------------------------
+# Журнал писем и отправка писем пользователям руками. Входящие письма попадают
+# сюда через ops/mail/ingest-mail.py (Postfix отдаёт их бэкенду), см. ops/mail/README.md.
+
+
+@router.get("/emails/stats", response_model=EmailStatsOut)
+async def email_stats(db: DbSession) -> EmailStatsOut:
+    return await email_log_service.stats(db)
+
+
+@router.get("/emails", response_model=EmailLogPageOut)
+async def list_emails(
+    db: DbSession,
+    direction: str | None = None,
+    kind: str | None = None,
+    # alias, потому что имя status в этом модуле занято fastapi.status.
+    status_filter: str | None = Query(None, alias="status"),
+    q: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+) -> EmailLogPageOut:
+    return await email_log_service.list_page(
+        db, direction=direction, status=status_filter, kind=kind, query=q, page=page, page_size=page_size
+    )
+
+
+@router.post("/emails/send", response_model=AdminEmailSendResult)
+async def send_emails(payload: AdminEmailSend, db: DbSession, admin: CurrentUser) -> AdminEmailSendResult:
+    return await admin_service.send_emails(db, payload, admin)
+
+
+# --- Blog ------------------------------------------------------------------------
+
+
+def _to_blog_admin_out(post: BlogPost, author_name: str | None) -> BlogPostAdminOut:
+    return BlogPostAdminOut.model_validate(post, from_attributes=True).model_copy(
+        update={"author_name": author_name}
+    )
+
+
+@router.get("/blog", response_model=list[BlogPostAdminOut])
+async def list_blog_posts(db: DbSession) -> list[BlogPostAdminOut]:
+    """Unlike the public listing, includes drafts and carries the full body - the admin
+    table doubles as the edit form's data source."""
+    posts = await blog_service.list_admin_posts(db)
+    authors = await blog_service.get_author_names(db, posts)
+    return [_to_blog_admin_out(p, authors.get(p.author_id) if p.author_id else None) for p in posts]
+
+
+@router.post("/blog", response_model=BlogPostAdminOut, status_code=status.HTTP_201_CREATED)
+async def create_blog_post(payload: BlogPostCreate, admin: CurrentUser, db: DbSession) -> BlogPostAdminOut:
+    post = await blog_service.create_post(db, payload, admin.id)
+    return _to_blog_admin_out(post, admin.display_name)
+
+
+@router.patch("/blog/{post_id}", response_model=BlogPostAdminOut)
+async def update_blog_post(post_id: uuid.UUID, payload: BlogPostUpdate, db: DbSession) -> BlogPostAdminOut:
+    post = await blog_service.get_post_or_404(db, post_id)
+    post = await blog_service.update_post(db, post, payload)
+    authors = await blog_service.get_author_names(db, [post])
+    return _to_blog_admin_out(post, authors.get(post.author_id) if post.author_id else None)
+
+
+@router.delete("/blog/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_blog_post(post_id: uuid.UUID, db: DbSession) -> None:
+    post = await blog_service.get_post_or_404(db, post_id)
+    await blog_service.delete_post(db, post)
+
+
+@router.post("/blog/images", response_model=UploadedImageOut)
+async def upload_blog_image(file: UploadFile = File(...)) -> UploadedImageOut:
+    """Images for the article body and covers. Saved under the same /files mount the
+    rich-text sanitizers allow-list as an image source (see utils/html_sanitize.py)."""
+    url = await file_service.save_upload(file, "blog-images", file_service.ALLOWED_IMAGE_TYPES)
+    return UploadedImageOut(url=url)

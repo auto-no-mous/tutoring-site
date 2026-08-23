@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.enums import UserRole
 from app.models.tutor import TutorProfile
 from app.models.user import User
+from app.schemas.email import AdminEmailSend, AdminEmailSendResult
+from app.services.email_service import send_admin_email
 from app.schemas.admin import AdminStudentUpdate, AdminTutorUpdate
 from app.services import auth_service
 from app.utils.names import compose_display_name
@@ -107,3 +109,55 @@ async def update_student(db: AsyncSession, user: User, payload: AdminStudentUpda
 async def delete_student(db: AsyncSession, user: User) -> None:
     await db.delete(user)
     await db.commit()
+
+
+# Больше писем за один запрос из админки не отправляем: это ручная переписка с
+# конкретными людьми, а не рассылка, и длинный цикл держал бы HTTP-запрос открытым.
+MAX_EMAIL_RECIPIENTS = 50
+
+
+async def send_emails(db: AsyncSession, payload: AdminEmailSend, admin: User) -> AdminEmailSendResult:
+    """Отправляет письмо каждому получателю отдельным сообщением.
+
+    Отдельным, а не одним с несколькими To: иначе получатели увидели бы адреса
+    друг друга. Пользователи без почты попадают в skipped, а не роняют запрос.
+    """
+    recipients: list[tuple[str, uuid.UUID | None]] = []
+    skipped: list[str] = []
+
+    if payload.user_ids:
+        users = (await db.scalars(select(User).where(User.id.in_(payload.user_ids)))).all()
+        found = {user.id for user in users}
+        for user in users:
+            if user.email:
+                recipients.append((user.email, user.id))
+            else:
+                skipped.append(f"{user.last_name} {user.first_name}".strip() or str(user.id))
+        for missing in set(payload.user_ids) - found:
+            skipped.append(str(missing))
+
+    known = {address for address, _ in recipients}
+    for address in payload.emails:
+        if address not in known:
+            recipients.append((address, None))
+            known.add(address)
+
+    if not recipients:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не выбран ни один получатель с адресом почты")
+    if len(recipients) > MAX_EMAIL_RECIPIENTS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"За один раз можно отправить не более {MAX_EMAIL_RECIPIENTS} писем",
+        )
+
+    sent = 0
+    failed = 0
+    for address, user_id in recipients:
+        ok = await send_admin_email(
+            address, payload.subject, payload.body, sent_by_id=admin.id, user_id=user_id
+        )
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+    return AdminEmailSendResult(sent=sent, failed=failed, skipped=skipped)

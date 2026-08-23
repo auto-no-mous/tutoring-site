@@ -5,10 +5,13 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.booking import Booking
 from app.models.enums import (
     BookingStatus,
+    EmailKind,
     NotificationChannel,
+    NotificationChannelPref,
     NotificationEvent,
     NotificationStatus,
     SystemNotificationEvent,
@@ -18,6 +21,7 @@ from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.services import system_notification_service
 from app.services.email_service import send_email
+from app.services.email_templates import render_email
 from app.services.schedule_service import MSK
 from app.services.telegram_service import send_telegram_message
 from app.utils.time import ensure_aware, utcnow
@@ -29,20 +33,49 @@ MAX_REMINDER_LEAD_MINUTES = 7 * 24 * 60
 logger = logging.getLogger("app.notifications")
 
 
-async def notify(db: AsyncSession, user_id: uuid.UUID, event_type: NotificationEvent, title: str, body: str) -> None:
-    """Dispatches a notification over every channel the user has configured (section
-    2.7). Best-effort: failures are logged to NotificationLog and swallowed so a
+async def notify(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    event_type: NotificationEvent,
+    title: str,
+    body: str,
+    *,
+    email_html: str | None = None,
+    email_text: str | None = None,
+) -> None:
+    """Dispatches a notification over the channels the user chose in Settings
+    (User.notification_channel: off / email / telegram / both, section 2.7).
+    Best-effort: failures are logged to NotificationLog and swallowed so a
     misconfigured channel never breaks the calling business operation (booking,
-    chat message, etc.)."""
+    chat message, etc.).
+
+    `email_html` даёт письму фирменное оформление вместо голого текста; в
+    Telegram в любом случае уходит короткий текстовый вариант."""
     user = await db.get(User, user_id)
     if user is None:
         return
 
-    if user.telegram_chat_id:
+    channel_pref = user.notification_channel
+    if channel_pref == NotificationChannelPref.OFF.value:
+        return
+
+    wants_telegram = channel_pref in (NotificationChannelPref.TELEGRAM.value, NotificationChannelPref.BOTH.value)
+    wants_email = channel_pref in (NotificationChannelPref.EMAIL.value, NotificationChannelPref.BOTH.value)
+
+    if user.telegram_chat_id and wants_telegram:
         await _dispatch(db, user.id, NotificationChannel.TELEGRAM, event_type, title, body, user.telegram_chat_id)
 
-    if user.email and user.email_notifications_enabled:
-        await _dispatch(db, user.id, NotificationChannel.EMAIL, event_type, title, body, user.email)
+    if user.email and wants_email:
+        await _dispatch(
+            db,
+            user.id,
+            NotificationChannel.EMAIL,
+            event_type,
+            title,
+            email_text or body,
+            user.email,
+            email_html=email_html,
+        )
 
 
 async def notify_tutor(
@@ -54,6 +87,84 @@ async def notify_tutor(
     await notify(db, profile.user_id, event_type, title, body)
 
 
+async def notify_first_booking(
+    db: AsyncSession,
+    *,
+    student: User,
+    tutor_user: User,
+    start_at: dt.datetime,
+    lesson_name: str | None = None,
+) -> None:
+    """Письмо о ПЕРВОМ занятии этой пары - обоим участникам.
+
+    Именно первом: для репетитора это "пришёл новый ученик", для ученика -
+    "занятия с этим репетитором начались". На повторные записи уходит обычное
+    короткое уведомление NEW_BOOKING (см. booking_service.create_student_booking),
+    иначе на каждую запись в серии сыпалось бы по два письма.
+
+    Ходит через notify(), поэтому уважает выбранные пользователем каналы и
+    попадает и в NotificationLog, и в журнал почты админки.
+    """
+    start_msk = ensure_aware(start_at).astimezone(MSK)
+    when = f"{start_msk:%d.%m.%Y} в {start_msk:%H:%M} (МСК)"
+    lesson_suffix = f" ({lesson_name})" if lesson_name else ""
+    cabinet_url = f"{settings.frontend_base_url.rstrip('/')}/cabinet?tab=bookings"
+
+    student_title = "Вы записались на занятие"
+    student_body = f"Занятие с {tutor_user.display_name}{lesson_suffix} — {when}."
+    student_text, student_html = render_email(
+        heading=student_title,
+        intro=f"{student_body} Это ваше первое занятие с этим репетитором — детали и ссылка на встречу будут в личном кабинете.",
+        button_label="Мои занятия",
+        button_url=cabinet_url,
+        note="Отменить или перенести занятие можно там же, в карточке занятия.",
+    )
+    await notify(
+        db,
+        student.id,
+        NotificationEvent.NEW_BOOKING,
+        student_title,
+        student_body,
+        email_html=student_html,
+        email_text=student_text,
+    )
+
+    tutor_title = "К вам записался новый ученик"
+    tutor_body = f"{student.display_name} записался(-ась) на {when}{lesson_suffix}."
+    tutor_text, tutor_html = render_email(
+        heading=tutor_title,
+        intro=f"{tutor_body} Раньше занятий с этим учеником не было.",
+        button_label="Открыть расписание",
+        button_url=cabinet_url,
+        note="Ссылку на занятие можно добавить в карточке занятия в личном кабинете.",
+    )
+    await notify(
+        db,
+        tutor_user.id,
+        NotificationEvent.NEW_BOOKING,
+        tutor_title,
+        tutor_body,
+        email_html=tutor_html,
+        email_text=tutor_text,
+    )
+
+
+def _reminder_email(other_name: str, start_msk: dt.datetime, for_tutor: bool) -> tuple[str, str]:
+    """Фирменное письмо-напоминание. Текст в мессенджер остаётся коротким."""
+    when = f"{start_msk:%d.%m.%Y} в {start_msk:%H:%M} (МСК)"
+    return render_email(
+        heading="Скоро занятие",
+        intro=(
+            f"Занятие с {other_name} начнётся {when}."
+            if for_tutor
+            else f"Ваше занятие с {other_name} начнётся {when}."
+        ),
+        button_label="Открыть занятие",
+        button_url=f"{settings.frontend_base_url.rstrip('/')}/cabinet?tab=bookings",
+        note="Ссылка на встречу — в карточке занятия. Отключить напоминания или сменить канал можно в Настройках.",
+    )
+
+
 async def _dispatch(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -62,6 +173,7 @@ async def _dispatch(
     title: str,
     body: str,
     destination: str,
+    email_html: str | None = None,
 ) -> None:
     log = NotificationLog(
         user_id=user_id,
@@ -78,7 +190,11 @@ async def _dispatch(
         if channel == NotificationChannel.TELEGRAM:
             await send_telegram_message(destination, f"{title}\n\n{body}")
         else:
-            await send_email(destination, title, body)
+            # kind/user_id - чтобы письмо было видно в журнале почты админки с
+            # привязкой к пользователю (см. app.services.email_log_service).
+            await send_email(
+                destination, title, body, email_html, kind=EmailKind.NOTIFICATION.value, user_id=user_id
+            )
         log.status = NotificationStatus.SENT.value
         log.sent_at = utcnow()
     except Exception as exc:  # noqa: BLE001 - notifications must never break the caller
@@ -139,10 +255,12 @@ async def send_upcoming_reminders(db: AsyncSession, tolerance_minutes: float = 1
             if tutor_user is not None and _is_due(start_at, now, tutor_user.reminder_lead_minutes, tolerance_minutes):
                 student = await db.get(User, booking.student_id) if booking.student_id else None
                 student_name = student.display_name if student else "учеником"
+                reminder_text, reminder_html = _reminder_email(student_name, start_msk, for_tutor=True)
                 await notify(
                     db, tutor_user.id, NotificationEvent.UPCOMING_REMINDER,
                     "Скоро занятие",
                     f"Занятие с {student_name} начнётся {start_msk:%d.%m.%Y %H:%M} (МСК).",
+                    email_html=reminder_html, email_text=reminder_text,
                 )
                 await system_notification_service.notify(
                     db, tutor_user.id, SystemNotificationEvent.UPCOMING_LESSON_REMINDER,
@@ -159,10 +277,12 @@ async def send_upcoming_reminders(db: AsyncSession, tolerance_minutes: float = 1
                 tutor_profile2 = await db.get(TutorProfile, booking.tutor_id)
                 tutor_user2 = await db.get(User, tutor_profile2.user_id) if tutor_profile2 else None
                 tutor_name = tutor_user2.display_name if tutor_user2 else "репетитором"
+                reminder_text, reminder_html = _reminder_email(tutor_name, start_msk, for_tutor=False)
                 await notify(
                     db, student_user.id, NotificationEvent.UPCOMING_REMINDER,
                     "Скоро занятие",
                     f"Занятие с {tutor_name} начнётся {start_msk:%d.%m.%Y %H:%M} (МСК).",
+                    email_html=reminder_html, email_text=reminder_text,
                 )
                 await system_notification_service.notify(
                     db, student_user.id, SystemNotificationEvent.UPCOMING_LESSON_REMINDER,

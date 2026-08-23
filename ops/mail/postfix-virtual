@@ -1,0 +1,20 @@
+# Входящая почта домена @MAIL_DOMAIN@: принимаем только эти адреса и пересылаем
+# их на личный ящик. Всё остальное Postfix отвергает на этапе RCPT TO - без
+# catch-all, иначе домен мгновенно соберёт спам и backscatter.
+#
+# Шаблон: @MAIL_DOMAIN@ и @FORWARD_TO@ подставляет ops/mail/install.sh.
+#
+# Второй получатель mailingest@localhost - копия письма для журнала почты в
+# админке (алиас пайпит письмо в /usr/local/bin/my-tutor-ingest-mail.py). Скрипт
+# всегда завершается успешно, поэтому недоступный сайт не превратит письмо в
+# отбойник для отправителя.
+
+# Обязателен по RFC 5321 и на него смотрят Gmail/mail.ru при оценке домена.
+postmaster@@MAIL_DOMAIN@    @FORWARD_TO@, mailingest@localhost
+# Тоже ожидаемый адрес: сюда пишут о злоупотреблениях с нашего IP.
+abuse@@MAIL_DOMAIN@         @FORWARD_TO@, mailingest@localhost
+# Публичный адрес для людей: он стоит в Reply-To писем сайта.
+info@@MAIL_DOMAIN@          @FORWARD_TO@, mailingest@localhost
+# Отбойники (bounce) на письма сайта прилетают сюда. Если станет шумно -
+# замените адрес на devnull@localhost и опишите это в README.
+no-reply@@MAIL_DOMAIN@      @FORWARD_TO@, mailingest@localhost

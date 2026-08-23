@@ -1,4 +1,4 @@
-from app.utils.html_sanitize import sanitize_rich_text
+from app.utils.html_sanitize import sanitize_rich_text, strip_html_to_text
 
 
 def test_strips_script_tags_and_event_handlers() -> None:
@@ -49,3 +49,12 @@ def test_unwraps_disallowed_tags_but_keeps_text_content() -> None:
 def test_preserves_allowed_formatting() -> None:
     result = sanitize_rich_text("<p>Hello <b>world</b>, <i>this</i> is <u>ok</u></p>")
     assert result == "<p>Hello <b>world</b>, <i>this</i> is <u>ok</u></p>"
+
+
+def test_strip_html_to_text_separates_blocks_but_not_inline_tags() -> None:
+    # Соседние блоки не должны склеиваться в "абзац.Второй".
+    assert strip_html_to_text("<p>Первый абзац.</p><p>Второй абзац.</p>") == "Первый абзац. Второй абзац."
+    assert strip_html_to_text("Строка<br>Другая") == "Строка Другая"
+    assert strip_html_to_text("<ul><li>Раз</li><li>Два</li></ul>") == "Раз Два"
+    # А инлайновое выделение внутри слова не должно его разрывать.
+    assert strip_html_to_text("<p>Сло<b>во</b></p>") == "Слово"

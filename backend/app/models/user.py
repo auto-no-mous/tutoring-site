@@ -6,6 +6,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
+from app.models.enums import NotificationChannelPref
 from app.utils.time import utcnow
 
 if TYPE_CHECKING:
@@ -58,7 +59,12 @@ class User(UUIDPKMixin, TimestampMixin, Base):
 
     # Notification channel settings (section 2.7)
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    email_notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Куда слать уведомления и напоминания: off / email / telegram / both
+    # (NotificationChannelPref). Письма о регистрации и сбросе пароля сюда не
+    # относятся - они транзакционные и уходят всегда.
+    notification_channel: Mapped[str] = mapped_column(
+        String(16), default=NotificationChannelPref.BOTH.value, server_default=NotificationChannelPref.BOTH.value
+    )
     # How long before a lesson this user wants the "Скоро занятие" reminder (see
     # notification_service.send_upcoming_reminders) - editable in Settings, next to
     # the Telegram connect button. Each participant of a booking has their own value,

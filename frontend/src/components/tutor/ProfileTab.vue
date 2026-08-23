@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from "lucide-vue-next";
 import axios from "axios";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -188,7 +189,7 @@ onMounted(load);
         <input
           type="file"
           accept="image/*"
-          class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
+          class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
           @change="onPhotoChange"
         />
       </div>
@@ -287,7 +288,7 @@ onMounted(load);
               class="shrink-0 rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
               @click="removeExtraLink(index)"
             >
-              ✕
+              <X class="h-4 w-4" />
             </button>
           </div>
           <button
@@ -312,7 +313,7 @@ onMounted(load);
       </label>
 
       <div class="flex items-center gap-3">
-        <button type="button" :disabled="isSaving" class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900" @click="save">
+        <button type="button" :disabled="isSaving" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50" @click="save">
           Сохранить
         </button>
         <span v-if="savedMessage" class="text-sm text-green-600 dark:text-green-400">{{ savedMessage }}</span>
@@ -348,7 +349,7 @@ onMounted(load);
         <button
           type="button"
           :disabled="isSavingSubjects"
-          class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+          class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50"
           @click="saveSubjects"
         >
           Сохранить предметы

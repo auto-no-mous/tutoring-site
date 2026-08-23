@@ -181,7 +181,7 @@ onMounted(load);
                 Цена, ₽
                 <input v-model.number="editPrice" type="number" min="0" class="w-24 rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" />
               </label>
-              <button type="button" class="rounded-md bg-slate-900 px-2 py-1 text-xs text-white dark:bg-white dark:text-slate-900" @click="saveEditType(type)">
+              <button type="button" class="rounded-md bg-brand-500 px-2 py-1 text-xs text-white" @click="saveEditType(type)">
                 Сохранить
               </button>
               <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="cancelEditType">
@@ -239,7 +239,7 @@ onMounted(load);
           Цена, ₽
           <input v-model.number="price" type="number" min="0" class="w-24 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
         </label>
-        <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white dark:bg-white dark:text-slate-900">Сохранить</button>
+        <button type="submit" class="rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white">Сохранить</button>
         <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700" @click="cancelAdd">Отмена</button>
         <p v-if="typeError" class="w-full text-sm text-red-600 dark:text-red-400">{{ typeError }}</p>
       </form>
@@ -285,7 +285,7 @@ onMounted(load);
         </label>
       </div>
       <div class="flex items-center gap-3">
-        <button type="button" :disabled="isSavingSettings" class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900" @click="saveSettings">
+        <button type="button" :disabled="isSavingSettings" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50" @click="saveSettings">
           Сохранить настройки
         </button>
         <span v-if="settingsSavedMessage" class="text-sm text-green-600 dark:text-green-400">{{ settingsSavedMessage }}</span>
@@ -315,7 +315,7 @@ onMounted(load);
       </div>
 
       <div class="flex items-center gap-3">
-        <button type="button" :disabled="isSaving" class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900" @click="save">
+        <button type="button" :disabled="isSaving" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50" @click="save">
           Сохранить расписание
         </button>
         <span v-if="savedMessage" class="text-sm text-green-600 dark:text-green-400">{{ savedMessage }}</span>
