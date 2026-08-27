@@ -29,8 +29,13 @@ def _require_student(user: CurrentUser) -> None:
 
 async def _display_title(db: DbSession, thread, current_user: User) -> str:
     if thread.type == ChatThreadType.GROUP.value:
-        group = await db.get(Group, thread.group_id)
-        return group.name if group else ""
+        # group_id is None once the group has been deleted - the thread stays as an
+        # archive and falls back to the name snapshotted at that moment
+        # (chat_service.archive_group_thread).
+        group = await db.get(Group, thread.group_id) if thread.group_id else None
+        if group is not None:
+            return group.name
+        return f"{thread.archived_group_name} (группа удалена)" if thread.archived_group_name else ""
     if current_user.role == UserRole.TUTOR:
         student = await db.get(User, thread.student_id)
         return student.display_name if student else ""

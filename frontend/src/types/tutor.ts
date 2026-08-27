@@ -15,6 +15,7 @@ export interface TutorProfile {
   telegram_url: string | null;
   vk_url: string | null;
   youtube_url: string | null;
+  video_url: string | null;
   extra_links: TutorExtraLink[];
   slot_granularity_minutes: number;
   break_between_lessons_minutes: number;
@@ -33,6 +34,7 @@ export interface TutorProfile {
   last_name?: string | null;
   patronymic?: string | null;
   email?: string | null;
+  email_verified?: boolean | null;
   // Populated only by the admin tutor listing - see backend api/v1/admin.py::list_tutors.
   subjects?: TutorSubject[];
 }
@@ -51,6 +53,7 @@ export interface TutorCatalogItem {
   reviews_count: number;
   about_snippet: string | null;
   show_individual_booking: boolean;
+  show_group_booking: boolean;
 }
 
 export interface TutorPublicProfile {
@@ -62,6 +65,10 @@ export interface TutorPublicProfile {
   telegram_url: string | null;
   vk_url: string | null;
   youtube_url: string | null;
+  video_url: string | null;
+  // Player URL built by the backend from video_url (app/utils/video.py) - rendered
+  // as an <iframe src> as-is, the frontend never parses the tutor's link itself.
+  video_embed_url: string | null;
   extra_links: TutorExtraLink[];
   subjects: TutorSubject[];
   avg_rating: number | null;

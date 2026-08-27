@@ -24,6 +24,14 @@ class AdminStudentUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class AdminPasswordReset(BaseModel):
+    """Новый пароль, назначаемый админом. Ограничения те же, что при регистрации
+    (schemas/auth.py::RegisterRequest), чтобы админ не мог завести пользователю
+    пароль, который тот сам задать бы не смог."""
+
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class AdminGroupMemberAdd(BaseModel):
     student_id: uuid.UUID
 

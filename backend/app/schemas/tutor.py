@@ -2,7 +2,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.common import ProfileUrl, SanitizedHtml, UTCDateTime
+from app.schemas.common import ProfileUrl, SanitizedHtml, UTCDateTime, VideoUrl
 from app.schemas.subject import TutorSubjectOut
 
 # Lowercase letters/digits, hyphens allowed in the middle only, 3-64 chars total -
@@ -37,6 +37,8 @@ class TutorProfileUpdate(BaseModel):
     telegram_url: ProfileUrl | None = None
     vk_url: ProfileUrl | None = None
     youtube_url: ProfileUrl | None = None
+    # Explicit null clears the video (update_profile uses exclude_unset).
+    video_url: VideoUrl | None = None
     extra_links: list[TutorExtraLink] | None = Field(default=None, max_length=MAX_EXTRA_LINKS)
     slot_granularity_minutes: int | None = None
     break_between_lessons_minutes: int | None = Field(default=None, ge=0)
@@ -61,6 +63,7 @@ class TutorProfileOut(BaseModel):
     telegram_url: str | None = None
     vk_url: str | None = None
     youtube_url: str | None = None
+    video_url: str | None = None
     extra_links: list[TutorExtraLink] = Field(default_factory=list)
     slot_granularity_minutes: int
     break_between_lessons_minutes: int
@@ -73,6 +76,9 @@ class TutorProfileOut(BaseModel):
     allow_group_bookings: bool = True
     display_name: str | None = None
     is_active: bool | None = None
+    # Как и поля выше, заполняется только там, где связанный User уже под рукой
+    # (own profile, админка). У учеников то же самое приходит в UserOut.
+    email_verified: bool | None = None
     # Populated only where the caller already has the linked User at hand (own
     # profile, admin) - see api/v1/tutors.py::_to_profile_out /
     # api/v1/admin.py::_to_profile_out. Lets the edit form prefill the split name
@@ -110,6 +116,9 @@ class TutorCatalogItem(BaseModel):
     # hourly_price is only non-null when such a lesson type exists, so it doubles as
     # that check here without a second query.
     show_individual_booking: bool = False
+    # The group counterpart needs its own lookup (tutor_service.search_catalog) - there
+    # is no group equivalent of hourly_price to piggyback on.
+    show_group_booking: bool = False
 
 
 class TutorCatalogPageOut(BaseModel):
@@ -128,6 +137,10 @@ class TutorPublicProfile(BaseModel):
     telegram_url: str | None = None
     vk_url: str | None = None
     youtube_url: str | None = None
+    video_url: str | None = None
+    # Player URL derived from video_url (app.utils.video.parse_video_embed_url) - the
+    # frontend renders this in an <iframe> and never parses the link itself.
+    video_embed_url: str | None = None
     extra_links: list[TutorExtraLink] = Field(default_factory=list)
     subjects: list[TutorSubjectOut] = Field(default_factory=list)
     avg_rating: float | None = None

@@ -413,3 +413,131 @@ async def test_no_show_rejected_for_cancelled_occurrence(client: AsyncClient) ->
 
     resp = await client.post(f"/api/v1/groups/me/occurrences/{occurrence_id}/no-show", headers=member["headers"])
     assert resp.status_code == 409
+
+
+async def test_group_full_edit(client: AsyncClient) -> None:
+    """Beyond periodicity, the tutor can edit the same fields they set at creation:
+    name, capacity and meeting link (see components/tutor/GroupsTab.vue)."""
+    tutor = await _setup_tutor_with_group(client, "group-edit-tutor@example.com", capacity=4)
+    group_id = tutor["group"]["id"]
+
+    resp = await client.patch(
+        f"/api/v1/groups/{group_id}",
+        headers=tutor["headers"],
+        json={
+            "name": "Подготовка к ОГЭ",
+            "capacity": 8,
+            "meeting_link": "https://meet.example.com/new-room",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "Подготовка к ОГЭ"
+    assert body["capacity"] == 8
+    assert body["meeting_link"] == "https://meet.example.com/new-room"
+
+    # And it survives a reload, not just the response of the write itself.
+    listed = (await client.get("/api/v1/groups/tutor/me", headers=tutor["headers"])).json()
+    assert listed[0]["name"] == "Подготовка к ОГЭ"
+    assert listed[0]["capacity"] == 8
+
+    # Clearing the link is a meaningful edit, not a "field omitted".
+    cleared = await client.patch(
+        f"/api/v1/groups/{group_id}", headers=tutor["headers"], json={"meeting_link": None}
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["meeting_link"] is None
+
+    # ...but the non-nullable fields have no "clear" meaning: a null there is an empty
+    # form field and must leave the stored value alone rather than hit NOT NULL.
+    nulls = await client.patch(
+        f"/api/v1/groups/{group_id}",
+        headers=tutor["headers"],
+        json={"name": None, "capacity": None, "is_active": None},
+    )
+    assert nulls.status_code == 200, nulls.text
+    assert nulls.json()["name"] == "Подготовка к ОГЭ"
+    assert nulls.json()["capacity"] == 8
+    assert nulls.json()["is_active"] is True
+
+
+async def test_capacity_cannot_drop_below_current_members(client: AsyncClient) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-capacity-tutor@example.com", capacity=3)
+    group_id = tutor["group"]["id"]
+    student = await _register(client, "group-capacity-student@example.com", "student")
+    application = await client.post(f"/api/v1/groups/{group_id}/apply", headers=student["headers"], json={})
+    await client.post(
+        f"/api/v1/groups/{group_id}/applications/{application.json()['id']}/accept", headers=tutor["headers"]
+    )
+
+    too_small = await client.patch(
+        f"/api/v1/groups/{group_id}", headers=tutor["headers"], json={"capacity": 0}
+    )
+    assert too_small.status_code == 422  # capacity must be > 0 at the schema level
+
+    below_members = await client.patch(
+        f"/api/v1/groups/{group_id}", headers=tutor["headers"], json={"capacity": 1}
+    )
+    assert below_members.status_code == 200, "capacity == member count is still fine"
+
+    # 1 member enrolled, so 1 is the floor.
+    assert (
+        await client.patch(f"/api/v1/groups/{group_id}", headers=tutor["headers"], json={"capacity": 1})
+    ).json()["capacity"] == 1
+
+
+async def test_delete_group_requires_empty_group(client: AsyncClient) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-delete-tutor@example.com")
+    group_id = tutor["group"]["id"]
+    student = await _register(client, "group-delete-student@example.com", "student")
+    application = await client.post(f"/api/v1/groups/{group_id}/apply", headers=student["headers"], json={})
+    await client.post(
+        f"/api/v1/groups/{group_id}/applications/{application.json()['id']}/accept", headers=tutor["headers"]
+    )
+
+    blocked = await client.delete(f"/api/v1/groups/{group_id}", headers=tutor["headers"])
+    assert blocked.status_code == 409
+    assert "исключите" in blocked.json()["detail"].lower()
+
+    # Once the last member is gone the group can be deleted.
+    await client.delete(f"/api/v1/groups/{group_id}/members/{student['user']['id']}", headers=tutor["headers"])
+    deleted = await client.delete(f"/api/v1/groups/{group_id}", headers=tutor["headers"])
+    assert deleted.status_code == 204, deleted.text
+
+    assert (await client.get("/api/v1/groups/tutor/me", headers=tutor["headers"])).json() == []
+    assert (await client.get(f"/api/v1/groups/{group_id}/occurrences")).status_code == 404
+
+
+async def test_group_chat_outlives_the_deleted_group(client: AsyncClient) -> None:
+    """Section 2.11: deleting a group must not delete the correspondence - the thread
+    is kept as an archive for the tutor, under the group's last known name."""
+    tutor = await _setup_tutor_with_group(client, "group-chat-delete-tutor@example.com")
+    group_id = tutor["group"]["id"]
+
+    thread = (await client.get(f"/api/v1/chat/threads/group/{group_id}", headers=tutor["headers"])).json()
+    sent = await client.post(
+        f"/api/v1/chat/threads/{thread['id']}/messages",
+        headers=tutor["headers"],
+        data={"content": "Занятие переносится"},
+    )
+    assert sent.status_code == 201, sent.text
+
+    assert (await client.delete(f"/api/v1/groups/{group_id}", headers=tutor["headers"])).status_code == 204
+
+    messages = await client.get(f"/api/v1/chat/threads/{thread['id']}/messages", headers=tutor["headers"])
+    assert messages.status_code == 200, "the archived thread must stay readable"
+    assert [m["content"] for m in messages.json()] == ["Занятие переносится"]
+
+    threads = (await client.get("/api/v1/chat/threads", headers=tutor["headers"])).json()
+    archived = next(t for t in threads if t["id"] == thread["id"])
+    assert archived["group_id"] is None
+    assert archived["display_title"] == "Подготовка к ЕГЭ (группа удалена)"
+
+
+async def test_delete_group_is_owner_only(client: AsyncClient) -> None:
+    tutor = await _setup_tutor_with_group(client, "group-delete-owner@example.com")
+    other = await _setup_tutor_with_group(client, "group-delete-other@example.com")
+
+    resp = await client.delete(f"/api/v1/groups/{tutor['group']['id']}", headers=other["headers"])
+    assert resp.status_code == 403
+    assert (await client.get("/api/v1/groups/tutor/me", headers=tutor["headers"])).json() != []

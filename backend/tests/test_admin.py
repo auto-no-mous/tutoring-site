@@ -656,3 +656,108 @@ async def test_admin_bookings_subject_direction_grade_filters_and_pagination(
     assert body1["page_size"] == 1
     assert len(body1["items"]) == 1
     assert body1["total"] >= 2
+
+
+async def test_admin_resets_password_and_kills_existing_sessions(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Последняя линия поддержки, когда письмо со ссылкой сброса до человека не
+    доходит. Одна ручка на любую роль: у TutorProfileOut есть user_id, поэтому обе
+    вкладки админки ходят сюда же."""
+    headers = await _admin_headers(client, db_session, "admin-password@example.com")
+    student = await _register(client, "reset-me@example.com", "student")
+    old_refresh = (
+        await client.post(
+            "/api/v1/auth/login", json={"email": "reset-me@example.com", "password": "supersecret1"}
+        )
+    ).json()["refresh_token"]
+
+    resp = await client.post(
+        f"/api/v1/admin/users/{student['user']['id']}/password",
+        headers=headers,
+        json={"new_password": "brandnewpass9"},
+    )
+    assert resp.status_code == 204, resp.text
+
+    # Старый пароль больше не работает, новый - работает.
+    assert (
+        await client.post(
+            "/api/v1/auth/login", json={"email": "reset-me@example.com", "password": "supersecret1"}
+        )
+    ).status_code == 401
+    assert (
+        await client.post(
+            "/api/v1/auth/login", json={"email": "reset-me@example.com", "password": "brandnewpass9"}
+        )
+    ).status_code == 200
+
+    # Выданные ранее refresh-токены отозваны: смена пароля обрывает чужие сессии.
+    refreshed = await client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
+    assert refreshed.status_code == 401
+
+    # Владелец аккаунта узнаёт о смене пароля из системных уведомлений.
+    login = await client.post(
+        "/api/v1/auth/login", json={"email": "reset-me@example.com", "password": "brandnewpass9"}
+    )
+    student_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    notifications = await client.get("/api/v1/notifications/system", headers=student_headers)
+    assert notifications.status_code == 200, notifications.text
+    assert any(n["event_type"] == "password_changed_by_admin" for n in notifications.json())
+
+
+async def test_admin_password_reset_enforces_the_same_rules_as_registration(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    headers = await _admin_headers(client, db_session, "admin-password-rules@example.com")
+    student = await _register(client, "weak-password@example.com", "student")
+
+    short = await client.post(
+        f"/api/v1/admin/users/{student['user']['id']}/password",
+        headers=headers,
+        json={"new_password": "korotk"},
+    )
+    assert short.status_code == 422
+
+    # Старый пароль остался рабочим - неудачная попытка ничего не сломала.
+    assert (
+        await client.post(
+            "/api/v1/auth/login", json={"email": "weak-password@example.com", "password": "supersecret1"}
+        )
+    ).status_code == 200
+
+
+async def test_admin_password_reset_unlocks_a_locked_out_account(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Иначе сброс был бы бесполезен ровно в том случае, ради которого его и зовут:
+    человек перебирал пароли, упёрся в блокировку на 15 минут и просит помощи."""
+    headers = await _admin_headers(client, db_session, "admin-unlock@example.com")
+    student = await _register(client, "locked-out@example.com", "student")
+    for _ in range(5):
+        await client.post(
+            "/api/v1/auth/login", json={"email": "locked-out@example.com", "password": "wrongpass1"}
+        )
+    locked = await client.post(
+        "/api/v1/auth/login", json={"email": "locked-out@example.com", "password": "supersecret1"}
+    )
+    assert locked.status_code == 429
+
+    await client.post(
+        f"/api/v1/admin/users/{student['user']['id']}/password",
+        headers=headers,
+        json={"new_password": "brandnewpass9"},
+    )
+    unlocked = await client.post(
+        "/api/v1/auth/login", json={"email": "locked-out@example.com", "password": "brandnewpass9"}
+    )
+    assert unlocked.status_code == 200, unlocked.text
+
+
+async def test_admin_password_reset_is_admin_only(client: AsyncClient) -> None:
+    student = await _register(client, "not-an-admin@example.com", "student")
+    resp = await client.post(
+        f"/api/v1/admin/users/{student['user']['id']}/password",
+        headers=student["headers"],
+        json={"new_password": "brandnewpass9"},
+    )
+    assert resp.status_code == 403

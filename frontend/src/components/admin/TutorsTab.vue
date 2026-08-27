@@ -3,6 +3,7 @@ import axios from "axios";
 import { onMounted, ref } from "vue";
 
 import { deleteTutor, listTutors, updateTutor } from "@/api/admin";
+import ResetPasswordButton from "@/components/admin/ResetPasswordButton.vue";
 import RichTextEditor from "@/components/RichTextEditor.vue";
 import type { TutorProfile } from "@/types/tutor";
 import { sanitizeRichText } from "@/utils/richText";
@@ -157,7 +158,15 @@ onMounted(load);
             <span v-if="tutor.is_active === false" class="ml-1 text-xs text-red-600 dark:text-red-400">(заблокирован)</span>
             <span v-if="tutor.is_hidden" class="ml-1 text-xs text-slate-400">(скрыт из каталога)</span>
           </div>
-          <div class="text-slate-500">{{ tutor.email }}</div>
+          <div class="text-slate-500">
+            {{ tutor.email }}
+            <span
+              v-if="tutor.email_verified === false"
+              class="ml-1 text-xs text-amber-600 dark:text-amber-400"
+              title="Пользователь не переходил по ссылке из письма подтверждения"
+              >почта не подтверждена</span
+            >
+          </div>
           <div v-if="aboutPreview(tutor)" class="mt-1 line-clamp-2 text-slate-500" v-html="aboutPreview(tutor)"></div>
           <div v-else class="mt-1 text-slate-400">—</div>
         </div>
@@ -168,6 +177,7 @@ onMounted(load);
           <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="toggleActive(tutor)">
             {{ tutor.is_active === false ? "Разблокировать" : "Заблокировать" }}
           </button>
+          <ResetPasswordButton :user-id="tutor.user_id" :display-name="tutor.display_name ?? ''" />
           <button type="button" class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 dark:border-red-800" @click="remove(tutor)">
             Удалить
           </button>

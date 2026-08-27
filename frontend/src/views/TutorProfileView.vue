@@ -130,6 +130,25 @@ onMounted(load);
         <p v-else class="mt-2 text-base text-slate-600 dark:text-slate-300">—</p>
       </section>
 
+      <!-- Ссылку разбирает бэкенд (app/utils/video.py) и отдаёт готовый адрес
+           плеера, так что сюда попадает только YouTube/RuTube/VK Видео. Обёртка
+           с aspect-video держит пропорции 16:9 на любой ширине. -->
+      <section v-if="profile.video_embed_url" class="surface-card animate-fade-in-up mt-5 p-5 [animation-delay:150ms]">
+        <h2 class="text-xl font-semibold">Видео</h2>
+        <div class="mt-2 aspect-video w-full overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
+          <iframe
+            :src="profile.video_embed_url"
+            :title="`Видео репетитора ${profile.display_name}`"
+            class="h-full w-full"
+            frameborder="0"
+            loading="lazy"
+            referrerpolicy="strict-origin-when-cross-origin"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+            allowfullscreen
+          ></iframe>
+        </div>
+      </section>
+
       <section v-if="reviews.length > 0" class="mt-8">
         <h2 class="text-xl font-semibold">Отзывы</h2>
         <div class="mt-3 flex flex-col gap-3">

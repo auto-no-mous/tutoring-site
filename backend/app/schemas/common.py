@@ -6,6 +6,7 @@ from pydantic import AfterValidator
 
 from app.utils.html_sanitize import sanitize_rich_text
 from app.utils.time import to_utc
+from app.utils.video import parse_video_embed_url
 
 # Use for every datetime accepted from a client. See app.utils.time.to_utc for why:
 # SQLite storage doesn't convert offsets, so anything not already normalized to UTC
@@ -38,3 +39,20 @@ def _validate_profile_url(value: str) -> str:
 # Use for any client-supplied link meant to be rendered as an <a href> on a public
 # profile - see TutorProfileUpdate.telegram_url/vk_url/youtube_url and TutorExtraLink.
 ProfileUrl = Annotated[str, AfterValidator(_validate_profile_url)]
+
+
+def _validate_video_url(value: str) -> str:
+    """Stricter than _validate_profile_url: this link ends up as an <iframe src>, so it
+    must be a link to a particular video on one of the supported platforms rather than
+    any http(s) address."""
+    value = _validate_profile_url(value)
+    if parse_video_embed_url(value) is None:
+        raise ValueError(
+            "Поддерживаются ссылки на видео с YouTube, RuTube или VK Видео "
+            "(например, https://youtu.be/xxxxxxxxxxx)"
+        )
+    return value
+
+
+# Use for the tutor's profile video (TutorProfileUpdate.video_url).
+VideoUrl = Annotated[str, AfterValidator(_validate_video_url)]

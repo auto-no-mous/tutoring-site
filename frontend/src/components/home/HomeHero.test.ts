@@ -80,4 +80,11 @@ describe("HomeHero", () => {
     mountHero().unmount();
     expect(clearSpy).toHaveBeenCalled();
   });
+
+  // На мобильных <br> скрыт (hidden sm:block), и обе половины заголовка встают в
+  // одну строку. Пробельный узел с переносом строки между тегами компилятор Vue
+  // вырезает, поэтому пробел должен быть явно в тексте - иначе "длярепетиторов".
+  it("keeps a space between the heading halves so it reads correctly with the <br> hidden", () => {
+    expect(mountHero().find("h1").text()).toContain("для репетиторов");
+  });
 });

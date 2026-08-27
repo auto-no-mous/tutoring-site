@@ -6,6 +6,7 @@ import { useRouter } from "vue-router";
 import {
   acceptApplication,
   createGroup,
+  deleteGroup,
   getOccurrenceAttendance,
   listApplications,
   listMembers,
@@ -15,15 +16,18 @@ import {
   removeMember,
   replaceSchedule,
   setOccurrenceAttendance,
+  updateGroup,
   updateOccurrence,
 } from "@/api/groups";
 import { getGroupThread, openThreadWithStudent } from "@/api/chat";
 import { getMyLessonTypes } from "@/api/tutors";
+import { useToastStore } from "@/stores/toast";
 import type { Group, GroupApplication, GroupAttendanceEntry, GroupMembership, GroupOccurrence } from "@/types/group";
 import type { LessonType } from "@/types/tutor";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
 const router = useRouter();
+const toast = useToastStore();
 
 const ATTENDANCE_OPTIONS = [
   { value: "conducted", label: "Присутствовал" },
@@ -137,30 +141,80 @@ async function openGroupChat(group: Group): Promise<void> {
   await router.push({ path: "/cabinet", query: { tab: "chat", thread: thread.id } });
 }
 
-// --- Schedule (periodicity) editing ---------------------------------------------
+// --- Editing a group -------------------------------------------------------------
+// Everything the create form asks for stays editable afterwards, plus deletion. The
+// only exception is the lesson type: it fixes the price per seat that current members
+// signed up for, and the duration of already generated sessions.
 
-const scheduleEditGroupId = ref<string | null>(null);
-const scheduleEditSlots = ref<{ weekday: number; start_time: string }[]>([]);
+const editGroupId = ref<string | null>(null);
+const editName = ref("");
+const editCapacity = ref(1);
+const editMeetingLink = ref("");
+const editSlots = ref<{ weekday: number; start_time: string }[]>([]);
+const isSavingEdit = ref(false);
 
-function startScheduleEdit(group: Group): void {
-  scheduleEditGroupId.value = group.id;
-  scheduleEditSlots.value = group.schedule_slots.map((s) => ({ weekday: s.weekday, start_time: s.start_time.slice(0, 5) }));
+// "18:00:00" from the API vs "18:00" in <input type="time"> - compared and sent in
+// the input's own format.
+function slotsOf(group: Group): { weekday: number; start_time: string }[] {
+  return group.schedule_slots.map((s) => ({ weekday: s.weekday, start_time: s.start_time.slice(0, 5) }));
 }
 
-function addScheduleEditSlot(): void {
-  scheduleEditSlots.value.push({ weekday: 1, start_time: "18:00" });
+function startEdit(group: Group): void {
+  editGroupId.value = group.id;
+  editName.value = group.name;
+  editCapacity.value = group.capacity;
+  editMeetingLink.value = group.meeting_link ?? "";
+  editSlots.value = slotsOf(group);
 }
 
-function removeScheduleEditSlot(i: number): void {
-  scheduleEditSlots.value.splice(i, 1);
+function addEditSlot(): void {
+  editSlots.value.push({ weekday: 1, start_time: "18:00" });
 }
 
-async function saveSchedule(): Promise<void> {
-  if (!scheduleEditGroupId.value) return;
-  const updated = await replaceSchedule(scheduleEditGroupId.value, scheduleEditSlots.value);
-  const idx = groups.value.findIndex((g) => g.id === updated.id);
-  if (idx !== -1) groups.value[idx] = updated;
-  scheduleEditGroupId.value = null;
+function removeEditSlot(i: number): void {
+  editSlots.value.splice(i, 1);
+}
+
+async function saveEdit(group: Group): Promise<void> {
+  isSavingEdit.value = true;
+  try {
+    // Plain fields and the schedule are separate endpoints (the latter also
+    // regenerates upcoming sessions), so the schedule is only touched when it really
+    // changed - otherwise every save would re-run that generation for nothing.
+    let updated = await updateGroup(group.id, {
+      name: editName.value,
+      capacity: editCapacity.value,
+      meeting_link: editMeetingLink.value || null,
+    });
+    if (JSON.stringify(editSlots.value) !== JSON.stringify(slotsOf(group))) {
+      updated = await replaceSchedule(group.id, editSlots.value);
+    }
+    const idx = groups.value.findIndex((g) => g.id === updated.id);
+    if (idx !== -1) groups.value[idx] = updated;
+    editGroupId.value = null;
+    toast.show("Группа сохранена");
+  } catch {
+    toast.show("Не удалось сохранить группу");
+  } finally {
+    isSavingEdit.value = false;
+  }
+}
+
+async function removeGroup(group: Group): Promise<void> {
+  const confirmed = window.confirm(
+    `Удалить группу «${group.name}»? Занятия, заявки и домашние задания группы будут удалены. Чат группы останется доступен в разделе «Чат».`,
+  );
+  if (!confirmed) return;
+  try {
+    await deleteGroup(group.id);
+    editGroupId.value = null;
+    toast.show("Группа удалена, чат сохранён");
+    await load();
+  } catch {
+    // The button is disabled while anyone is still enrolled, so this is the rare
+    // case of the group filling up in another tab.
+    toast.show("Не удалось удалить группу");
+  }
 }
 
 // --- Occurrences / attendance ----------------------------------------------------
@@ -267,34 +321,78 @@ onMounted(load);
           <div v-for="slot in group.schedule_slots" :key="slot.id">
             {{ WEEKDAY_FULL[slot.weekday] }} {{ slot.start_time.slice(0, 5) }}, {{ group.duration_minutes }} мин
           </div>
-          <button type="button" class="mt-0.5 text-xs text-slate-500 underline" @click="startScheduleEdit(group)">
-            Изменить периодичность
+          <button type="button" class="mt-0.5 text-xs text-slate-500 underline" @click="startEdit(group)">
+            Редактировать группу
           </button>
         </div>
 
-        <div v-if="scheduleEditGroupId === group.id" class="mt-2 rounded-md border border-slate-200 p-3 dark:border-slate-800">
-          <div v-for="(slot, i) in scheduleEditSlots" :key="i" class="mt-1 flex items-center gap-2">
-            <select v-model.number="slot.weekday" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700">
-              <option v-for="(wd, idx) in WEEKDAY_ABBR" :key="idx" :value="idx">{{ wd }}</option>
-            </select>
-            <input v-model="slot.start_time" type="time" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700" />
-            <button
-              type="button"
-              class="rounded-md p-1 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-              aria-label="Убрать день"
-              @click="removeScheduleEditSlot(i)"
-            >
-              <X class="h-3.5 w-3.5" />
-            </button>
+        <form
+          v-if="editGroupId === group.id"
+          class="mt-2 flex flex-col gap-3 rounded-md border border-slate-200 p-3 dark:border-slate-800"
+          @submit.prevent="saveEdit(group)"
+        >
+          <label class="flex flex-col gap-1 text-sm">
+            Название группы
+            <input v-model="editName" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
+          </label>
+          <label class="flex flex-col gap-1 text-sm">
+            Вместимость
+            <input
+              v-model.number="editCapacity"
+              type="number"
+              required
+              :min="Math.max(group.member_count, 1)"
+              class="w-24 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
+            />
+            <span v-if="group.member_count > 0" class="text-xs text-slate-500">
+              Не меньше числа участников ({{ group.member_count }}).
+            </span>
+          </label>
+          <label class="flex flex-col gap-1 text-sm">
+            Ссылка на занятие
+            <input v-model="editMeetingLink" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
+          </label>
+          <div>
+            <span class="text-sm">Периодичность (МСК)</span>
+            <div v-for="(slot, i) in editSlots" :key="i" class="mt-1 flex items-center gap-2">
+              <select v-model.number="slot.weekday" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700">
+                <option v-for="(wd, idx) in WEEKDAY_ABBR" :key="idx" :value="idx">{{ wd }}</option>
+              </select>
+              <input v-model="slot.start_time" type="time" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700" />
+              <button
+                type="button"
+                class="rounded-md p-1 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                aria-label="Убрать день"
+                @click="removeEditSlot(i)"
+              >
+                <X class="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <button type="button" class="mt-1 text-xs text-slate-500 underline" @click="addEditSlot">+ день</button>
           </div>
-          <div class="mt-2 flex items-center gap-3">
-            <button type="button" class="text-xs text-slate-500 underline" @click="addScheduleEditSlot">+ день</button>
-            <button type="button" class="rounded-md bg-brand-500 px-3 py-1 text-xs text-white" @click="saveSchedule">
+          <div class="flex items-center gap-3">
+            <button type="submit" :disabled="isSavingEdit" class="rounded-md bg-brand-500 px-3 py-1 text-xs text-white disabled:opacity-50">
               Сохранить
             </button>
-            <button type="button" class="text-xs text-slate-500 underline" @click="scheduleEditGroupId = null">Отмена</button>
+            <button type="button" class="text-xs text-slate-500 underline" @click="editGroupId = null">Отмена</button>
           </div>
-        </div>
+          <div class="border-t border-slate-200 pt-3 dark:border-slate-800">
+            <button
+              type="button"
+              :disabled="group.member_count > 0"
+              class="rounded-md border border-red-300 px-3 py-1 text-xs text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400"
+              @click="removeGroup(group)"
+            >
+              Удалить группу
+            </button>
+            <p class="mt-1 text-xs text-slate-500">
+              <template v-if="group.member_count > 0">
+                Сначала исключите участников ({{ group.member_count }}) — ниже, в разделе «Участники».
+              </template>
+              <template v-else>Чат группы после удаления останется доступен в разделе «Чат».</template>
+            </p>
+          </div>
+        </form>
 
         <div class="mt-3 flex flex-wrap gap-3 text-sm">
           <a v-if="group.meeting_link" :href="group.meeting_link" target="_blank" class="underline">Ссылка на занятие</a>

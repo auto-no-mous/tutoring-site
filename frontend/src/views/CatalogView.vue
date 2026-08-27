@@ -5,6 +5,7 @@ import { useRouter } from "vue-router";
 
 import { listSubjects } from "@/api/subjects";
 import { getCatalog } from "@/api/tutors";
+import ForTutorsNote from "@/components/home/ForTutorsNote.vue";
 import HomeBlog from "@/components/home/HomeBlog.vue";
 import HomeFaq from "@/components/home/HomeFaq.vue";
 import HomeHero from "@/components/home/HomeHero.vue";
@@ -93,13 +94,13 @@ function onSubjectTileSelect(id: string): void {
   scrollToCatalog();
 }
 
-// The card itself is a RouterLink to the tutor's profile; this button sits inside it
-// for a direct shortcut to booking, so its click must not also trigger the card's
+// The card itself is a RouterLink to the tutor's profile; these buttons sit inside it
+// as direct shortcuts to booking, so their clicks must not also trigger the card's
 // own navigation.
-function goToBooking(tutorId: string, event: MouseEvent): void {
+function goToBooking(tutorId: string, event: MouseEvent, format: "individual" | "group" = "individual"): void {
   event.preventDefault();
   event.stopPropagation();
-  router.push(`/tutors/${tutorId}/book`);
+  router.push(format === "group" ? `/tutors/${tutorId}/groups` : `/tutors/${tutorId}/book`);
 }
 
 onMounted(async () => {
@@ -124,7 +125,10 @@ onBeforeUnmount(() => {
     <SubjectTiles :subjects="subjects" :selected-id="subjectId" @select="onSubjectTileSelect" />
 
     <!-- scroll-mt компенсирует липкую шапку, когда сюда скроллят из хиро или с плиток. -->
-    <section ref="catalogSection" class="mx-auto w-full max-w-3xl scroll-mt-20 px-4 pt-16">
+    <!-- max-w-5xl - как у остальных секций главной (хиро, плитки предметов, «Как это
+         работает», «Что внутри платформы»): каталог стоит с ними в одной колонке, и
+         более узкая рамка бросалась в глаза как ошибка вёрстки. -->
+    <section ref="catalogSection" class="mx-auto w-full max-w-5xl scroll-mt-20 px-4 pt-16">
       <h2 class="text-2xl font-semibold tracking-tight">Каталог репетиторов</h2>
       <p class="mt-1.5 text-base text-slate-500 dark:text-slate-400">
         Выберите преподавателя и запишитесь на занятие в пару кликов.
@@ -201,14 +205,29 @@ onBeforeUnmount(() => {
             <p v-if="tutor.about_snippet" class="mt-2 text-base leading-relaxed text-slate-600 dark:text-slate-300">
               {{ tutor.about_snippet }}
             </p>
-            <button
-              v-if="tutor.show_individual_booking"
-              type="button"
-              class="btn-primary mt-3 px-3.5 py-1.5 text-sm"
-              @click="goToBooking(tutor.id, $event)"
+            <!-- Обе кнопки-ярлыка ведут туда же, куда кнопки на самом профиле
+                 (TutorProfileView), и подчиняются тем же флагам с бэкенда. -->
+            <div
+              v-if="tutor.show_individual_booking || tutor.show_group_booking"
+              class="mt-3 flex flex-wrap gap-2"
             >
-              Запись на индивидуальное занятие
-            </button>
+              <button
+                v-if="tutor.show_individual_booking"
+                type="button"
+                class="btn-primary px-3.5 py-1.5 text-sm"
+                @click="goToBooking(tutor.id, $event)"
+              >
+                Запись на индивидуальное занятие
+              </button>
+              <button
+                v-if="tutor.show_group_booking"
+                type="button"
+                class="btn-outline px-3.5 py-1.5 text-sm"
+                @click="goToBooking(tutor.id, $event, 'group')"
+              >
+                Запись на групповое занятие
+              </button>
+            </div>
           </div>
         </RouterLink>
       </TransitionGroup>
@@ -223,6 +242,7 @@ onBeforeUnmount(() => {
 
     <HowItWorks />
     <PlatformFeatures />
+    <ForTutorsNote />
     <HomeBlog />
     <HomeFaq />
   </div>

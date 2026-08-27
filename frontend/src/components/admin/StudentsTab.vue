@@ -3,6 +3,7 @@ import axios from "axios";
 import { onMounted, ref } from "vue";
 
 import { deleteStudent, listStudents, updateStudent } from "@/api/admin";
+import ResetPasswordButton from "@/components/admin/ResetPasswordButton.vue";
 import type { User } from "@/types/user";
 
 const students = ref<User[]>([]);
@@ -121,7 +122,15 @@ onMounted(load);
             <span v-if="!student.is_active" class="ml-1 text-xs text-red-600 dark:text-red-400">(заблокирован)</span>
             <span v-if="student.grade" class="ml-1 text-xs text-slate-400">({{ student.grade }}-й класс)</span>
           </div>
-          <div class="text-slate-500">{{ student.email }}</div>
+          <div class="text-slate-500">
+            {{ student.email }}
+            <span
+              v-if="!student.email_verified"
+              class="ml-1 text-xs text-amber-600 dark:text-amber-400"
+              title="Пользователь не переходил по ссылке из письма подтверждения"
+              >почта не подтверждена</span
+            >
+          </div>
         </div>
         <div class="flex gap-2">
           <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="startEdit(student)">
@@ -130,6 +139,7 @@ onMounted(load);
           <button type="button" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="toggleActive(student)">
             {{ student.is_active ? "Заблокировать" : "Разблокировать" }}
           </button>
+          <ResetPasswordButton :user-id="student.id" :display-name="student.display_name" />
           <button type="button" class="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 dark:border-red-800" @click="remove(student)">
             Удалить
           </button>

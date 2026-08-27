@@ -40,6 +40,26 @@ async def create_group_thread(db: AsyncSession, tutor_id: uuid.UUID, group_id: u
     return thread
 
 
+async def archive_group_thread(db: AsyncSession, group_id: uuid.UUID, group_name: str) -> ChatThread | None:
+    """Detaches a group's chat from the group that is about to be deleted, keeping the
+    messages themselves (section 2.11 - the correspondence is not what's being deleted).
+    The name is copied over because the group row won't be there to supply it anymore.
+
+    Doesn't commit: the caller deletes the group in the same transaction, so the thread
+    must not be left detached if that delete fails.
+    """
+    result = await db.execute(
+        select(ChatThread).where(ChatThread.type == ChatThreadType.GROUP.value, ChatThread.group_id == group_id)
+    )
+    thread = result.scalar_one_or_none()
+    if thread is None:
+        return None
+    thread.archived_group_name = group_name
+    thread.group_id = None
+    await db.flush()
+    return thread
+
+
 async def get_thread_or_404(db: AsyncSession, thread_id: uuid.UUID) -> ChatThread:
     thread = await db.get(ChatThread, thread_id)
     if thread is None:
@@ -75,6 +95,11 @@ async def can_access_thread(db: AsyncSession, thread: ChatThread, user: User) ->
     if user.role == "student":
         if thread.type == ChatThreadType.INDIVIDUAL.value:
             return thread.student_id == user.id
+        # group_id is None on a thread whose group was deleted (archive_group_thread).
+        # Deletion requires an empty group, so no student loses access they still had;
+        # from here on the archive is the tutor's alone.
+        if thread.group_id is None:
+            return False
         return await _is_active_member(db, thread.group_id, user.id)
     return False
 

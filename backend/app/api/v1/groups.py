@@ -203,6 +203,15 @@ async def update_group(group_id: uuid.UUID, payload: GroupUpdate, current_user: 
     return _to_group_out(group, count, duration)
 
 
+@router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_group(group_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> None:
+    """Only for an empty group, and the group chat survives it - see
+    group_service.delete_group."""
+    _require_tutor(current_user)
+    group = await _owned_group(db, current_user, group_id)
+    await group_service.delete_group(db, group)
+
+
 @router.put("/{group_id}/schedule", response_model=GroupOut)
 async def replace_group_schedule(
     group_id: uuid.UUID, payload: list[GroupScheduleSlotIn], current_user: CurrentUser, db: DbSession

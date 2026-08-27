@@ -49,7 +49,7 @@ onBeforeUnmount(stopRotation);
     <div class="flex flex-col items-center gap-8 sm:flex-row sm:items-center sm:gap-10">
       <div class="animate-fade-in-up flex-1 text-center sm:text-left">
         <h1 class="text-3xl font-bold tracking-tight sm:text-5xl">
-          Удобная платформа для<br class="hidden sm:block" />
+          Удобная платформа для <br class="hidden sm:block" />
           <span class="text-brand-600 dark:text-brand-300">репетиторов и учеников</span>
         </h1>
         <!-- Реплики лежат стопкой в одной ячейке грида, а не подменяются через

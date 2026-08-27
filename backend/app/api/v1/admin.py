@@ -13,6 +13,7 @@ from app.schemas.admin import (
     AdminBookingReschedule,
     AdminGroupMemberAdd,
     AdminGroupTutorReassign,
+    AdminPasswordReset,
     AdminStudentUpdate,
     AdminTutorUpdate,
 )
@@ -88,6 +89,7 @@ def _to_profile_out(profile, user: User | None, subjects: list | None = None) ->
             "last_name": user.last_name if user else None,
             "patronymic": user.patronymic if user else None,
             "email": user.email if user else None,
+            "email_verified": user.email_verified if user else None,
             "subjects": subjects or [],
         }
     )
@@ -151,6 +153,16 @@ async def update_student(student_id: uuid.UUID, payload: AdminStudentUpdate, db:
 async def delete_student(student_id: uuid.UUID, db: DbSession) -> None:
     user = await admin_service.get_student_or_404(db, student_id)
     await admin_service.delete_student(db, user)
+
+
+@router.post("/users/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_user_password(user_id: uuid.UUID, payload: AdminPasswordReset, db: DbSession) -> None:
+    """Задаёт пользователю новый пароль вместо отправки ссылки на самостоятельный
+    сброс - нужна, когда письмо до него не доходит. По user_id, а не отдельными
+    ручками для учеников и репетиторов: у TutorProfileOut есть user_id, так что одна
+    ручка покрывает обе вкладки админки. Подробности - admin_service."""
+    user = await admin_service.get_user_or_404(db, user_id)
+    await admin_service.reset_user_password(db, user, payload.new_password)
 
 
 # --- Bookings (individual lessons) -----------------------------------------------

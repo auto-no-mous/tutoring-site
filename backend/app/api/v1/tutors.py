@@ -31,6 +31,7 @@ from app.services import (
     subject_service,
     tutor_service,
 )
+from app.utils.video import parse_video_embed_url
 
 router = APIRouter(prefix="/tutors", tags=["tutors"])
 
@@ -275,6 +276,8 @@ async def get_public_profile(tutor_id: str, db: DbSession) -> TutorPublicProfile
         telegram_url=profile.telegram_url,
         vk_url=profile.vk_url,
         youtube_url=profile.youtube_url,
+        video_url=profile.video_url,
+        video_embed_url=parse_video_embed_url(profile.video_url),
         extra_links=profile.extra_links,
         subjects=subject_service.to_tutor_subject_out(subject_rows),
         avg_rating=avg_rating,

@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import HTTPException, status
@@ -8,6 +9,8 @@ from app.models.enums import SystemNotificationEvent, UserRole
 from app.models.system_notification import NotificationTemplate, SystemNotification
 from app.models.user import User
 from app.utils.time import utcnow
+
+logger = logging.getLogger("app.notifications")
 
 # Default Russian-language template text, seeded into notification_templates on first
 # use (see ensure_default_templates) and shown as a starting point in the admin UI.
@@ -39,7 +42,12 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
     (SystemNotificationEvent.WELCOME, UserRole.TUTOR): (
         "Добро пожаловать на my-tutor.ru",
         "Добро пожаловать, {name}! Ваш профиль репетитора создан. Заполните раздел «Профиль» "
-        "и настройте расписание во вкладке «Расписание», чтобы ученики могли записываться на занятия.",
+        "и настройте расписание во вкладке «Расписание», чтобы ученики могли записываться на занятия.\n\n"
+        "Важно: my-tutor.ru — это прежде всего инструмент для ведения занятий: расписание, группы, "
+        "домашние задания, напоминания и чат. Каталог сайта пока не продвигается среди учеников, "
+        "поэтому просто ждать заявок из него не стоит. Разместите ссылку на свою страницу там, где вас "
+        "уже находят, — в соцсетях, мессенджерах, объявлениях: ученик откроет её, увидит ваше "
+        "расписание и запишется сам. Адрес страницы настраивается в разделе «Профиль».",
     ),
     (SystemNotificationEvent.WELCOME, UserRole.STUDENT): (
         "Добро пожаловать на my-tutor.ru",
@@ -102,6 +110,16 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
         "Скоро занятие",
         "Через {lead_minutes} мин ({time}) у вас занятие с репетитором {tutor_name}.",
     ),
+    (SystemNotificationEvent.PASSWORD_CHANGED_BY_ADMIN, UserRole.TUTOR): (
+        "Пароль изменён администратором",
+        "Здравствуйте, {name}! Администратор сайта задал новый пароль для вашего аккаунта, "
+        "и все активные сессии завершены. Если вы не просили об этом, свяжитесь с администрацией.",
+    ),
+    (SystemNotificationEvent.PASSWORD_CHANGED_BY_ADMIN, UserRole.STUDENT): (
+        "Пароль изменён администратором",
+        "Здравствуйте, {name}! Администратор сайта задал новый пароль для вашего аккаунта, "
+        "и все активные сессии завершены. Если вы не просили об этом, свяжитесь с администрацией.",
+    ),
 }
 
 
@@ -149,16 +167,42 @@ async def _get_template(db: AsyncSession, event: SystemNotificationEvent, role: 
 
 async def notify(db: AsyncSession, user_id: uuid.UUID, event: SystemNotificationEvent, **params: str) -> None:
     """Creates an in-app "Системные уведомления" notification for `user_id`. Never
-    raises on a missing user/template - like notification_service.notify, this must
-    not break the calling business operation (booking, login, ...)."""
-    user = await db.get(User, user_id)
-    if user is None:
+    raises - like notification_service.notify, this must not break the calling
+    business operation (booking, login, ...).
+
+    Раньше гасился только отсутствующий пользователь или шаблон, а всё остальное
+    летело наверх. Это ставило побочный эффект выше самой операции: шаблоны правит
+    админ в UI, а _render прогоняет их через format_map - одной непарной фигурной
+    скобки в тексте хватало, чтобы 500 получили вход в аккаунт (authenticate_user
+    зовёт notify и на успехе, и на неудаче) и регистрация (уже после коммита
+    пользователя, оставляя аккаунт, который никто не заводил).
+    """
+    try:
+        user = await db.get(User, user_id)
+        if user is None:
+            return
+        title, body_template = await _get_template(db, event, user.role)
+        body = _render(body_template, params)
+    except Exception:
+        logger.exception(
+            "SYSTEM NOTIFICATION: не удалось собрать уведомление event=%s user_id=%s", event.value, user_id
+        )
         return
 
-    title, body_template = await _get_template(db, event, user.role)
-    body = _render(body_template, params)
-    db.add(SystemNotification(user_id=user_id, event_type=event.value, title=title, body=body))
-    await db.commit()
+    # Запись отделена от подготовки намеренно. Ровно тот сбой, ради которого всё это
+    # писалось (непарная скобка в шаблоне), происходит выше и до единой записи в базу -
+    # значит откатывать нечего, и сессию вызывающего трогать нельзя: её rollback
+    # "протухает" уже загруженные им объекты, и следующее же обращение к их полям
+    # падает на ленивой подгрузке (MissingGreenlet). Здесь же, если не прошёл сам
+    # commit, сессия и так непригодна к дальнейшему использованию без отката.
+    try:
+        db.add(SystemNotification(user_id=user_id, event_type=event.value, title=title, body=body))
+        await db.commit()
+    except Exception:
+        logger.exception(
+            "SYSTEM NOTIFICATION: не удалось сохранить уведомление event=%s user_id=%s", event.value, user_id
+        )
+        await db.rollback()
 
 
 async def list_for_user(db: AsyncSession, user_id: uuid.UUID, limit: int = 100) -> list[SystemNotification]:

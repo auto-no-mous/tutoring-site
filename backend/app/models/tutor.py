@@ -41,6 +41,12 @@ class TutorProfile(UUIDPKMixin, TimestampMixin, Base):
     youtube_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     extra_links: Mapped[list[dict]] = mapped_column(JSON, default=list)
 
+    # A single presentation video shown on the public profile. Stored exactly as the
+    # tutor pasted it (so the edit form shows them their own link back); the embeddable
+    # form is derived on read - see app.utils.video.parse_video_embed_url, which is
+    # also what validates it on write.
+    video_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
     # Schedule settings (section 2.3), shared across the tutor's whole schedule.
     slot_granularity_minutes: Mapped[int] = mapped_column(
         Integer, default=settings.default_slot_granularity_minutes

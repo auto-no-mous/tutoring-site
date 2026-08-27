@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useAuthStore } from "@/stores/auth";
+import { apiErrorMessage } from "@/utils/apiError";
 
 const email = ref("");
 const password = ref("");
@@ -20,8 +21,8 @@ async function onSubmit(): Promise<void> {
     await auth.login(email.value, password.value);
     const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/cabinet";
     await router.push(redirect);
-  } catch {
-    error.value = "Неверная почта или пароль";
+  } catch (err) {
+    error.value = apiErrorMessage(err, "Неверная почта или пароль");
   } finally {
     isSubmitting.value = false;
   }

@@ -4,13 +4,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import UserRole
+from app.models.enums import SystemNotificationEvent, UserRole
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.schemas.email import AdminEmailSend, AdminEmailSendResult
 from app.services.email_service import send_admin_email
 from app.schemas.admin import AdminStudentUpdate, AdminTutorUpdate
-from app.services import auth_service
+from app.services import auth_service, system_notification_service
 from app.utils.names import compose_display_name
 
 
@@ -83,6 +83,26 @@ async def get_student_or_404(db: AsyncSession, student_id: uuid.UUID) -> User:
     if user is None or user.role != UserRole.STUDENT.value:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не найден")
     return user
+
+
+async def get_user_or_404(db: AsyncSession, user_id: uuid.UUID) -> User:
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    return user
+
+
+async def reset_user_password(db: AsyncSession, user: User, new_password: str) -> None:
+    """Админский сброс пароля - последняя линия поддержки, когда до пользователя не
+    доходит письмо со ссылкой (не подтверждена почта, письмо не дошло, адрес утрачен).
+
+    Пользователя об этом уведомляем: смена пароля извне - событие, о котором владелец
+    аккаунта обязан узнать, даже если он сам её и попросил.
+    """
+    await auth_service.set_password(db, user, new_password)
+    await system_notification_service.notify(
+        db, user.id, SystemNotificationEvent.PASSWORD_CHANGED_BY_ADMIN, name=user.first_name
+    )
 
 
 async def update_student(db: AsyncSession, user: User, payload: AdminStudentUpdate) -> User:

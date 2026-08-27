@@ -2,7 +2,7 @@ import datetime as dt
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,6 +17,7 @@ from app.models.enums import (
     UserRole,
 )
 from app.models.group import Group, GroupApplication, GroupAttendance, GroupMembership, GroupOccurrence, GroupSchedule
+from app.models.homework import HomeworkAssignment, HomeworkSubmission
 from app.models.lesson_type import LessonType
 from app.models.tutor import TutorProfile
 from app.models.user import User
@@ -112,11 +113,80 @@ async def create_group(db: AsyncSession, tutor: TutorProfile, payload: GroupCrea
 
 
 async def update_group(db: AsyncSession, group: Group, payload: GroupUpdate) -> Group:
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    fields = payload.model_dump(exclude_unset=True)
+
+    # Every field here is optional in the schema, but only meeting_link is nullable in
+    # the database - an explicit null for the others means "field left empty in the
+    # form", not "clear it", and would otherwise hit a NOT NULL constraint.
+    for field in ("name", "capacity", "is_active"):
+        if field in fields and fields[field] is None:
+            del fields[field]
+
+    # Capacity is what accept_application checks against, so it can't be lowered past
+    # the members already enrolled - that would leave the group permanently overfull
+    # with no way to fix it other than removing someone.
+    new_capacity = fields.get("capacity")
+    if new_capacity is not None:
+        members = await count_active_members(db, group.id)
+        if new_capacity < members:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"В группе уже {members} участник(ов) - вместимость нельзя сделать меньше",
+            )
+
+    for field, value in fields.items():
         setattr(group, field, value)
     await db.commit()
     await db.refresh(group)
     return group
+
+
+async def delete_group(db: AsyncSession, group: Group) -> None:
+    """Removes a group and everything scheduled around it, but deliberately NOT its
+    chat: the thread is detached and kept as an archive (see
+    chat_service.archive_group_thread).
+
+    Only allowed once the group is empty - members are people with a place in a
+    schedule, so emptying the group is a separate, deliberate step by the tutor rather
+    than a side effect of one confirm dialog.
+    """
+    members = await count_active_members(db, group.id)
+    if members:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Сначала исключите участников: в группе их ещё {members}",
+        )
+
+    await chat_service.archive_group_thread(db, group.id, group.name)
+
+    # Explicit deletes rather than ORM cascade: the relationship cascades would have to
+    # lazy-load every collection, which isn't allowed on an AsyncSession. Order follows
+    # the foreign keys - attendances hang off occurrences, the rest off the group.
+    occurrence_ids = (
+        (await db.execute(select(GroupOccurrence.id).where(GroupOccurrence.group_id == group.id)))
+        .scalars()
+        .all()
+    )
+    if occurrence_ids:
+        await db.execute(delete(GroupAttendance).where(GroupAttendance.occurrence_id.in_(occurrence_ids)))
+    await db.execute(delete(GroupOccurrence).where(GroupOccurrence.group_id == group.id))
+    await db.execute(delete(GroupMembership).where(GroupMembership.group_id == group.id))
+    await db.execute(delete(GroupApplication).where(GroupApplication.group_id == group.id))
+    await db.execute(delete(GroupSchedule).where(GroupSchedule.group_id == group.id))
+
+    # Homework addressed to the group as a whole goes with it; per-student submissions
+    # hang off the assignment.
+    assignment_ids = (
+        (await db.execute(select(HomeworkAssignment.id).where(HomeworkAssignment.group_id == group.id)))
+        .scalars()
+        .all()
+    )
+    if assignment_ids:
+        await db.execute(delete(HomeworkSubmission).where(HomeworkSubmission.assignment_id.in_(assignment_ids)))
+        await db.execute(delete(HomeworkAssignment).where(HomeworkAssignment.id.in_(assignment_ids)))
+
+    await db.execute(delete(Group).where(Group.id == group.id))
+    await db.commit()
 
 
 async def replace_schedule(db: AsyncSession, group: Group, slots: list[GroupScheduleSlotIn]) -> Group:

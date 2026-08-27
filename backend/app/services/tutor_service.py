@@ -130,6 +130,24 @@ async def search_catalog(
     tutor_ids = [profile.id for profile, *_ in rows]
     ratings = await review_service.get_rating_summaries(db, tutor_ids)
     subjects_by_tutor = await subject_service.get_subject_names_for_tutors(db, tutor_ids)
+    # Group lesson types aren't part of price_agg (it covers individual formats only,
+    # since group seats aren't comparable per hour), so whether to show the group
+    # booking button needs its own lookup - one query for the whole page.
+    tutors_with_group_type = set(
+        (
+            await db.execute(
+                select(LessonType.tutor_id)
+                .where(
+                    LessonType.tutor_id.in_(tutor_ids),
+                    LessonType.is_active.is_(True),
+                    LessonType.format == LessonFormat.GROUP.value,
+                )
+                .distinct()
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     about_snippet_length = 140
 
@@ -163,6 +181,8 @@ async def search_catalog(
                 # tells us whether the tutor has one - same rule as the public
                 # profile's show_individual_booking.
                 "show_individual_booking": bool(profile.allow_individual_bookings) and hourly_price is not None,
+                "show_group_booking": bool(profile.allow_group_bookings)
+                and profile.id in tutors_with_group_type,
             }
         )
     return items, total

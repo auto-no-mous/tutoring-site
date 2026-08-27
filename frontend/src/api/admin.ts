@@ -64,6 +64,15 @@ export async function deleteStudent(id: string) {
   await apiClient.delete(`/admin/students/${id}`);
 }
 
+// --- Пользователи (любая роль) --------------------------------------------------
+
+// По user_id, а не по роли: у TutorProfile есть user_id, так что обе вкладки админки
+// зовут одну и ту же ручку. Отзывает все refresh-токены пользователя и снимает
+// блокировку после неудачных попыток входа - см. backend admin_service.
+export async function resetUserPassword(userId: string, newPassword: string) {
+  await apiClient.post(`/admin/users/${userId}/password`, { new_password: newPassword });
+}
+
 // --- Bookings -----------------------------------------------------------------
 
 export interface BookingPage {

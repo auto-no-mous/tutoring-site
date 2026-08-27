@@ -79,6 +79,7 @@ async function load(): Promise<void> {
   telegramInput.value = profileData.telegram_url ?? "";
   vkInput.value = profileData.vk_url ?? "";
   youtubeInput.value = profileData.youtube_url ?? "";
+  videoInput.value = profileData.video_url ?? "";
   extraLinksInput.splice(0, extraLinksInput.length, ...profileData.extra_links);
   allSubjects.value = subjectsData;
   for (const entry of mySubjectsData) {
@@ -126,6 +127,7 @@ async function saveSubjects(): Promise<void> {
 const telegramInput = ref("");
 const vkInput = ref("");
 const youtubeInput = ref("");
+const videoInput = ref("");
 const extraLinksInput = reactive<TutorExtraLink[]>([]);
 const saveError = ref("");
 
@@ -149,6 +151,7 @@ async function save(): Promise<void> {
       telegram_url: telegramInput.value.trim() || null,
       vk_url: vkInput.value.trim() || null,
       youtube_url: youtubeInput.value.trim() || null,
+      video_url: videoInput.value.trim() || null,
       extra_links: extraLinksInput
         .map((link) => ({ label: link.label.trim(), url: link.url.trim() }))
         .filter((link) => link.label && link.url),
@@ -156,11 +159,14 @@ async function save(): Promise<void> {
     telegramInput.value = profile.value.telegram_url ?? "";
     vkInput.value = profile.value.vk_url ?? "";
     youtubeInput.value = profile.value.youtube_url ?? "";
+    videoInput.value = profile.value.video_url ?? "";
     extraLinksInput.splice(0, extraLinksInput.length, ...profile.value.extra_links);
     savedMessage.value = "Сохранено";
   } catch (err) {
     if (axios.isAxiosError(err) && err.response?.status === 422) {
-      saveError.value = "Проверьте правильность ссылок — они должны начинаться с http:// или https://";
+      saveError.value = videoInput.value.trim()
+        ? "Проверьте ссылки: обычные должны начинаться с http:// или https://, а видео — быть ссылкой на ролик с YouTube, RuTube или VK Видео"
+        : "Проверьте правильность ссылок — они должны начинаться с http:// или https://";
     } else {
       saveError.value = "Не удалось сохранить профиль";
     }
@@ -300,6 +306,20 @@ onMounted(load);
             + Добавить ссылку
           </button>
         </div>
+      </div>
+
+      <div class="flex flex-col gap-2 text-sm">
+        <span class="font-medium">Видео на странице</span>
+        <p class="text-xs text-slate-500">
+          Ролик с YouTube, RuTube или VK Видео — будет встроен в вашу публичную страницу под описанием.
+          Вставьте обычную ссылку на видео, например https://youtu.be/xxxxxxxxxxx. Оставьте поле пустым, чтобы убрать видео.
+        </p>
+        <input
+          v-model="videoInput"
+          type="url"
+          placeholder="https://youtu.be/…, https://rutube.ru/video/… или https://vk.com/video-…"
+          class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700"
+        />
       </div>
 
       <div class="flex flex-col gap-1 text-sm">

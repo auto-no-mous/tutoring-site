@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_email_verification_token, create_password_reset_token
+from app.models.system_notification import NotificationTemplate
 from app.models.user import User
 from app.services import telegram_service
 
@@ -345,3 +346,97 @@ async def test_password_reset_revokes_existing_refresh_tokens(client: AsyncClien
         "/api/v1/auth/login", json={"email": "resetflow@example.com", "password": "brandnewpassword1"}
     )
     assert new_login.status_code == 200
+
+
+async def test_broken_notification_template_breaks_neither_signup_nor_login(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Регрессия. Шаблоны системных уведомлений правит админ в UI, а рендерятся они
+    через format_map - одной непарной фигурной скобки в тексте достаточно, чтобы шаг
+    упал. Раньше это исключение летело наверх и роняло саму операцию:
+
+    - регистрацию, причём уже ПОСЛЕ коммита пользователя: человек получал 500 при
+      реально созданном аккаунте, а на повторную попытку - 409 "почта уже существует"
+      про аккаунт, которого он не заводил и пароля к которому не знал;
+    - вход, потому что authenticate_user зовёт notify и на успехе, и на неудаче.
+    """
+    # Строки шаблонов в тестовой БД не засеяны (ensure_default_templates вызывается в
+    # lifespan, которого здесь нет), поэтому добавляем их сами - иначе _get_template
+    # молча возьмёт заведомо исправный DEFAULT_TEMPLATES и ломать будет нечего.
+    for event in ("welcome", "login_success"):
+        db_session.add(
+            NotificationTemplate(
+                event_type=event,
+                role="student",
+                title="Заголовок",
+                # Непарная "{" - ровно то, что легко набрать в админке руками.
+                body="Здравствуйте, {name}! Скидка 50% на { всё",
+            )
+        )
+    await db_session.commit()
+
+    payload = {
+        "email": "resilient-signup@example.com",
+        "password": "supersecret1",
+        "first_name": "Иван",
+        "last_name": "Иванов",
+        "role": "student",
+        "pd_consent": True,
+    }
+    resp = await client.post("/api/v1/auth/register", json=payload)
+    assert resp.status_code == 201, resp.text
+
+    login = await client.post(
+        "/api/v1/auth/login", json={"email": payload["email"], "password": payload["password"]}
+    )
+    assert login.status_code == 200, login.text
+
+    # Уведомление не создалось - но это единственное последствие, а не отказ операции.
+    user = (
+        await db_session.execute(select(User).where(User.email == payload["email"]))
+    ).scalar_one()
+    assert user.email == payload["email"]
+
+
+async def test_registration_survives_a_failing_verification_email(
+    client: AsyncClient, monkeypatch
+) -> None:
+    """Вторая половина того же: письмо подтверждения - тоже побочный эффект. SMTP-ошибки
+    гасит сам send_email, но не всё, что рядом (создание токена, журнал)."""
+    from app.services import auth_service
+
+    async def broken_send(*args: object, **kwargs: object) -> bool:
+        raise RuntimeError("SMTP расплавился")
+
+    monkeypatch.setattr(auth_service, "send_verification_email", broken_send)
+
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "no-mail-signup@example.com",
+            "password": "supersecret1",
+            "first_name": "Пётр",
+            "last_name": "Петров",
+            "role": "tutor",
+            "pd_consent": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_duplicate_registration_tells_the_user_what_to_do(client: AsyncClient) -> None:
+    payload = {
+        "email": "duplicate-signup@example.com",
+        "password": "supersecret1",
+        "first_name": "Анна",
+        "last_name": "Аннова",
+        "role": "student",
+        "pd_consent": True,
+    }
+    assert (await client.post("/api/v1/auth/register", json=payload)).status_code == 201
+
+    again = await client.post("/api/v1/auth/register", json=payload)
+    assert again.status_code == 409
+    # Тупик "почта занята" - самый частый для живого человека, поэтому ответ обязан
+    # содержать выход, а не только констатацию.
+    assert "восстановите пароль" in again.json()["detail"]

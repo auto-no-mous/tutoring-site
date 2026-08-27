@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +26,8 @@ from app.services import system_notification_service
 from app.services.email_service import send_password_reset_email, send_verification_email
 from app.utils.names import compose_display_name
 from app.utils.time import ensure_aware, utcnow
+
+logger = logging.getLogger("app.auth")
 
 
 async def _get_user_by_email(db: AsyncSession, email: str) -> User | None:
@@ -131,7 +134,10 @@ async def update_user_settings(db: AsyncSession, user: User, payload: UserSettin
 async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
     existing = await _get_user_by_email(db, payload.email)
     if existing is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Пользователь с такой почтой уже существует")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Пользователь с такой почтой уже существует. Войдите или восстановите пароль.",
+        )
 
     user = User(
         role=payload.role,
@@ -154,8 +160,18 @@ async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
     await db.commit()
     await db.refresh(user)
 
-    token = create_email_verification_token(str(user.id))
-    await send_verification_email(user.email, token, user.id)
+    # Всё, что ниже - побочные эффекты уже состоявшейся регистрации, и ни один из них
+    # не должен её отменять. Аккаунт к этому моменту уже зафиксирован в базе, поэтому
+    # исключение отсюда превращается в 500 при фактически созданном пользователе:
+    # человек видит ошибку, а повторная попытка с той же почтой упирается в 409
+    # "уже существует" - аккаунт, которого он не заводил и пароля к которому не знает.
+    # notify() гасит свои ошибки сам (см. system_notification_service), send_email -
+    # ошибки SMTP, а здесь остаётся выпуск токена подтверждения.
+    try:
+        token = create_email_verification_token(str(user.id))
+        await send_verification_email(user.email, token, user.id)
+    except Exception:
+        logger.exception("REGISTER: не удалось отправить письмо подтверждения user_id=%s", user.id)
 
     await system_notification_service.notify(
         db, user.id, SystemNotificationEvent.WELCOME, name=user.first_name
@@ -289,6 +305,27 @@ async def request_password_reset(db: AsyncSession, email: str) -> None:
     await send_password_reset_email(user.email, token, user.id)
 
 
+async def set_password(db: AsyncSession, user: User, new_password: str) -> None:
+    """Задаёт пароль и обрывает все действующие сессии пользователя.
+
+    Общая точка для самостоятельного сброса по ссылке из письма и для сброса
+    админом (app.services.admin_service): смена пароля почти всегда реакция на
+    компрометацию, поэтому любой refresh-токен, выданный до неё, должен перестать
+    работать немедленно, а не дожить до собственного истечения.
+    """
+    user.password_hash = hash_password(new_password)
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked.is_(False))
+        .values(revoked=True)
+    )
+    # Блокировка после неудачных попыток тоже снимается: иначе пользователь получит
+    # верный пароль и всё равно упрётся в "аккаунт временно заблокирован".
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    await db.commit()
+
+
 async def confirm_password_reset(db: AsyncSession, payload: PasswordResetConfirm) -> None:
     try:
         decoded = decode_token(payload.token)
@@ -301,13 +338,4 @@ async def confirm_password_reset(db: AsyncSession, payload: PasswordResetConfirm
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
 
-    user.password_hash = hash_password(payload.new_password)
-    # A password reset is often a compromise response - any refresh token issued
-    # before it (e.g. to an attacker who had one) must stop working immediately,
-    # rather than staying valid until its own expiry.
-    await db.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user.id, RefreshToken.revoked.is_(False))
-        .values(revoked=True)
-    )
-    await db.commit()
+    await set_password(db, user, payload.new_password)

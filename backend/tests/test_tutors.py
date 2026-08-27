@@ -312,6 +312,37 @@ async def test_catalog_item_has_about_snippet_and_booking_flag(client: AsyncClie
     assert item["show_individual_booking"] is True
 
 
+async def test_catalog_item_group_booking_flag(client: AsyncClient) -> None:
+    """The catalog card shows "Запись на групповое занятие" under the same rule as the
+    public profile: the tutor's own toggle AND an active group-format lesson type."""
+    tutor = await _register_tutor(client, "catalog-group-tutor@example.com")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+
+    async def catalog_item() -> dict:
+        resp = await client.get("/api/v1/tutors", params={"page_size": 100})
+        return next(i for i in resp.json()["items"] if i["id"] == tutor_id)
+
+    # allow_group_bookings defaults to True, but without a group lesson type there is
+    # nothing to sign up for.
+    assert (await catalog_item())["show_group_booking"] is False
+
+    await client.post(
+        "/api/v1/tutors/me/lesson-types",
+        headers=tutor["headers"],
+        json={"name": "Группа", "format": "group", "duration_minutes": 90, "price": 500},
+    )
+    item = await catalog_item()
+    assert item["show_group_booking"] is True
+    # An individual-format button must not appear just because a group type exists.
+    assert item["show_individual_booking"] is False
+
+    # Turning the setting off hides the button again even though the type stays active.
+    await client.patch(
+        "/api/v1/tutors/me", headers=tutor["headers"], json={"allow_group_bookings": False}
+    )
+    assert (await catalog_item())["show_group_booking"] is False
+
+
 async def test_slot_computation_respects_break_and_conflicts(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -505,3 +536,36 @@ async def test_student_detail_reachable_via_booking_alone(client: AsyncClient) -
     assert detail["last_name"] == "Петрова"
     assert detail["grade"] == 9
     assert detail["groups"] == []
+
+
+async def test_profile_video_is_validated_and_exposed_as_embed(client: AsyncClient) -> None:
+    """Tutors can put a presentation video on their profile; the public profile also
+    carries the ready-to-embed player URL (see app/utils/video.py)."""
+    tutor = await _register_tutor(client, "video-tutor@example.com")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+
+    saved = await client.patch(
+        "/api/v1/tutors/me",
+        headers=tutor["headers"],
+        json={"video_url": "https://youtu.be/dQw4w9WgXcQ"},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["video_url"] == "https://youtu.be/dQw4w9WgXcQ"
+
+    public = (await client.get(f"/api/v1/tutors/{tutor_id}")).json()
+    assert public["video_url"] == "https://youtu.be/dQw4w9WgXcQ"
+    assert public["video_embed_url"] == "https://www.youtube.com/embed/dQw4w9WgXcQ"
+
+    # A link outside the supported platforms is refused rather than embedded blindly.
+    rejected = await client.patch(
+        "/api/v1/tutors/me", headers=tutor["headers"], json={"video_url": "https://vimeo.com/123456"}
+    )
+    assert rejected.status_code == 422
+    assert (await client.get(f"/api/v1/tutors/{tutor_id}")).json()["video_embed_url"] is not None
+
+    # Explicit null clears it.
+    cleared = await client.patch("/api/v1/tutors/me", headers=tutor["headers"], json={"video_url": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["video_url"] is None
+    public_after = (await client.get(f"/api/v1/tutors/{tutor_id}")).json()
+    assert public_after["video_url"] is None and public_after["video_embed_url"] is None

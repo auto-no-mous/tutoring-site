@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useAuthStore } from "@/stores/auth";
+import { apiErrorMessage } from "@/utils/apiError";
 import type { UserRole } from "@/types/user";
 
 const email = ref("");
@@ -37,8 +38,10 @@ async function onSubmit(): Promise<void> {
       pd_consent: pdConsent.value,
     });
     await router.push("/cabinet");
-  } catch {
-    error.value = "Не удалось зарегистрироваться. Проверьте данные.";
+  } catch (err) {
+    // Причина почти всегда известна серверу (почта занята, лимит попыток,
+    // недоступность) - показываем её, а не общее "проверьте данные".
+    error.value = apiErrorMessage(err, "Не удалось зарегистрироваться. Проверьте данные.");
   } finally {
     isSubmitting.value = false;
   }

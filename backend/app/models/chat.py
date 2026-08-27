@@ -30,10 +30,17 @@ class ChatThread(UUIDPKMixin, TimestampMixin, Base):
     student_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    # Set for group threads; null for individual threads.
+    # Set for group threads; null for individual threads - and cleared again if the
+    # group is deleted, since the chat deliberately outlives its group (see
+    # group_service.delete_group). Hence SET NULL, not CASCADE: the correspondence
+    # stays readable to the tutor as an archive.
     group_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("groups.id", ondelete="CASCADE"), nullable=True, index=True
+        ForeignKey("groups.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Name the group had at the moment it was deleted. Written only then (a live group
+    # is the better source, see api/v1/chat.py::_display_title), so that an archived
+    # thread still has a heading in the chat list instead of an empty one.
+    archived_group_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     messages: Mapped[list["ChatMessage"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan", order_by="ChatMessage.created_at"

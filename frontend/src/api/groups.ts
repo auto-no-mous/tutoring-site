@@ -30,6 +30,12 @@ export async function updateGroup(id: string, payload: Partial<Group>) {
   return data;
 }
 
+// Rejected with 409 while the group still has members - see
+// backend services/group_service.py::delete_group. The group chat is kept.
+export async function deleteGroup(id: string) {
+  await apiClient.delete(`/groups/${id}`);
+}
+
 export async function replaceSchedule(id: string, slots: GroupScheduleSlot[]) {
   const { data } = await apiClient.put<Group>(`/groups/${id}/schedule`, slots);
   return data;

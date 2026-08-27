@@ -145,6 +145,7 @@ class SystemNotificationEvent(StrEnum):
     GROUP_APPLICATION_REJECTED = "group_application_rejected"
     HOMEWORK_ASSIGNED = "homework_assigned"
     UPCOMING_LESSON_REMINDER = "upcoming_lesson_reminder"
+    PASSWORD_CHANGED_BY_ADMIN = "password_changed_by_admin"
 
 
 class ActivityEventType(StrEnum):
