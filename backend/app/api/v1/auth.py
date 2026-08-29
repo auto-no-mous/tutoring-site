@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, File, Request, UploadFile, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, CurrentUserOptional, DbSession
 from app.core.rate_limit import limiter
 from app.schemas.auth import (
     EmailVerifyRequest,
@@ -13,10 +13,17 @@ from app.schemas.auth import (
     RegisterResponse,
     TelegramLinkTokenOut,
     TokenPair,
-    VKAuthRequest,
+)
+from app.schemas.oauth import (
+    OAuthCallbackRequest,
+    OAuthCallbackResponse,
+    OAuthCompleteRequest,
+    OAuthProviderOut,
+    OAuthStartRequest,
+    OAuthStartResponse,
 )
 from app.schemas.user import UserOut, UserSettingsUpdate
-from app.services import auth_service, telegram_service, vk_service
+from app.services import auth_service, file_service, oauth_service, telegram_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -86,10 +93,67 @@ async def update_me(payload: UserSettingsUpdate, current_user: CurrentUser, db: 
     return UserOut.model_validate(user)
 
 
-@router.post("/vk", response_model=RegisterResponse)
-@limiter.limit("10/minute")
-async def vk_login(request: Request, payload: VKAuthRequest, db: DbSession) -> RegisterResponse:
-    result = await vk_service.exchange_code(payload.code, payload.redirect_uri)
-    user = await auth_service.login_or_register_vk_user(db, result.vk_id, payload)
+@router.post("/me/photo", response_model=UserOut)
+async def upload_my_photo(
+    current_user: CurrentUser, db: DbSession, file: UploadFile = File(...)
+) -> UserOut:
+    """Аватар аккаунта. У репетитора фото анкеты меняется отдельно, в профиле
+    (POST /tutors/me/photo) - это разные картинки, см. User.photo_url."""
+    photo_url = await file_service.save_upload(file, "user-photos", file_service.ALLOWED_IMAGE_TYPES)
+    user = await auth_service.set_photo(db, current_user, photo_url)
+    return UserOut.model_validate(user)
+
+
+@router.delete("/me/photo", response_model=UserOut)
+async def delete_my_photo(current_user: CurrentUser, db: DbSession) -> UserOut:
+    user = await auth_service.set_photo(db, current_user, None)
+    return UserOut.model_validate(user)
+
+
+@router.get("/oauth/providers", response_model=list[OAuthProviderOut])
+async def list_oauth_providers() -> list[OAuthProviderOut]:
+    """Какие внешние провайдеры входа настроены на сервере - фронтенд показывает
+    только их кнопки."""
+    return [OAuthProviderOut(**item) for item in await oauth_service.list_providers()]
+
+
+@router.post("/oauth/{provider}/start", response_model=OAuthStartResponse)
+@limiter.limit("20/minute")
+async def oauth_start(
+    request: Request,
+    provider: str,
+    payload: OAuthStartRequest,
+    db: DbSession,
+    current_user: CurrentUserOptional,
+) -> OAuthStartResponse:
+    """Начало авторизации у провайдера. С токеном в заголовке это привязка провайдера
+    к текущему аккаунту, без токена - вход или регистрация."""
+    auth_url = await oauth_service.start_authorization(
+        db, provider, payload.redirect_to, current_user
+    )
+    return OAuthStartResponse(auth_url=auth_url)
+
+
+@router.post("/oauth/{provider}/callback", response_model=OAuthCallbackResponse)
+@limiter.limit("20/minute")
+async def oauth_callback(
+    request: Request, provider: str, payload: OAuthCallbackRequest, db: DbSession
+) -> OAuthCallbackResponse:
+    return await oauth_service.handle_callback(db, provider, payload)
+
+
+@router.post("/oauth/complete", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/hour")
+async def oauth_complete(
+    request: Request, payload: OAuthCompleteRequest, db: DbSession
+) -> RegisterResponse:
+    """Второй шаг первого входа через провайдера: роль и согласие на обработку ПД."""
+    user = await oauth_service.complete_signup(db, payload)
     tokens = await auth_service.issue_token_pair(db, user)
     return RegisterResponse(user=UserOut.model_validate(user), tokens=tokens)
+
+
+@router.delete("/me/identities/{provider}", response_model=UserOut)
+async def unlink_identity(provider: str, current_user: CurrentUser, db: DbSession) -> UserOut:
+    user = await oauth_service.unlink_identity(db, current_user, provider)
+    return UserOut.model_validate(user)

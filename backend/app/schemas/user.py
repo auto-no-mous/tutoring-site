@@ -16,6 +16,7 @@ class UserOut(BaseModel):
     last_name: str
     patronymic: str | None
     grade: int | None
+    photo_url: str | None
     role: str
     email_verified: bool
     is_active: bool
@@ -23,6 +24,9 @@ class UserOut(BaseModel):
     telegram_chat_id: str | None
     notification_channel: str
     reminder_lead_minutes: int
+    # Чем можно войти в аккаунт: "password" и/или провайдеры (vk, yandex) - см.
+    # User.auth_providers. Раздел "Способы входа" в настройках строится по нему.
+    auth_providers: list[str]
     created_at: UTCDateTime
 
 

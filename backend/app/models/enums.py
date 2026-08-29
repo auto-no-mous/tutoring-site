@@ -8,8 +8,12 @@ class UserRole(StrEnum):
 
 
 class AuthProvider(StrEnum):
+    """Способы входа. PASSWORD - почта + пароль, остальные - внешние провайдеры,
+    у которых есть строка в user_identities (см. app.services.oauth_providers)."""
+
     PASSWORD = "password"
     VK = "vk"
+    YANDEX = "yandex"
 
 
 class LessonFormat(StrEnum):

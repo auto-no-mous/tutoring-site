@@ -14,6 +14,10 @@ class TokenType(StrEnum):
     REFRESH = "refresh"
     EMAIL_VERIFY = "email_verify"
     PASSWORD_RESET = "password_reset"
+    # Промежуточный токен между колбэком VK/Яндекса и созданием аккаунта: провайдер
+    # подтвердил, кто пользователь, но роль и согласие на обработку ПД он ещё не
+    # выбрал - см. app.services.oauth_service.
+    OAUTH_SIGNUP = "oauth_signup"
 
 
 # bcrypt hard-caps input at 72 bytes; anything past that is truncated (matches common
@@ -80,6 +84,37 @@ def create_password_reset_token(user_id: str) -> str:
     return _create_token(user_id, TokenType.PASSWORD_RESET, timedelta(hours=2))
 
 
+# Токен живёт ровно столько, сколько человек заполняет форму "роль + согласие" после
+# возврата из VK/Яндекса, и не даёт доступа ни к чему, кроме создания аккаунта с уже
+# подтверждённой провайдером идентичностью.
+OAUTH_SIGNUP_TOKEN_TTL = timedelta(minutes=15)
+
+
+def create_oauth_signup_token(
+    provider: str,
+    provider_user_id: str,
+    email: str | None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    avatar_url: str | None = None,
+) -> str:
+    """Данные профиля едут внутри подписанного токена, а не возвращаются формой:
+    имя, почта и аватар взяты у провайдера, и подменить их по дороге через браузер
+    не должно быть возможно."""
+    return _create_token(
+        subject=provider_user_id,
+        token_type=TokenType.OAUTH_SIGNUP,
+        expires_delta=OAUTH_SIGNUP_TOKEN_TTL,
+        extra_claims={
+            "provider": provider,
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "avatar_url": avatar_url,
+        },
+    )
+
+
 def decode_token(token: str) -> dict[str, Any]:
     """Raises jose.JWTError on invalid/expired token."""
     return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
@@ -94,5 +129,6 @@ __all__ = [
     "create_refresh_token",
     "create_email_verification_token",
     "create_password_reset_token",
+    "create_oauth_signup_token",
     "decode_token",
 ]

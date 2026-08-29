@@ -54,17 +54,25 @@ async def save_upload(file: UploadFile, subdir: str, allowed_types: set[str]) ->
     explicit content-type allow-list, since /files is served same-origin with the SPA
     and an unrestricted upload (e.g. an .html file) would render as a same-origin
     page rather than downloading, enabling stored XSS."""
-    if file.content_type not in allowed_types:
+    contents = await file.read()
+    return save_bytes(contents, file.content_type or "", subdir, allowed_types)
+
+
+def save_bytes(contents: bytes, content_type: str, subdir: str, allowed_types: set[str]) -> str:
+    """Та же запись в storage, но для содержимого, которое пришло не файлом от
+    браузера: например, аватар, скачанный у VK/Яндекса при регистрации через них
+    (см. app.services.oauth_service). Проверки те же - тип из белого списка и
+    ограничение размера."""
+    if content_type not in allowed_types:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Недопустимый тип файла")
 
-    contents = await file.read()
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
     if len(contents) > max_bytes:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"Файл больше {settings.max_upload_size_mb} МБ"
         )
 
-    ext = _CONTENT_TYPE_EXTENSIONS.get(file.content_type, "")
+    ext = _CONTENT_TYPE_EXTENSIONS.get(content_type, "")
     filename = f"{uuid.uuid4().hex}{ext}"
     target_dir = settings.storage_dir / subdir
     target_dir.mkdir(parents=True, exist_ok=True)

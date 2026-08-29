@@ -21,6 +21,11 @@ const router = useRouter();
 const isOpen = ref(false);
 
 const firstName = computed(() => auth.user?.first_name ?? "");
+// У репетитора в шапке показывается фото из анкеты (его он и правит на вкладке
+// "Профиль"), у остальных - аватар аккаунта.
+const avatarUrl = computed(() =>
+  auth.user?.role === "tutor" ? auth.tutorPhotoUrl : (auth.user?.photo_url ?? null),
+);
 const initial = computed(() => firstName.value.charAt(0).toUpperCase());
 // Both roles land on their lesson list - it's the tab either role is most likely to
 // want first. "Профиль"/"Настройки" are still one click away via the dropdown below.
@@ -46,7 +51,7 @@ async function onLogout(): Promise<void> {
       class="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-brand-50 dark:hover:bg-brand-900/30"
     >
       <span class="relative shrink-0">
-        <img v-if="auth.tutorPhotoUrl" :src="auth.tutorPhotoUrl" alt="" class="h-8 w-8 rounded-full object-cover" />
+        <img v-if="avatarUrl" :src="avatarUrl" alt="" class="h-8 w-8 rounded-full object-cover" />
         <div
           v-else
           class="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800 dark:bg-brand-900/60 dark:text-brand-200"

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import OAuthButtons from "@/components/OAuthButtons.vue";
 import { useAuthStore } from "@/stores/auth";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -13,6 +14,12 @@ const isSubmitting = ref(false);
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+
+// Тот же ?redirect, что и у формы: после возврата из VK/Яндекса человек должен
+// попасть туда, куда шёл.
+const redirectTo = computed(() =>
+  typeof route.query.redirect === "string" ? route.query.redirect : "/cabinet",
+);
 
 async function onSubmit(): Promise<void> {
   error.value = null;
@@ -69,6 +76,7 @@ async function onSubmit(): Promise<void> {
           Войти
         </button>
       </form>
+      <OAuthButtons :redirect-to="redirectTo" />
       <RouterLink to="/forgot-password" class="text-sm text-slate-500 hover:underline">Забыли пароль?</RouterLink>
       <RouterLink to="/register" class="text-sm text-slate-500 hover:underline">
         Нет аккаунта? Зарегистрироваться

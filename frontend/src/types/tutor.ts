@@ -102,6 +102,7 @@ export interface TutorStudentDetail {
   patronymic: string | null;
   grade: number | null;
   email: string | null;
+  photo_url: string | null;
   groups: StudentGroupMembership[];
 }
 

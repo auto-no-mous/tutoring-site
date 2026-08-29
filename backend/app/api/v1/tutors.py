@@ -226,6 +226,7 @@ async def get_my_student(student_id: uuid.UUID, current_user: CurrentUser, db: D
         patronymic=student.patronymic,
         grade=student.grade,
         email=student.email,
+        photo_url=student.photo_url,
         groups=groups,
     )
 

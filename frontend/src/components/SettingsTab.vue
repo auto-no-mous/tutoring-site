@@ -2,10 +2,24 @@
 import axios from "axios";
 import { onMounted, ref } from "vue";
 
+import {
+  listOAuthProviders,
+  startOAuth,
+  unlinkOAuthProvider,
+  type OAuthProviderName,
+} from "@/api/auth";
 import { listMyRecurringSeries, stopSeries } from "@/api/bookings";
 import { getMyProfile, updateMyProfile } from "@/api/tutors";
-import { getTelegramLinkToken, resendVerificationEmail, updateMySettings } from "@/api/users";
+import {
+  deleteMyPhoto,
+  getTelegramLinkToken,
+  resendVerificationEmail,
+  updateMySettings,
+  uploadMyPhoto,
+} from "@/api/users";
+import PhotoCropModal from "@/components/PhotoCropModal.vue";
 import { useAuthStore } from "@/stores/auth";
+import { apiErrorMessage } from "@/utils/apiError";
 import type { RecurringSeriesDetail } from "@/types/booking";
 import type { NotificationChannel } from "@/types/user";
 import type { TutorProfile } from "@/types/tutor";
@@ -46,7 +60,43 @@ const isSavingPolicy = ref(false);
 
 const recurringSeries = ref<RecurringSeriesDetail[]>([]);
 
+// Способы входа: пароль + привязанные провайдеры (auth.user.auth_providers).
+const oauthProviders = ref<{ provider: OAuthProviderName; label: string }[]>([]);
+const identityError = ref("");
+const pendingProvider = ref<OAuthProviderName | null>(null);
+
+function isLinked(provider: OAuthProviderName): boolean {
+  return auth.user?.auth_providers.includes(provider) ?? false;
+}
+
+async function linkProvider(provider: OAuthProviderName): Promise<void> {
+  identityError.value = "";
+  pendingProvider.value = provider;
+  try {
+    // Возвращаемся сразу на эту же вкладку, чтобы список обновился на глазах.
+    window.location.href = await startOAuth(provider, "/cabinet?tab=settings");
+  } catch (err) {
+    identityError.value = apiErrorMessage(err, "Не удалось начать привязку");
+    pendingProvider.value = null;
+  }
+}
+
+async function unlinkProvider(provider: OAuthProviderName): Promise<void> {
+  identityError.value = "";
+  try {
+    auth.user = await unlinkOAuthProvider(provider);
+  } catch (err) {
+    // Сервер не даёт снять последний способ входа - показываем его формулировку.
+    identityError.value = apiErrorMessage(err, "Не удалось отвязать");
+  }
+}
+
 async function load(): Promise<void> {
+  try {
+    oauthProviders.value = (await listOAuthProviders()).filter((p) => p.enabled);
+  } catch {
+    oauthProviders.value = [];
+  }
   if (auth.user?.role === "tutor") {
     tutorProfile.value = await getMyProfile();
   }
@@ -59,6 +109,39 @@ async function stopOneSeries(series: RecurringSeriesDetail): Promise<void> {
   if (!window.confirm("Остановить еженедельную регулярность? Уже созданные занятия останутся.")) return;
   await stopSeries(series.id);
   recurringSeries.value = await listMyRecurringSeries();
+}
+
+// Фото аккаунта. Как и у репетитора в анкете, файл не уходит на сервер сразу:
+// сначала пользователь выбирает кадр в PhotoCropModal, иначе квадратная миниатюра
+// нередко срезает лицо.
+const photoToCrop = ref<File | null>(null);
+const photoError = ref("");
+
+function onPhotoChange(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0] ?? null;
+  // Сбрасываем input сразу: иначе повторный выбор того же файла не вызовет change.
+  input.value = "";
+  photoToCrop.value = file;
+}
+
+async function onPhotoCropped(blob: Blob): Promise<void> {
+  photoToCrop.value = null;
+  photoError.value = "";
+  try {
+    auth.user = await uploadMyPhoto(blob);
+  } catch (err) {
+    photoError.value = apiErrorMessage(err, "Не удалось загрузить фото");
+  }
+}
+
+async function removePhoto(): Promise<void> {
+  photoError.value = "";
+  try {
+    auth.user = await deleteMyPhoto();
+  } catch (err) {
+    photoError.value = apiErrorMessage(err, "Не удалось удалить фото");
+  }
 }
 
 async function save(): Promise<void> {
@@ -161,6 +244,45 @@ onMounted(load);
   <div class="flex max-w-md flex-col gap-8">
     <section class="flex flex-col gap-4">
       <h2 class="text-lg font-medium">Личные данные</h2>
+
+      <!-- Репетитор меняет фото в анкете (вкладка "Профиль"), там оно и показывается
+           в каталоге; здесь - аватар аккаунта для остальных ролей. -->
+      <div v-if="auth.user?.role !== 'tutor'" class="flex flex-col gap-2">
+        <div class="flex items-center gap-4">
+          <img
+            v-if="auth.user?.photo_url"
+            :src="auth.user.photo_url"
+            alt=""
+            class="h-20 w-20 rounded-full object-cover"
+          />
+          <div v-else class="h-20 w-20 rounded-full bg-slate-200 dark:bg-slate-800"></div>
+          <div class="flex flex-col gap-1">
+            <input
+              type="file"
+              accept="image/*"
+              class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
+              @change="onPhotoChange"
+            />
+            <button
+              v-if="auth.user?.photo_url"
+              type="button"
+              class="w-fit text-xs text-slate-500 underline"
+              @click="removePhoto"
+            >
+              Удалить фото
+            </button>
+          </div>
+        </div>
+        <span v-if="photoError" class="text-xs text-red-600 dark:text-red-400">{{ photoError }}</span>
+      </div>
+
+      <PhotoCropModal
+        v-if="photoToCrop"
+        :file="photoToCrop"
+        @cropped="onPhotoCropped"
+        @close="photoToCrop = null"
+      />
+
       <div class="flex gap-2">
         <label class="flex w-1/2 flex-col gap-1 text-sm">
           Фамилия
@@ -227,6 +349,44 @@ onMounted(load);
           </div>
           <span v-if="telegramLinkError" class="text-xs text-red-600 dark:text-red-400">{{ telegramLinkError }}</span>
         </div>
+      </div>
+
+      <div v-if="oauthProviders.length" class="flex flex-col gap-2 text-sm">
+        <span>Способы входа</span>
+        <div class="flex items-center gap-2">
+          <span class="w-24">Пароль</span>
+          <span
+            v-if="auth.user?.auth_providers.includes('password')"
+            class="text-green-600 dark:text-green-400"
+          >
+            Задан
+          </span>
+          <span v-else class="text-slate-400">
+            Не задан — вход только через привязанный аккаунт
+          </span>
+        </div>
+        <div v-for="provider in oauthProviders" :key="provider.provider" class="flex items-center gap-2">
+          <span class="w-24">{{ provider.label }}</span>
+          <template v-if="isLinked(provider.provider)">
+            <span class="text-green-600 dark:text-green-400">Привязан</span>
+            <button type="button" class="text-xs text-slate-500 underline" @click="unlinkProvider(provider.provider)">
+              Отвязать
+            </button>
+          </template>
+          <button
+            v-else
+            type="button"
+            :disabled="pendingProvider !== null"
+            class="rounded-md border border-slate-300 px-3 py-1 text-xs disabled:opacity-50 dark:border-slate-700"
+            @click="linkProvider(provider.provider)"
+          >
+            Привязать
+          </button>
+        </div>
+        <span v-if="identityError" class="text-xs text-red-600 dark:text-red-400">{{ identityError }}</span>
+        <span class="text-xs text-slate-400">
+          Привязанным аккаунтом можно входить на сайт вместо почты и пароля.
+        </span>
       </div>
 
       <label class="flex flex-col gap-1 text-sm">

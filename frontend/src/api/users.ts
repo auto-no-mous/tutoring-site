@@ -18,6 +18,19 @@ export async function updateMySettings(payload: UserSettingsUpdate) {
   return data;
 }
 
+/** Аватар аккаунта. Файл приходит уже обрезанным квадратом из PhotoCropModal. */
+export async function uploadMyPhoto(file: Blob, filename = "photo.jpg") {
+  const form = new FormData();
+  form.append("file", file, filename);
+  const { data } = await apiClient.post<User>("/auth/me/photo", form);
+  return data;
+}
+
+export async function deleteMyPhoto() {
+  const { data } = await apiClient.delete<User>("/auth/me/photo");
+  return data;
+}
+
 export async function verifyEmail(token: string) {
   const { data } = await apiClient.post<User>("/auth/verify-email", { token });
   return data;

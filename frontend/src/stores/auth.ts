@@ -72,6 +72,24 @@ export const useAuthStore = defineStore("auth", () => {
     await fetchCurrentUser();
   }
 
+  /** Ставит сессию из готовой пары токенов - вход через VK/Яндекс возвращает их
+   * сразу вместе с пользователем (см. api/auth.ts). */
+  async function applySession(tokens: TokenPair, nextUser: User | null): Promise<void> {
+    setTokens(tokens.access_token, tokens.refresh_token);
+    if (nextUser) {
+      user.value = nextUser;
+      if (nextUser.role === "tutor") {
+        try {
+          tutorPhotoUrl.value = (await getMyProfile()).photo_url;
+        } catch {
+          tutorPhotoUrl.value = null;
+        }
+      }
+      return;
+    }
+    await fetchCurrentUser();
+  }
+
   async function register(payload: RegisterPayload): Promise<void> {
     const { data } = await apiClient.post<{ user: User; tokens: TokenPair }>(
       "/auth/register",
@@ -95,6 +113,7 @@ export const useAuthStore = defineStore("auth", () => {
     setTutorPhotoUrl,
     init,
     login,
+    applySession,
     register,
     logout,
     fetchCurrentUser,

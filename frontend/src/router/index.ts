@@ -40,6 +40,13 @@ const router = createRouter({
       meta: { guestOnly: true },
     },
     {
+      // Возврат из VK/Яндекса. Без meta: сюда попадают и гость (вход/регистрация), и
+      // залогиненный пользователь (привязка провайдера из настроек).
+      path: "/oauth/:provider/callback",
+      name: "oauth-callback",
+      component: () => import("@/views/OAuthCallbackView.vue"),
+    },
+    {
       path: "/cabinet",
       name: "cabinet",
       component: () => import("@/views/CabinetView.vue"),

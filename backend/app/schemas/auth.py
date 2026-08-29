@@ -65,15 +65,3 @@ class TelegramLinkTokenOut(BaseModel):
     token: str
     # None when the bot's @username isn't configured in settings yet.
     deep_link: str | None
-
-
-class VKAuthRequest(BaseModel):
-    code: str
-    redirect_uri: str | None = None
-    # Registration-only fields, used the first time a VK account signs in and no
-    # linked user exists yet.
-    role: Literal["tutor", "student"] | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-    patronymic: str | None = None
-    pd_consent: bool | None = None

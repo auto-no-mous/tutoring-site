@@ -3,6 +3,7 @@ from app.models.booking import Booking, RecurringSeries
 from app.models.chat import ChatMessage, ChatThread, ChatThreadRead
 from app.models.group import Group, GroupApplication, GroupMembership, GroupOccurrence, GroupSchedule
 from app.models.homework import HomeworkAssignment, HomeworkSubmission
+from app.models.identity import OAuthState, UserIdentity
 from app.models.lesson_type import LessonType
 from app.models.email_log import EmailLog
 from app.models.notification import NotificationLog
@@ -27,6 +28,8 @@ __all__ = [
     "GroupSchedule",
     "HomeworkAssignment",
     "HomeworkSubmission",
+    "OAuthState",
+    "UserIdentity",
     "LessonType",
     "EmailLog",
     "NotificationLog",

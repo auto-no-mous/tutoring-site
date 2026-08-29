@@ -440,3 +440,64 @@ async def test_duplicate_registration_tells_the_user_what_to_do(client: AsyncCli
     # Тупик "почта занята" - самый частый для живого человека, поэтому ответ обязан
     # содержать выход, а не только констатацию.
     assert "восстановите пароль" in again.json()["detail"]
+
+
+async def test_account_photo_upload_and_removal(
+    client: AsyncClient, monkeypatch, tmp_path
+) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "storage_dir", tmp_path)
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "photo@example.com",
+            "password": "supersecret1",
+            "first_name": "Пётр",
+            "last_name": "Петров",
+            "role": "student",
+            "pd_consent": True,
+        },
+    )
+    headers = {"Authorization": f"Bearer {resp.json()['tokens']['access_token']}"}
+    assert resp.json()["user"]["photo_url"] is None
+
+    resp = await client.post(
+        "/api/v1/auth/me/photo",
+        headers=headers,
+        files={"file": ("avatar.png", b"png-bytes", "image/png")},
+    )
+    assert resp.status_code == 200, resp.text
+    photo_url = resp.json()["photo_url"]
+    assert photo_url.startswith("/files/user-photos/")
+    assert (tmp_path / "user-photos" / photo_url.rsplit("/", 1)[-1]).read_bytes() == b"png-bytes"
+
+    # Загруженное видно и в /auth/me, а не только в ответе загрузки.
+    resp = await client.get("/api/v1/auth/me", headers=headers)
+    assert resp.json()["photo_url"] == photo_url
+
+    resp = await client.delete("/api/v1/auth/me/photo", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["photo_url"] is None
+
+
+async def test_account_photo_rejects_non_image(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "photo2@example.com",
+            "password": "supersecret1",
+            "first_name": "Пётр",
+            "last_name": "Петров",
+            "role": "student",
+            "pd_consent": True,
+        },
+    )
+    headers = {"Authorization": f"Bearer {resp.json()['tokens']['access_token']}"}
+
+    resp = await client.post(
+        "/api/v1/auth/me/photo",
+        headers=headers,
+        files={"file": ("payload.html", b"<script>alert(1)</script>", "text/html")},
+    )
+    assert resp.status_code == 400

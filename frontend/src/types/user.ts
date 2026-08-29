@@ -9,6 +9,8 @@ export interface User {
   last_name: string;
   patronymic: string | null;
   grade: number | null;
+  // Аватар аккаунта. У репетитора фото анкеты - отдельное поле TutorProfile.photo_url.
+  photo_url: string | null;
   role: UserRole;
   email_verified: boolean;
   is_active: boolean;
@@ -17,5 +19,7 @@ export interface User {
   // Куда слать уведомления и напоминания: off / email / telegram / both.
   notification_channel: NotificationChannel;
   reminder_lead_minutes: number;
+  // Чем можно войти в аккаунт: "password" и/или провайдеры ("vk", "yandex").
+  auth_providers: string[];
   created_at: string;
 }

@@ -191,4 +191,5 @@ class TutorStudentDetailOut(BaseModel):
     patronymic: str | None
     grade: int | None
     email: str | None
+    photo_url: str | None = None
     groups: list[StudentGroupMembershipOut] = Field(default_factory=list)

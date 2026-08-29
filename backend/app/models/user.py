@@ -6,7 +6,8 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
-from app.models.enums import NotificationChannelPref
+from app.models.enums import AuthProvider, NotificationChannelPref
+from app.models.identity import UserIdentity
 from app.utils.time import utcnow
 
 if TYPE_CHECKING:
@@ -18,8 +19,9 @@ class User(UUIDPKMixin, TimestampMixin, Base):
 
     role: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
 
-    # Nullable because VK-only accounts may not expose an email (see project_description.md
-    # section 10: VK OAuth doesn't always return email, so VK users are identified by vk_id).
+    # Nullable because social-login accounts may not expose an email (VK ID only returns
+    # one if the user granted the scope), so such users are identified by their
+    # app.models.identity.UserIdentity row rather than by email.
     email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -31,8 +33,6 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    vk_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
-
     # Denormalized full name, composed from the fields below at registration/settings-
     # update time (see app.utils.names.compose_display_name). Kept as the single
     # column most of the app reads (bookings, reviews, chat, notifications, ...) so
@@ -41,11 +41,17 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     first_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
     last_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
     # Patronymic (отчество): mainly meaningful for tutors' formal ФИО, optional for
-    # everyone since the field doesn't universally apply (e.g. VK-only accounts).
+    # everyone since the field doesn't universally apply (e.g. social-login accounts).
     patronymic: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # School grade (класс), e.g. 10 for "10-й класс". Only meaningful for students,
     # used to identify them in the tutor's homework-assignment student picker.
     grade: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Аватар аккаунта: показывается в шапке, а репетитору - в карточке его ученика.
+    # Публичное фото анкеты репетитора живёт отдельно, в TutorProfile.photo_url: это
+    # разные вещи по смыслу (одно человек ставит для себя, второе - витрина в
+    # каталоге), и репетитор правит их в разных местах. При регистрации через
+    # VK/Яндекс аватар провайдера кладётся сразу в оба места.
+    photo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Section 6: student's timezone, auto-detected with manual override. Stored as an
@@ -81,9 +87,22 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     tutor_profile: Mapped["TutorProfile | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    # lazy="selectin": UserOut.auth_providers читается на каждом /auth/me, а ленивая
+    # подгрузка в async-сессии падает (MissingGreenlet), так что грузим сразу.
+    identities: Mapped[list["UserIdentity"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", lazy="selectin"
+    )
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+
+    @property
+    def auth_providers(self) -> list[str]:
+        """Способы, которыми в этот аккаунт можно войти - для настроек и для проверки
+        "не отвязываем ли мы последний" (см. oauth_service.unlink_identity)."""
+        providers = [AuthProvider.PASSWORD.value] if self.password_hash else []
+        providers.extend(sorted(identity.provider for identity in self.identities))
+        return providers
 
 
 class RefreshToken(UUIDPKMixin, Base):

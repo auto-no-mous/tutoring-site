@@ -21,7 +21,7 @@ from app.core.security import (
 from app.models.enums import SystemNotificationEvent, UserRole
 from app.models.tutor import TutorProfile
 from app.models.user import RefreshToken, User
-from app.schemas.auth import LoginRequest, PasswordResetConfirm, RegisterRequest, TokenPair, VKAuthRequest
+from app.schemas.auth import LoginRequest, PasswordResetConfirm, RegisterRequest, TokenPair
 from app.schemas.user import UserSettingsUpdate
 from app.services import system_notification_service
 from app.services.email_service import send_password_reset_email, send_verification_email
@@ -34,49 +34,6 @@ logger = logging.getLogger("app.auth")
 async def _get_user_by_email(db: AsyncSession, email: str) -> User | None:
     result = await db.execute(select(User).where(User.email == email))
     return result.scalar_one_or_none()
-
-
-async def _get_user_by_vk_id(db: AsyncSession, vk_id: str) -> User | None:
-    result = await db.execute(select(User).where(User.vk_id == vk_id))
-    return result.scalar_one_or_none()
-
-
-async def login_or_register_vk_user(db: AsyncSession, vk_id: str, payload: VKAuthRequest) -> User:
-    user = await _get_user_by_vk_id(db, vk_id)
-    if user is not None:
-        if not user.is_active:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Аккаунт заблокирован")
-        return user
-
-    # First time we see this VK account: it must be registered with role + consent,
-    # same as email registration (section 7). We deliberately don't auto-link by
-    # email even if VK happened to return one (section 10).
-    if payload.role is None or not payload.first_name or not payload.last_name or not payload.pd_consent:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "Для первого входа через VK укажите роль, имя, фамилию и согласие на обработку персональных данных",
-        )
-
-    user = User(
-        role=payload.role,
-        vk_id=vk_id,
-        first_name=payload.first_name,
-        last_name=payload.last_name,
-        patronymic=payload.patronymic,
-        display_name=compose_display_name(payload.first_name, payload.last_name, payload.patronymic),
-        email_verified=False,
-        pd_consent_given=True,
-        pd_consent_at=utcnow(),
-    )
-    db.add(user)
-    await db.flush()
-
-    if payload.role == UserRole.TUTOR:
-        db.add(TutorProfile(user_id=user.id))
-
-    await db.commit()
-    await db.refresh(user)
-    return user
 
 
 async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID | str) -> User | None:
@@ -129,6 +86,15 @@ async def update_user_settings(db: AsyncSession, user: User, payload: UserSettin
     if email_changed:
         await send_email_verification(user)
 
+    return user
+
+
+async def set_photo(db: AsyncSession, user: User, photo_url: str | None) -> User:
+    """Ставит или снимает аватар аккаунта. Прежний файл в storage не удаляем - там же
+    лежат фото анкет и вложения, а чистка storage сделана отдельной задачей."""
+    user.photo_url = photo_url
+    await db.commit()
+    await db.refresh(user)
     return user
 
 

@@ -55,10 +55,20 @@ class Settings(BaseSettings):
     # Settings for the "Подключить Telegram" flow - see app.services.telegram_service.
     telegram_bot_username: str | None = None
 
-    # VK OAuth
+    # Вход через VK ID - OAuth 2.1 с обязательным PKCE (см. app.services.oauth_providers).
+    # Секрет приложения не нужен: код обменивается на токен по code_verifier. Прежний
+    # протокол oauth.vk.com, которому требовался VK_CLIENT_SECRET, отключён VK 30.09.2025.
+    # redirect_uri должен совпадать с доверенным в настройках VK ID-приложения; если не
+    # задан, берётся FRONTEND_BASE_URL + /oauth/vk/callback.
     vk_client_id: str | None = None
-    vk_client_secret: str | None = None
     vk_redirect_uri: str | None = None
+
+    # Вход через Яндекс ID (OAuth 2.0). Здесь секрет нужен - код меняется на токен по
+    # паре client_id/client_secret. Приложение регистрируется на oauth.yandex.ru с
+    # правами login:email и login:info.
+    yandex_client_id: str | None = None
+    yandex_client_secret: str | None = None
+    yandex_redirect_uri: str | None = None
 
     # Files
     storage_dir: Path = BASE_DIR / "storage"

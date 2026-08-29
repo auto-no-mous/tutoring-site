@@ -80,13 +80,21 @@ onMounted(load);
     </p>
     <template v-else-if="student">
       <div class="mt-2 flex items-center justify-between">
-        <div>
-          <h1 class="text-2xl font-semibold">{{ fullName }}</h1>
-          <p class="mt-1 text-sm text-slate-500">
-            <span v-if="student.grade">{{ student.grade }}-й класс</span>
-            <span v-if="student.grade && student.email"> · </span>
-            <span v-if="student.email">{{ student.email }}</span>
-          </p>
+        <div class="flex items-center gap-3">
+          <img
+            v-if="student.photo_url"
+            :src="student.photo_url"
+            alt=""
+            class="h-14 w-14 shrink-0 rounded-full object-cover"
+          />
+          <div>
+            <h1 class="text-2xl font-semibold">{{ fullName }}</h1>
+            <p class="mt-1 text-sm text-slate-500">
+              <span v-if="student.grade">{{ student.grade }}-й класс</span>
+              <span v-if="student.grade && student.email"> · </span>
+              <span v-if="student.email">{{ student.email }}</span>
+            </p>
+          </div>
         </div>
         <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700" @click="openChat">
           Написать сообщение

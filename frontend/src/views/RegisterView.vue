@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import OAuthButtons from "@/components/OAuthButtons.vue";
 import { useAuthStore } from "@/stores/auth";
 import { apiErrorMessage } from "@/utils/apiError";
 import type { UserRole } from "@/types/user";
@@ -133,6 +134,7 @@ async function onSubmit(): Promise<void> {
           Зарегистрироваться
         </button>
       </form>
+      <OAuthButtons redirect-to="/cabinet" />
       <RouterLink to="/login" class="text-sm text-slate-500 hover:underline">
         Уже есть аккаунт? Войти
       </RouterLink>
