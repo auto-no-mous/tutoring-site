@@ -177,13 +177,22 @@ onBeforeUnmount(() => {
           :style="{ '--stagger': `${(index % PAGE_SIZE) * 35}ms` }"
           class="surface-card flex gap-5 p-5 transition-all duration-200 ease-out hover:z-10 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg dark:hover:border-brand-700"
         >
+          <!-- Фото тянется на всю высоту карточки (self-stretch вместо фиксированной
+               h-28): высоту задаёт колонка с текстом, и квадрат 112px занимал рядом
+               с ней примерно половину. object-cover обрезает, а не растягивает лицо.
+               max-h-44 только до sm: на узком экране текст переносится и карточка
+               становится настолько высокой, что фото при своей ширине выродилось бы
+               в тонкую полосу. -->
           <img
             v-if="tutor.photo_url"
             :src="tutor.photo_url"
             alt=""
-            class="h-28 w-28 shrink-0 rounded-xl object-cover ring-2 ring-brand-100 dark:ring-brand-900/50"
+            class="max-h-44 min-h-28 w-28 shrink-0 self-stretch rounded-xl object-cover ring-2 ring-brand-100 sm:max-h-none sm:w-36 dark:ring-brand-900/50"
           />
-          <div v-else class="h-28 w-28 shrink-0 rounded-xl bg-brand-50 ring-2 ring-brand-100 dark:bg-slate-800 dark:ring-brand-900/50"></div>
+          <div
+            v-else
+            class="max-h-44 min-h-28 w-28 shrink-0 self-stretch rounded-xl bg-brand-50 ring-2 ring-brand-100 sm:max-h-none sm:w-36 dark:bg-slate-800 dark:ring-brand-900/50"
+          ></div>
           <div class="flex-1">
             <div class="text-xl font-semibold">{{ tutor.name_patronymic }}</div>
             <div v-if="tutor.hourly_price != null" class="mt-1 text-base font-medium text-brand-700 dark:text-brand-300">

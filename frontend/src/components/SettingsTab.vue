@@ -10,11 +10,13 @@ import type { RecurringSeriesDetail } from "@/types/booking";
 import type { NotificationChannel } from "@/types/user";
 import type { TutorProfile } from "@/types/tutor";
 
-const NOTIFICATION_CHANNELS: { value: NotificationChannel; label: string }[] = [
-  { value: "both", label: "Почта и мессенджер" },
-  { value: "email", label: "Только почта" },
-  { value: "telegram", label: "Только мессенджер" },
-  { value: "off", label: "Не присылать" },
+// needsTelegram - вариант бессмысленен без привязанного мессенджера: уведомления
+// просто некуда слать. Такие кнопки выключаются, пока Telegram не подключён.
+const NOTIFICATION_CHANNELS: { value: NotificationChannel; label: string; needsTelegram: boolean }[] = [
+  { value: "both", label: "Почта и мессенджер", needsTelegram: true },
+  { value: "email", label: "Только почта", needsTelegram: false },
+  { value: "telegram", label: "Только мессенджер", needsTelegram: true },
+  { value: "off", label: "Не присылать", needsTelegram: false },
 ];
 
 const WEEKDAY_NAMES = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
@@ -119,6 +121,11 @@ async function checkTelegramLinked(): Promise<void> {
     await auth.fetchCurrentUser();
     if (auth.user?.telegram_chat_id) {
       telegramDeepLink.value = null;
+      // При привязке сервер сам переводит канал в "Почта и мессенджер"
+      // (backend telegram_service.link_chat_by_token) - забираем это значение в
+      // форму, иначе она продолжила бы показывать прежний выбор и затёрла бы его
+      // при следующем сохранении.
+      notificationChannel.value = auth.user.notification_channel;
     }
   } finally {
     isCheckingTelegram.value = false;
@@ -244,7 +251,9 @@ onMounted(load);
             v-for="option in NOTIFICATION_CHANNELS"
             :key="option.value"
             type="button"
-            class="rounded-lg border px-3 py-1.5 transition-colors"
+            :disabled="option.needsTelegram && !auth.user?.telegram_chat_id"
+            :title="option.needsTelegram && !auth.user?.telegram_chat_id ? 'Сначала подключите Telegram выше' : undefined"
+            class="rounded-lg border px-3 py-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-300 dark:disabled:hover:border-slate-700"
             :class="
               notificationChannel === option.value
                 ? 'border-brand-500 bg-brand-50 font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'
@@ -257,10 +266,12 @@ onMounted(load);
         </div>
         <p class="text-xs text-slate-500">
           {{
-            notificationChannel === "off"
-              ? "Напоминания и уведомления о занятиях приходить не будут. Письма о регистрации и сбросе пароля отправляются всегда."
-              : notificationChannel === "telegram" && !auth.user?.telegram_chat_id
-                ? "Мессенджер ещё не подключён — нажмите «Подключить Telegram» выше, иначе уведомления приходить не будут."
+            !auth.user?.telegram_chat_id && (notificationChannel === "telegram" || notificationChannel === "both")
+              ? "Мессенджер сейчас не подключён — уведомления в него приходить не будут. Подключите Telegram выше или выберите «Только почта»."
+              : !auth.user?.telegram_chat_id
+                ? "Варианты с мессенджером станут доступны после подключения Telegram — кнопка выше."
+                : notificationChannel === "off"
+                ? "Напоминания и уведомления о занятиях приходить не будут. Письма о регистрации и сбросе пароля отправляются всегда."
                 : "Письма о регистрации и сбросе пароля отправляются всегда, независимо от этой настройки."
           }}
         </p>

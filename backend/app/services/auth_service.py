@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import (
     JWTError,
     TokenType,
@@ -173,8 +174,14 @@ async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
     except Exception:
         logger.exception("REGISTER: не удалось отправить письмо подтверждения user_id=%s", user.id)
 
+    # catalog_url подставляется, а не зашит в текст шаблона: адрес отличается между
+    # локальной разработкой и продом (FRONTEND_BASE_URL), а шаблон один на всех.
     await system_notification_service.notify(
-        db, user.id, SystemNotificationEvent.WELCOME, name=user.first_name
+        db,
+        user.id,
+        SystemNotificationEvent.WELCOME,
+        name=user.first_name,
+        catalog_url=settings.frontend_base_url,
     )
 
     return user

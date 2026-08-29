@@ -146,6 +146,12 @@ async def get_reschedule_dates(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Слишком большой диапазон дат")
     booking = await booking_service.get_booking_or_404(db, booking_id)
     tutor, lesson_type = await booking_service.get_reschedule_context(db, booking, current_user)
+    # Репетитору доступен любой день, включая прошедшие и те, когда он обычно не
+    # работает - правила расписания на него не распространяются (см.
+    # booking_service.reschedule_booking). Поэтому фильтровать нечего: отдаём весь
+    # запрошенный диапазон, а прошедшие дни интерфейс покажет бледнее.
+    if current_user.role == UserRole.TUTOR:
+        return [date_from + dt.timedelta(days=i) for i in range((date_to - date_from).days + 1)]
     return await schedule_service.compute_available_dates(
         db, tutor, lesson_type, date_from, date_to, exclude_booking_id=booking.id
     )
@@ -153,11 +159,21 @@ async def get_reschedule_dates(
 
 @router.get("/{booking_id}/reschedule/slots", response_model=list[SlotOut])
 async def get_reschedule_slots(
-    booking_id: uuid.UUID, date: dt.date, current_user: CurrentUser, db: DbSession
+    booking_id: uuid.UUID,
+    date: dt.date,
+    current_user: CurrentUser,
+    db: DbSession,
+    duration_minutes: int | None = None,
 ) -> list[SlotOut]:
     _require_student_or_tutor(current_user)
     booking = await booking_service.get_booking_or_404(db, booking_id)
     tutor, lesson_type = await booking_service.get_reschedule_context(db, booking, current_user)
+    if current_user.role == UserRole.TUTOR:
+        # duration_minutes приходит, когда репетитор в форме переноса поменял тип
+        # занятия или длительность: сетку надо строить уже под новую длину.
+        return await schedule_service.compute_tutor_day_slots(
+            db, tutor, duration_minutes or lesson_type.duration_minutes, date, exclude_booking_id=booking.id
+        )
     return await schedule_service.compute_day_slots(db, tutor, lesson_type, date, exclude_booking_id=booking.id)
 
 
@@ -167,7 +183,14 @@ async def reschedule_booking(
 ) -> BookingOut:
     _require_student_or_tutor(current_user)
     booking = await booking_service.get_booking_or_404(db, booking_id)
-    new_booking = await booking_service.reschedule_booking(db, booking, current_user, payload.new_start_at)
+    new_booking = await booking_service.reschedule_booking(
+        db,
+        booking,
+        current_user,
+        payload.new_start_at,
+        lesson_type_id=payload.lesson_type_id,
+        duration_minutes=payload.duration_minutes,
+    )
     return await _to_role_aware_booking_out(db, new_booking, current_user)
 
 

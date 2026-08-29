@@ -85,9 +85,13 @@ export async function updateMyProfile(payload: Partial<TutorProfile>) {
   return data;
 }
 
-export async function uploadMyPhoto(file: File) {
+// Blob, а не File: сюда приходит результат кадрирования с canvas
+// (components/PhotoCropModal.vue), у которого своего имени нет. Расширение на сервере
+// всё равно берётся из проверенного content-type, а не из имени файла - см.
+// backend services/file_service.py.
+export async function uploadMyPhoto(file: Blob, filename = "photo.jpg") {
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", file, filename);
   const { data } = await apiClient.post<TutorProfile>("/tutors/me/photo", form);
   return data;
 }

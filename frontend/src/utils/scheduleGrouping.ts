@@ -57,7 +57,7 @@ function formatRuDateShort(d: Date): string {
   return `${dd}.${mm}`;
 }
 
-function dateInTimeZone(date: Date, timeZone: string): string {
+export function dateInTimeZone(date: Date, timeZone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -135,4 +135,19 @@ export function groupByWeekAndDay<T>(
   }
 
   return weeks;
+}
+
+/**
+ * Занятие относится к прошедшим дням - то есть ко вчера или раньше по календарю в
+ * указанном поясе.
+ *
+ * Именно по календарю, а не по моменту времени. Раньше списки делились сравнением
+ * start_at с «сейчас», и занятие проваливалось в «Историю» сразу, как только
+ * начиналось: перенёс на сегодня - и оно исчезло из ближайших, хотя день ещё идёт.
+ * Сегодняшние занятия должны оставаться наверху списка до конца дня.
+ *
+ * Даты в формате YYYY-MM-DD сравниваются лексикографически, поэтому строк достаточно.
+ */
+export function isBeforeToday(startAtIso: string, timeZone: string): boolean {
+  return dateInTimeZone(new Date(startAtIso), timeZone) < dateInTimeZone(new Date(), timeZone);
 }

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { groupByWeekAndDay } from "@/utils/scheduleGrouping";
+import { groupByWeekAndDay, isBeforeToday } from "@/utils/scheduleGrouping";
 
 interface Item {
   start_at: string;
@@ -45,5 +45,37 @@ describe("groupByWeekAndDay", () => {
     const otherWeeks = weeks.filter((w) => w.label !== "Текущая неделя");
     expect(otherWeeks.length).toBeGreaterThan(0);
     expect(otherWeeks.every((w) => w.isCurrentWeek === false)).toBe(true);
+  });
+});
+
+describe("isBeforeToday", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // 15:00 МСК - половина дня позади, половина впереди.
+    vi.setSystemTime(new Date("2026-09-02T12:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps today's lesson out of history even after it has started", () => {
+    // Регрессия: списки делились сравнением с «сейчас», и занятие проваливалось в
+    // «Историю» ровно в момент начала - перенёс на сегодня и оно исчезло из ближайших.
+    expect(isBeforeToday("2026-09-02T06:00:00Z", "Europe/Moscow")).toBe(false);
+  });
+
+  it("keeps a lesson still ahead today out of history", () => {
+    expect(isBeforeToday("2026-09-02T18:00:00Z", "Europe/Moscow")).toBe(false);
+  });
+
+  it("treats yesterday and earlier as history", () => {
+    expect(isBeforeToday("2026-09-01T18:00:00Z", "Europe/Moscow")).toBe(true);
+    expect(isBeforeToday("2026-08-20T09:00:00Z", "Europe/Moscow")).toBe(true);
+  });
+
+  it("counts the day in the given timezone, not UTC", () => {
+    // 22:30 UTC 1 сентября - это уже 01:30 2 сентября по Москве, то есть сегодня.
+    expect(isBeforeToday("2026-09-01T22:30:00Z", "Europe/Moscow")).toBe(false);
+    expect(isBeforeToday("2026-09-01T22:30:00Z", "UTC")).toBe(true);
   });
 });

@@ -32,7 +32,34 @@ function Assert-Command($name, $hint) {
     }
 }
 
-Assert-Command "poetry" "Установите Poetry: https://python-poetry.org/docs/#installation"
+# Как звать Poetry. Сначала пробуем модулем через python, и только потом exe-обёртку.
+#
+# Причина: Smart App Control в Windows 11 блокирует poetry.exe - это несигнованная
+# обёртка, которую генерирует pip, и репутации у неё нет ("Политика управления
+# приложениями заблокировала этот файл"). Тот же самый Poetry, запущенный как модуль
+# подписанным python.exe, той же политикой не блокируется.
+#
+# По той же причине ниже все инструменты зовутся через "python -m ...", а не своими
+# обёртками: запрет расползается по ним по одной (сначала poetry.exe, затем
+# pytest.exe), а python.exe в venv - копия подписанного интерпретатора, и его
+# политика пропускает.
+function Resolve-PoetryCommand {
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        & python -m poetry --version *> $null
+        if ($LASTEXITCODE -eq 0) { return "python -m poetry" }
+    }
+    if (Get-Command poetry -ErrorAction SilentlyContinue) {
+        & poetry --version *> $null
+        if ($LASTEXITCODE -eq 0) { return "poetry" }
+    }
+    throw "Не найден работающий Poetry. Установите его: python -m pip install --user poetry (см. https://python-poetry.org/docs/#installation)"
+}
+
+$poetry = Resolve-PoetryCommand
+$poetryExe = ($poetry -split " ")[0]
+$poetryArgs = @($poetry -split " " | Select-Object -Skip 1)
+Write-Host "Poetry запускается как: $poetry" -ForegroundColor DarkGray
+
 Assert-Command "npm" "Установите Node.js: https://nodejs.org/"
 
 # --- backend: .env, зависимости, миграции ---
@@ -46,11 +73,11 @@ if (-not (Test-Path $envFile)) {
 Push-Location $backendDir
 try {
     if (-not $SkipInstall) {
-        Write-Host "Backend: poetry install..." -ForegroundColor Cyan
-        poetry install
+        Write-Host "Backend: установка зависимостей..." -ForegroundColor Cyan
+        & $poetryExe @poetryArgs install
     }
     Write-Host "Backend: применяю миграции (alembic upgrade head)..." -ForegroundColor Cyan
-    poetry run alembic upgrade head
+    & $poetryExe @poetryArgs run python -m alembic upgrade head
 } finally {
     Pop-Location
 }
@@ -77,7 +104,7 @@ foreach ($port in 8000, 5173) {
 Write-Host "Запускаю backend (http://127.0.0.1:8000)..." -ForegroundColor Green
 Start-Process powershell -ArgumentList @(
     "-NoExit", "-Command",
-    "cd `"$backendDir`"; poetry run uvicorn app.main:app --reload --port 8000"
+    "cd `"$backendDir`"; $poetry run python -m uvicorn app.main:app --reload --port 8000"
 )
 
 Write-Host "Запускаю frontend (http://127.0.0.1:5173)..." -ForegroundColor Green
@@ -105,7 +132,7 @@ if ($telegramConfigured) {
     Write-Host "Запускаю Telegram-бота (long polling)..." -ForegroundColor Green
     Start-Process powershell -ArgumentList @(
         "-NoExit", "-Command",
-        "cd `"$backendDir`"; poetry run python -m app.scripts.run_telegram_bot"
+        "cd `"$backendDir`"; $poetry run python -m app.scripts.run_telegram_bot"
     )
 } else {
     Write-Host "Telegram-бот не запущен: TELEGRAM_ENABLED/TELEGRAM_BOT_TOKEN не заданы в backend/.env (пропустите, если Telegram-уведомления не нужны)." -ForegroundColor DarkGray
@@ -119,7 +146,7 @@ if ($telegramConfigured) {
 Write-Host "Запускаю напоминания о занятиях (проверка раз в минуту)..." -ForegroundColor Green
 Start-Process powershell -ArgumentList @(
     "-NoExit", "-Command",
-    "cd `"$backendDir`"; while (`$true) { poetry run python -m app.scripts.send_reminders; Start-Sleep -Seconds 60 }"
+    "cd `"$backendDir`"; while (`$true) { $poetry run python -m app.scripts.send_reminders; Start-Sleep -Seconds 60 }"
 )
 
 Write-Host "Жду, пока серверы поднимутся..." -ForegroundColor Cyan

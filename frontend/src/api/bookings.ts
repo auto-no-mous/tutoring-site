@@ -22,8 +22,18 @@ export async function cancelBooking(id: string, reason?: string) {
   return data;
 }
 
-export async function rescheduleBooking(id: string, newStartAt: string) {
-  const { data } = await apiClient.post<Booking>(`/bookings/${id}/reschedule`, { new_start_at: newStartAt });
+// lessonTypeId и durationMinutes принимает только репетитор - см. backend
+// booking_service.reschedule_booking, у ученика они дают 403.
+export async function rescheduleBooking(
+  id: string,
+  newStartAt: string,
+  options: { lessonTypeId?: string | null; durationMinutes?: number | null } = {},
+) {
+  const { data } = await apiClient.post<Booking>(`/bookings/${id}/reschedule`, {
+    new_start_at: newStartAt,
+    lesson_type_id: options.lessonTypeId ?? null,
+    duration_minutes: options.durationMinutes ?? null,
+  });
   return data;
 }
 
@@ -34,8 +44,12 @@ export async function getRescheduleDates(bookingId: string, dateFrom: string, da
   return data;
 }
 
-export async function getRescheduleSlots(bookingId: string, date: string) {
-  const { data } = await apiClient.get<Slot[]>(`/bookings/${bookingId}/reschedule/slots`, { params: { date } });
+// durationMinutes нужен, когда репетитор поменял тип занятия или длительность:
+// сетку слотов надо строить уже под новую длину.
+export async function getRescheduleSlots(bookingId: string, date: string, durationMinutes?: number | null) {
+  const { data } = await apiClient.get<Slot[]>(`/bookings/${bookingId}/reschedule/slots`, {
+    params: { date, duration_minutes: durationMinutes ?? undefined },
+  });
   return data;
 }
 

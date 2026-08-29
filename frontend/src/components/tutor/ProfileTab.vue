@@ -5,6 +5,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { listSubjects } from "@/api/subjects";
 import { getMyProfile, getMySubjects, replaceMySubjects, updateMyProfile, uploadAboutImage, uploadMyPhoto } from "@/api/tutors";
+import PhotoCropModal from "@/components/PhotoCropModal.vue";
 import RichTextEditor from "@/components/RichTextEditor.vue";
 import { useAuthStore } from "@/stores/auth";
 import type { Subject } from "@/types/subject";
@@ -175,11 +176,23 @@ async function save(): Promise<void> {
   }
 }
 
-async function onPhotoChange(event: Event): Promise<void> {
+// Файл не уходит на сервер сразу: сначала репетитор сам выбирает кадр
+// (components/PhotoCropModal.vue). Фото везде показывается квадратом с object-cover,
+// и автоматическая обрезка по центру нередко срезала лицо.
+const photoToCrop = ref<File | null>(null);
+
+function onPhotoChange(event: Event): void {
   const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  profile.value = await uploadMyPhoto(file);
+  const file = input.files?.[0] ?? null;
+  // Сбрасываем input сразу: иначе повторный выбор того же файла (например, после
+  // отмены кадрирования) не вызовет change, и окно не откроется.
+  input.value = "";
+  photoToCrop.value = file;
+}
+
+async function onPhotoCropped(blob: Blob): Promise<void> {
+  photoToCrop.value = null;
+  profile.value = await uploadMyPhoto(blob);
   auth.setTutorPhotoUrl(profile.value.photo_url);
 }
 
@@ -199,6 +212,13 @@ onMounted(load);
           @change="onPhotoChange"
         />
       </div>
+
+      <PhotoCropModal
+        v-if="photoToCrop"
+        :file="photoToCrop"
+        @cropped="onPhotoCropped"
+        @close="photoToCrop = null"
+      />
 
       <div class="flex flex-col gap-2 text-sm">
         Ссылка на мой профиль

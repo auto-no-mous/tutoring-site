@@ -11,7 +11,7 @@ import { useToastStore } from "@/stores/toast";
 import type { Booking } from "@/types/booking";
 import type { StudentGroupOccurrence } from "@/types/group";
 import { formatDateTimeWithMsk } from "@/utils/time";
-import { groupByWeekAndDay } from "@/utils/scheduleGrouping";
+import { groupByWeekAndDay, isBeforeToday } from "@/utils/scheduleGrouping";
 
 const toast = useToastStore();
 
@@ -28,16 +28,16 @@ type ScheduleItem = ({ kind: "booking" } & Booking) | ({ kind: "occurrence" } & 
 
 const upcoming = computed<ScheduleItem[]>(() => {
   const bookingItems: ScheduleItem[] = bookings.value
-    .filter((b) => b.status === "scheduled" && new Date(b.start_at) >= new Date())
+    .filter((b) => b.status === "scheduled" && !isBeforeToday(b.start_at, localTimeZone))
     .map((b) => ({ kind: "booking", ...b }));
   const occurrenceItems: ScheduleItem[] = occurrences.value
-    .filter((o) => o.status !== "cancelled" && new Date(o.start_at) >= new Date())
+    .filter((o) => o.status !== "cancelled" && !isBeforeToday(o.start_at, localTimeZone))
     .map((o) => ({ kind: "occurrence", ...o }));
   return [...bookingItems, ...occurrenceItems].sort((a, b) => a.start_at.localeCompare(b.start_at));
 });
 const past = computed(() =>
   bookings.value
-    .filter((b) => b.status !== "scheduled" || new Date(b.start_at) < new Date())
+    .filter((b) => b.status !== "scheduled" || isBeforeToday(b.start_at, localTimeZone))
     .sort((a, b) => b.start_at.localeCompare(a.start_at))
     .slice(0, 20),
 );

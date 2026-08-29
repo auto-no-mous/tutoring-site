@@ -164,3 +164,41 @@ async def test_first_booking_email_only_once_per_pair(client: AsyncClient, monke
         assert resp.status_code == 201, resp.text
 
     assert len(first_booking_calls) == 1
+
+
+async def test_linking_telegram_switches_the_channel_on_once(db_session: AsyncSession) -> None:
+    """Привязали мессенджер - значит хотят получать в него уведомления. Иначе выходило
+    странно: человек подключил Telegram, а сообщения туда не идут, потому что в
+    настройках осталось «только почта»."""
+    from app.services import telegram_service
+
+    user = await _make_user(db_session, NotificationChannelPref.EMAIL.value, with_telegram=False)
+    user.telegram_link_token = "link-token"
+    user.telegram_link_token_expires_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)
+    await db_session.commit()
+
+    linked = await telegram_service.link_chat_by_token(db_session, "link-token", "99887")
+    assert linked is not None
+    assert linked.telegram_chat_id == "99887"
+    assert linked.notification_channel == NotificationChannelPref.BOTH.value
+
+    # Дальше выбор снова за пользователем: переключение происходит в момент привязки,
+    # а не навязывается постоянно.
+    linked.notification_channel = NotificationChannelPref.EMAIL.value
+    await db_session.commit()
+    await db_session.refresh(linked)
+    assert linked.notification_channel == NotificationChannelPref.EMAIL.value
+
+
+async def test_expired_link_token_changes_nothing(db_session: AsyncSession) -> None:
+    from app.services import telegram_service
+
+    user = await _make_user(db_session, NotificationChannelPref.EMAIL.value, with_telegram=False)
+    user.telegram_link_token = "stale-token"
+    user.telegram_link_token_expires_at = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)
+    await db_session.commit()
+
+    assert await telegram_service.link_chat_by_token(db_session, "stale-token", "99887") is None
+    await db_session.refresh(user)
+    assert user.telegram_chat_id is None
+    assert user.notification_channel == NotificationChannelPref.EMAIL.value

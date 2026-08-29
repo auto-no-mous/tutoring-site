@@ -8,6 +8,7 @@ import { useNotificationsStore } from "@/stores/notifications";
 import type { ChatMessage, ChatThread } from "@/types/chat";
 import type { SystemNotification } from "@/types/notification";
 import type { TutorStudent } from "@/types/tutor";
+import { linkifySegments } from "@/utils/linkify";
 import { formatDayLabel, formatThreadTimestamp, formatTime } from "@/utils/time";
 
 // Lets other tabs (e.g. tutor/GroupsTab.vue's "написать" / "чат группы" buttons) deep-
@@ -386,7 +387,23 @@ defineExpose({ loadThreads });
               <span class="mb-0.5 px-1 text-[11px] font-medium text-slate-500">Системные уведомления</span>
               <div class="max-w-[80%] rounded-md bg-slate-100 px-3 py-1.5 text-sm dark:bg-slate-800">
                 <p class="font-medium">{{ item.title }}</p>
-                <p class="whitespace-pre-wrap">{{ item.body }}</p>
+                <!-- Адреса внутри текста уведомления делаем кликабельными. Куски
+                     приходят разобранными (utils/linkify.ts), а не готовым HTML:
+                     тексты шаблонов правит админ, и v-html открыл бы им дорогу к
+                     произвольной разметке. -->
+                <p class="whitespace-pre-wrap">
+                  <template v-for="(segment, i) in linkifySegments(item.body)" :key="i">
+                    <a
+                      v-if="segment.type === 'link'"
+                      :href="segment.value"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="text-brand-700 underline underline-offset-2 hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
+                      >{{ segment.value }}</a
+                    >
+                    <template v-else>{{ segment.value }}</template>
+                  </template>
+                </p>
                 <div class="mt-1 text-[10px] opacity-70">{{ formatTime(item.created_at) }}</div>
               </div>
             </div>

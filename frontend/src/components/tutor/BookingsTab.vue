@@ -13,7 +13,7 @@ import type { Booking } from "@/types/booking";
 import type { Group } from "@/types/group";
 import type { LessonType, Slot, TutorStudent } from "@/types/tutor";
 import { addDaysIso, formatDate, formatDateTimeWithMsk, formatMskTime, formatTime, mskDateTimeToUtcIso, todayIso } from "@/utils/time";
-import { groupByWeekAndDay } from "@/utils/scheduleGrouping";
+import { groupByWeekAndDay, isBeforeToday } from "@/utils/scheduleGrouping";
 
 const toast = useToastStore();
 
@@ -208,12 +208,12 @@ const MSK = "Europe/Moscow";
 
 const upcoming = computed(() =>
   bookings.value
-    .filter((b) => b.status === "scheduled" && new Date(b.start_at) >= new Date())
+    .filter((b) => b.status === "scheduled" && !isBeforeToday(b.start_at, MSK))
     .sort((a, b) => a.start_at.localeCompare(b.start_at)),
 );
 const past = computed(() =>
   bookings.value
-    .filter((b) => b.status !== "scheduled" || new Date(b.start_at) < new Date())
+    .filter((b) => b.status !== "scheduled" || isBeforeToday(b.start_at, MSK))
     .sort((a, b) => b.start_at.localeCompare(a.start_at))
     .slice(0, 20),
 );

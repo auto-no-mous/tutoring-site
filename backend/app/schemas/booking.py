@@ -1,9 +1,14 @@
 import datetime as dt
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.common import UTCDateTime
+
+# Потолок разовой длительности занятия, которую репетитор задаёт руками при
+# переносе. Восемь часов - заведомо больше любого осмысленного занятия и при этом
+# защищает от опечатки вроде 6000 минут, которая перекрыла бы весь календарь.
+MAX_LESSON_DURATION_MINUTES = 8 * 60
 
 
 class BookingCreate(BaseModel):
@@ -43,6 +48,11 @@ class BookingCancelRequest(BaseModel):
 
 class BookingRescheduleRequest(BaseModel):
     new_start_at: UTCDateTime
+    # Оба поля - только для репетитора: перенося занятие, он может заодно сменить его
+    # тип или разово задать другую длительность (см. booking_service.reschedule_booking,
+    # который отклонит их у ученика). None означает "оставить как было".
+    lesson_type_id: uuid.UUID | None = None
+    duration_minutes: int | None = Field(default=None, gt=0, le=MAX_LESSON_DURATION_MINUTES)
 
 
 class BookingOutcomeUpdate(BaseModel):

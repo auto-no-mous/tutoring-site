@@ -532,3 +532,210 @@ async def test_tutor_cannot_modify_other_tutors_booking(client: AsyncClient) -> 
 
     resp = await client.delete(f"/api/v1/bookings/{booking_id}", headers=tutor_b["headers"])
     assert resp.status_code == 403
+
+
+async def test_tutor_reschedules_into_the_past_and_over_another_lesson(client: AsyncClient) -> None:
+    """Правила переноса - это правила для ученика. У репетитора бывает необходимость
+    поставить занятие и задним числом, и внакладку с другим: это его календарь."""
+    tutor = await _setup_tutor(client, "tutor-free-reschedule@example.com")
+    student = await _register(client, "tutor-free-reschedule-student@example.com", "student")
+
+    booking = (
+        await client.post(
+            "/api/v1/bookings",
+            headers=student["headers"],
+            json={
+                "tutor_id": tutor["id"],
+                "lesson_type_id": tutor["lesson_type_id"],
+                "start_at": _next_weekday_datetime(0, 10).isoformat(),
+            },
+        )
+    ).json()
+    other_start = _next_weekday_datetime(0, 12)
+    other = (
+        await client.post(
+            "/api/v1/bookings",
+            headers=student["headers"],
+            json={
+                "tutor_id": tutor["id"],
+                "lesson_type_id": tutor["lesson_type_id"],
+                "start_at": other_start.isoformat(),
+            },
+        )
+    ).json()
+    assert other["status"] == "scheduled"
+
+    # В прошлое - вчера, в час, когда репетитор вообще не работает.
+    yesterday = dt.datetime.combine(dt.date.today() - dt.timedelta(days=1), dt.time(7, 0), tzinfo=MSK)
+    moved = await client.post(
+        f"/api/v1/bookings/{booking['id']}/reschedule",
+        headers=tutor["headers"],
+        json={"new_start_at": yesterday.isoformat()},
+    )
+    assert moved.status_code == 200, moved.text
+    assert dt.datetime.fromisoformat(moved.json()["start_at"]) == yesterday.astimezone(dt.timezone.utc)
+
+    # И внакладку на уже существующее занятие.
+    overlapped = await client.post(
+        f"/api/v1/bookings/{moved.json()['id']}/reschedule",
+        headers=tutor["headers"],
+        json={"new_start_at": other_start.isoformat()},
+    )
+    assert overlapped.status_code == 200, overlapped.text
+
+
+async def test_student_reschedule_still_obeys_the_rules(client: AsyncClient) -> None:
+    """Обратная сторона: послабление сделано только для репетитора."""
+    tutor = await _setup_tutor(client, "student-rules-tutor@example.com")
+    student = await _register(client, "student-rules-student@example.com", "student")
+    booking = (
+        await client.post(
+            "/api/v1/bookings",
+            headers=student["headers"],
+            json={
+                "tutor_id": tutor["id"],
+                "lesson_type_id": tutor["lesson_type_id"],
+                "start_at": _next_weekday_datetime(0, 10).isoformat(),
+            },
+        )
+    ).json()
+
+    yesterday = dt.datetime.combine(dt.date.today() - dt.timedelta(days=1), dt.time(10, 0), tzinfo=MSK)
+    resp = await client.post(
+        f"/api/v1/bookings/{booking['id']}/reschedule",
+        headers=student["headers"],
+        json={"new_start_at": yesterday.isoformat()},
+    )
+    assert resp.status_code == 409
+
+
+async def test_tutor_changes_lesson_type_and_duration_while_rescheduling(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "retype-tutor@example.com")
+    student = await _register(client, "retype-student@example.com", "student")
+    long_type = (
+        await client.post(
+            "/api/v1/tutors/me/lesson-types",
+            headers=tutor["headers"],
+            json={"name": "Интенсив", "format": "individual", "duration_minutes": 120, "price": 2000},
+        )
+    ).json()
+
+    booking = (
+        await client.post(
+            "/api/v1/bookings",
+            headers=student["headers"],
+            json={
+                "tutor_id": tutor["id"],
+                "lesson_type_id": tutor["lesson_type_id"],
+                "start_at": _next_weekday_datetime(0, 10).isoformat(),
+            },
+        )
+    ).json()
+
+    new_start = _next_weekday_datetime(0, 15, weeks_ahead=3)
+    resp = await client.post(
+        f"/api/v1/bookings/{booking['id']}/reschedule",
+        headers=tutor["headers"],
+        json={"new_start_at": new_start.isoformat(), "lesson_type_id": long_type["id"]},
+    )
+    assert resp.status_code == 200, resp.text
+    moved = resp.json()
+    assert moved["lesson_type_id"] == long_type["id"]
+    assert moved["lesson_type_name"] == "Интенсив"
+    span = dt.datetime.fromisoformat(moved["end_at"]) - dt.datetime.fromisoformat(moved["start_at"])
+    assert span == dt.timedelta(minutes=120)
+
+    # Разовая длительность перебивает длительность типа.
+    custom = await client.post(
+        f"/api/v1/bookings/{moved['id']}/reschedule",
+        headers=tutor["headers"],
+        json={"new_start_at": new_start.isoformat(), "duration_minutes": 45},
+    )
+    assert custom.status_code == 200, custom.text
+    custom_span = dt.datetime.fromisoformat(custom.json()["end_at"]) - dt.datetime.fromisoformat(
+        custom.json()["start_at"]
+    )
+    assert custom_span == dt.timedelta(minutes=45)
+
+
+async def test_student_cannot_change_type_or_duration(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "student-retype-tutor@example.com")
+    student = await _register(client, "student-retype-student@example.com", "student")
+    booking = (
+        await client.post(
+            "/api/v1/bookings",
+            headers=student["headers"],
+            json={
+                "tutor_id": tutor["id"],
+                "lesson_type_id": tutor["lesson_type_id"],
+                "start_at": _next_weekday_datetime(0, 10).isoformat(),
+            },
+        )
+    ).json()
+
+    resp = await client.post(
+        f"/api/v1/bookings/{booking['id']}/reschedule",
+        headers=student["headers"],
+        json={
+            "new_start_at": _next_weekday_datetime(0, 11, weeks_ahead=3).isoformat(),
+            "duration_minutes": 45,
+        },
+    )
+    assert resp.status_code == 403
+
+
+async def test_tutor_reschedule_grid_shows_every_day_and_marks_busy_slots(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "grid-tutor@example.com")
+    student = await _register(client, "grid-student@example.com", "student")
+    busy_start = _next_weekday_datetime(0, 12)
+    booking = (
+        await client.post(
+            "/api/v1/bookings",
+            headers=student["headers"],
+            json={
+                "tutor_id": tutor["id"],
+                "lesson_type_id": tutor["lesson_type_id"],
+                "start_at": _next_weekday_datetime(0, 10).isoformat(),
+            },
+        )
+    ).json()
+    await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": busy_start.isoformat(),
+        },
+    )
+
+    # Даты: репетитору отдаётся весь запрошенный диапазон, включая прошедшие дни и
+    # выходные, когда он не работает.
+    date_from = dt.date.today() - dt.timedelta(days=5)
+    date_to = dt.date.today() + dt.timedelta(days=5)
+    dates = (
+        await client.get(
+            f"/api/v1/bookings/{booking['id']}/reschedule/dates",
+            headers=tutor["headers"],
+            params={"date_from": date_from.isoformat(), "date_to": date_to.isoformat()},
+        )
+    ).json()
+    assert len(dates) == 11
+    assert dates[0] == date_from.isoformat()
+
+    # Слоты: сетка шире рабочих часов (09:00-20:00 плюс запас), занятое помечено.
+    slots = (
+        await client.get(
+            f"/api/v1/bookings/{booking['id']}/reschedule/slots",
+            headers=tutor["headers"],
+            params={"date": busy_start.date().isoformat()},
+        )
+    ).json()
+    assert all(s["available"] for s in slots), "репетитору доступен любой слот"
+    msk_hours = {dt.datetime.fromisoformat(s["start_at"]).astimezone(MSK).hour for s in slots}
+    assert 7 in msk_hours and 21 in msk_hours, "сетка выходит за рабочие часы"
+
+    busy = [s for s in slots if s["busy"]]
+    assert busy, "занятое другим занятием время должно быть помечено"
+    busy_msk = {dt.datetime.fromisoformat(s["start_at"]).astimezone(MSK).hour for s in busy}
+    assert 12 in busy_msk

@@ -8,6 +8,7 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 from app.core.config import settings
+from app.models.enums import NotificationChannelPref
 from app.models.user import User
 from app.utils.time import ensure_aware, utcnow
 
@@ -77,6 +78,15 @@ async def link_chat_by_token(db: AsyncSession, token: str, chat_id: str) -> User
     user.telegram_chat_id = chat_id
     user.telegram_link_token = None
     user.telegram_link_token_expires_at = None
+
+    # Привязали мессенджер - значит хотят получать в него уведомления, поэтому сразу
+    # включаем оба канала. Ровно в этот момент и только один раз: дальше выбор
+    # остаётся за пользователем, и если он потом выберет что-то другое, повторная
+    # привязка ему это не переставит (её просто не будет, пока он не отвяжет и не
+    # привяжет заново). Иначе выходило странно: человек подключил Telegram, а
+    # уведомления туда не идут, потому что в настройках всё ещё «только почта».
+    user.notification_channel = NotificationChannelPref.BOTH.value
+
     await db.commit()
     await db.refresh(user)
     return user

@@ -20,7 +20,12 @@ import { computed } from "vue";
 // Сетка месяца для выбора даты занятия: свободные дни кликабельны, занятые —
 // приглушены и недоступны. Список свободных дат приходит с бэкенда
 // (getAvailableDates), здесь он только раскладывается по календарю.
-const props = defineProps<{ availableDates: string[] }>();
+// allowPast - режим переноса для репетитора: ему доступны и прошедшие даты (можно
+// записать уже проведённое занятие задним числом), поэтому календарь не упирается
+// в сегодняшний день, а прошедшие дни просто показываются бледнее.
+const props = withDefaults(defineProps<{ availableDates: string[]; allowPast?: boolean }>(), {
+  allowPast: false,
+});
 const emit = defineEmits<{ select: [date: string] }>();
 
 const availableSet = computed(() => new Set(props.availableDates));
@@ -32,8 +37,17 @@ const minValue = computed<DateValue>(() => {
   const first = props.availableDates[0];
   if (!first) return now;
   const firstDate = parseDate(first);
+  if (props.allowPast) return firstDate;
   return firstDate.compare(now) < 0 ? firstDate : now;
 });
+
+// Открываем календарь на текущем месяце, когда прошлое доступно: иначе репетитор
+// попадал бы сразу на начало диапазона, то есть на месяц назад.
+const todayValue = computed<DateValue>(() => today(getLocalTimeZone()));
+
+function isPast(date: DateValue): boolean {
+  return date.compare(todayValue.value) < 0;
+}
 
 const maxValue = computed<DateValue | undefined>(() => {
   const last = props.availableDates[props.availableDates.length - 1];
@@ -42,7 +56,7 @@ const maxValue = computed<DateValue | undefined>(() => {
 
 // Открываем на месяце с первой свободной датой - иначе при записи в конце месяца
 // ученик увидит пустую сетку и решит, что мест нет.
-const placeholder = computed<DateValue>(() => minValue.value);
+const placeholder = computed<DateValue>(() => (props.allowPast ? todayValue.value : minValue.value));
 
 function isDateUnavailable(date: DateValue): boolean {
   return !availableSet.value.has(date.toString());
@@ -105,6 +119,7 @@ function onSelect(date: DateValue | undefined): void {
             <CalendarCellTrigger
               :day="weekDate"
               :month="month.value"
+              :class="allowPast && isPast(weekDate) ? 'text-slate-400 dark:text-slate-500' : ''"
               class="flex h-10 w-full cursor-pointer items-center justify-center rounded-lg text-base font-medium transition-all duration-150
                 hover:-translate-y-0.5 hover:bg-brand-50 hover:text-brand-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500
                 data-[disabled]:cursor-not-allowed data-[disabled]:text-slate-300 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:bg-transparent

@@ -207,6 +207,86 @@ async def compute_day_slots_by_duration(
     return slots
 
 
+# На сколько сетка репетитора шире его рабочих часов - чтобы перенести занятие чуть
+# раньше или позже обычного, не заводя ради этого новый интервал в расписании.
+TUTOR_GRID_PADDING_HOURS = 2
+# Запасная полоса, если недельное расписание ещё вовсе не заполнено.
+TUTOR_GRID_FALLBACK = (dt.time(8, 0), dt.time(22, 0))
+
+
+async def get_tutor_grid_bounds(db: AsyncSession, tutor_id: uuid.UUID) -> tuple[dt.time, dt.time]:
+    """Границы сетки времени, которую видит сам репетитор при переносе занятия.
+
+    Берём самый ранний и самый поздний час из всего недельного расписания и
+    расширяем на TUTOR_GRID_PADDING_HOURS в обе стороны. Одинаково для всех дней,
+    включая те, где репетитор обычно не работает: перенос для него не ограничен
+    расписанием, и сетка нужна как удобная рамка, а не как правило.
+    """
+    result = await db.execute(select(WeeklyAvailability).where(WeeklyAvailability.tutor_id == tutor_id))
+    rows = result.scalars().all()
+    if not rows:
+        return TUTOR_GRID_FALLBACK
+
+    earliest = min(r.start_time for r in rows)
+    latest = max(r.end_time for r in rows)
+    start_hour = max(0, earliest.hour - TUTOR_GRID_PADDING_HOURS)
+    # Округляем конец вверх до часа, прежде чем добавлять запас, иначе окно до 19:30
+    # дало бы сетку до 21:30 и половинчатый последний час.
+    end_hour = latest.hour + (1 if latest.minute else 0) + TUTOR_GRID_PADDING_HOURS
+    if end_hour >= 24:
+        return dt.time(start_hour, 0), dt.time(23, 59)
+    return dt.time(start_hour, 0), dt.time(end_hour, 0)
+
+
+async def compute_tutor_day_slots(
+    db: AsyncSession,
+    tutor: TutorProfile,
+    duration_minutes: int,
+    target_date: dt.date,
+    exclude_booking_id: uuid.UUID | None = None,
+) -> list[SlotOut]:
+    """Сетка слотов для самого репетитора: показываем весь день целиком, ничего не
+    отсеивая.
+
+    Отличие от compute_day_slots_by_duration принципиальное. Там сетка строится по
+    недельному расписанию и отсеивает всё, что занято, слишком скоро или вне рабочих
+    часов - это правила для ученика. Репетитору же переносить можно куда угодно,
+    включая прошлое и наложение на другое занятие, поэтому здесь каждый слот
+    выбираем (available=True), а занятость отдаём отдельным признаком busy, чтобы
+    интерфейс мог её подсветить.
+    """
+    grid_start, grid_end = await get_tutor_grid_bounds(db, tutor.id)
+    step = dt.timedelta(minutes=tutor.slot_granularity_minutes)
+    duration = dt.timedelta(minutes=duration_minutes)
+    break_minutes = tutor.break_between_lessons_minutes
+
+    day_start_utc = _combine_msk(target_date, dt.time(0, 0)).astimezone(dt.timezone.utc)
+    reserved_zones = await get_reserved_zones(
+        db,
+        tutor.id,
+        day_start_utc - dt.timedelta(days=1),
+        day_start_utc + dt.timedelta(days=2),
+        break_minutes,
+        exclude_booking_id=exclude_booking_id,
+    )
+
+    slots: list[SlotOut] = []
+    mark = _combine_msk(target_date, grid_start)
+    grid_end_dt = _combine_msk(target_date, grid_end)
+    while mark <= grid_end_dt:
+        mark_utc = mark.astimezone(dt.timezone.utc)
+        slots.append(
+            SlotOut(
+                start_at=mark_utc,
+                end_at=mark_utc + duration,
+                available=True,
+                busy=slot_conflicts(mark_utc, mark_utc + duration, break_minutes, reserved_zones),
+            )
+        )
+        mark += step
+    return slots
+
+
 async def compute_day_slots(
     db: AsyncSession,
     tutor: TutorProfile,

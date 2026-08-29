@@ -589,11 +589,29 @@ async def get_reschedule_context(db: AsyncSession, booking: Booking, actor: User
     return tutor, lesson_type
 
 
-async def reschedule_booking(db: AsyncSession, booking: Booking, actor: User, new_start_at: dt.datetime) -> Booking:
+async def reschedule_booking(
+    db: AsyncSession,
+    booking: Booking,
+    actor: User,
+    new_start_at: dt.datetime,
+    lesson_type_id: uuid.UUID | None = None,
+    duration_minutes: int | None = None,
+) -> Booking:
     tutor, lesson_type = await get_reschedule_context(db, booking, actor)
     is_tutor = actor.role == UserRole.TUTOR.value
     now = utcnow()
     start_at = ensure_aware(booking.start_at)
+
+    if not is_tutor and (lesson_type_id is not None or duration_minutes is not None):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Менять тип и длительность занятия может только репетитор"
+        )
+
+    if lesson_type_id is not None and lesson_type_id != booking.lesson_type_id:
+        new_type = await db.get(LessonType, lesson_type_id)
+        if new_type is None or new_type.tutor_id != booking.tutor_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Тип занятия не найден")
+        lesson_type = new_type
 
     if not is_tutor:
         if start_at - now < dt.timedelta(hours=tutor.reschedule_min_hours_before):
@@ -608,16 +626,21 @@ async def reschedule_booking(db: AsyncSession, booking: Booking, actor: User, ne
         if reschedules_this_month >= tutor.reschedule_max_per_month:
             raise HTTPException(status.HTTP_409_CONFLICT, "Превышен лимит переносов занятий в этом месяце")
 
-    if not await schedule_service.is_slot_available(
+    # Проверка доступности слота - это свод правил для ученика: рабочие часы, запас по
+    # времени, отсутствие пересечений, не в прошлом. К репетитору она не применяется
+    # вовсе: у него бывает необходимость перенести занятие и на вчера (записать уже
+    # проведённое), и внакладку с другим - это его календарь и его ответственность.
+    if not is_tutor and not await schedule_service.is_slot_available(
         db, tutor, lesson_type, new_start_at, exclude_booking_id=booking.id
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, "Выбранное время уже недоступно")
 
-    new_end_at = new_start_at + dt.timedelta(minutes=lesson_type.duration_minutes)
+    new_duration = duration_minutes or lesson_type.duration_minutes
+    new_end_at = new_start_at + dt.timedelta(minutes=new_duration)
     new_booking = Booking(
         tutor_id=booking.tutor_id,
         student_id=booking.student_id,
-        lesson_type_id=booking.lesson_type_id,
+        lesson_type_id=lesson_type.id,
         start_at=new_start_at,
         end_at=new_end_at,
         status=BookingStatus.SCHEDULED.value,
