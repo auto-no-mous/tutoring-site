@@ -68,7 +68,8 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
     (SystemNotificationEvent.GROUP_APPLICATION_RECEIVED, UserRole.TUTOR): (
         "Новая заявка в группу",
         "{student_name} подал(а) заявку на участие в группе «{group_name}». "
-        "Рассмотрите её во вкладке «Группы».",
+        "Принять или отклонить её можно во вкладке «Группы» — заявка ждёт вверху "
+        "страницы: {groups_url}",
     ),
     (SystemNotificationEvent.GROUP_MEMBER_LEFT, UserRole.TUTOR): (
         "Ученик покинул группу",
@@ -91,6 +92,12 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
         "Изменилось расписание группы",
         "Репетитор изменил расписание группы «{group_name}»: ближайшее занятие перенесено "
         "с {old_date} {old_time} на {new_date} {new_time} (МСК).",
+    ),
+    (SystemNotificationEvent.GROUP_MEMBER_REMOVED, UserRole.STUDENT): (
+        "Вы больше не участник группы",
+        "Репетитор исключил вас из группы «{group_name}», её занятия больше не будут "
+        "появляться в вашем расписании. Если это недоразумение, вы можете подать заявку "
+        "в группу заново на странице репетитора.",
     ),
     (SystemNotificationEvent.GROUP_APPLICATION_ACCEPTED, UserRole.STUDENT): (
         "Заявка в группу принята",

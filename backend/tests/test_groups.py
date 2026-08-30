@@ -541,3 +541,45 @@ async def test_delete_group_is_owner_only(client: AsyncClient) -> None:
     resp = await client.delete(f"/api/v1/groups/{tutor['group']['id']}", headers=other["headers"])
     assert resp.status_code == 403
     assert (await client.get("/api/v1/groups/tutor/me", headers=tutor["headers"])).json() != []
+
+
+async def test_public_groups_report_student_state(client: AsyncClient) -> None:
+    """Страница групп должна заранее знать, где ученик уже состоит и где ждёт решения
+    его заявка: иначе кнопка "Подать заявку" активна и молча упирается в 409."""
+    tutor = await _setup_tutor_with_group(client, "public-state-tutor@example.com")
+    member = await _register(client, "public-state-member@example.com", "student")
+    applicant = await _register(client, "public-state-applicant@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+    group_id = tutor["group"]["id"]
+
+    url = f"/api/v1/tutors/{tutor_id}/groups"
+
+    # Гость видит группы, но никаких признаков участия у него нет.
+    guest_groups = (await client.get(url)).json()
+    assert guest_groups[0]["is_member"] is False
+    assert guest_groups[0]["has_pending_application"] is False
+
+    application = await client.post(
+        f"/api/v1/groups/{group_id}/apply", headers=member["headers"], json={}
+    )
+    accept = await client.post(
+        f"/api/v1/groups/{group_id}/applications/{application.json()['id']}/accept",
+        headers=tutor["headers"],
+    )
+    assert accept.status_code == 200, accept.text
+    apply_resp = await client.post(
+        f"/api/v1/groups/{group_id}/apply", headers=applicant["headers"], json={}
+    )
+    assert apply_resp.status_code == 201, apply_resp.text
+
+    member_view = (await client.get(url, headers=member["headers"])).json()[0]
+    assert member_view["is_member"] is True
+    assert member_view["has_pending_application"] is False
+
+    applicant_view = (await client.get(url, headers=applicant["headers"])).json()[0]
+    assert applicant_view["is_member"] is False
+    assert applicant_view["has_pending_application"] is True
+
+    # Репетитору эти поля не адресованы - он не может состоять в собственной группе.
+    tutor_view = (await client.get(url, headers=tutor["headers"])).json()[0]
+    assert tutor_view["is_member"] is False

@@ -54,6 +54,16 @@ async def _events_for_user(db_session: AsyncSession, user_id: str) -> list[str]:
     return [n.event_type for n in result.scalars().all()]
 
 
+async def _notification_body(db_session: AsyncSession, user_id: str, event_type: str) -> str:
+    result = await db_session.execute(
+        select(SystemNotification).where(
+            SystemNotification.user_id == uuid.UUID(user_id),
+            SystemNotification.event_type == event_type,
+        )
+    )
+    return result.scalars().first().body
+
+
 async def _setup_individual_booking(client: AsyncClient, tutor: dict, student: dict) -> dict:
     tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
     lesson_type_id = (
@@ -198,6 +208,14 @@ async def test_group_application_lifecycle_notifications(client: AsyncClient, db
     tutor_events = await _events_for_user(db_session, tutor["user"]["id"])
     assert "group_application_received" in tutor_events
 
+    # В теле уведомления должна быть ссылка прямо на вкладку с заявками: иначе
+    # репетитору приходится догадываться, где их рассматривать.
+    application_notice = await _notification_body(
+        db_session, tutor["user"]["id"], "group_application_received"
+    )
+    assert "/cabinet?tab=groups" in application_notice
+    assert "Группа уведомлений" in application_notice
+
     accept_resp = await client.post(
         f"/api/v1/groups/{group_id}/applications/{app_resp.json()['id']}/accept", headers=tutor["headers"]
     )
@@ -340,3 +358,50 @@ async def test_non_admin_cannot_access_notification_templates(client: AsyncClien
     student = await _register(client, "sysnotif-forbidden@example.com", "student")
     resp = await client.get("/api/v1/admin/notification-templates", headers=student["headers"])
     assert resp.status_code == 403
+
+
+async def test_removed_student_is_notified(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Исключение из группы раньше проходило молча - занятия просто пропадали."""
+    tutor = await _register(client, "sysnotif-remove-tutor@example.com", "tutor")
+    student = await _register(client, "sysnotif-remove-student@example.com", "student")
+
+    lesson_type_id = (
+        await client.post(
+            "/api/v1/tutors/me/lesson-types",
+            headers=tutor["headers"],
+            json={"name": "Группа", "format": "group", "duration_minutes": 90, "price": 500},
+        )
+    ).json()["id"]
+    group_id = (
+        await client.post(
+            "/api/v1/groups",
+            headers=tutor["headers"],
+            json={
+                "name": "Группа исключения",
+                "lesson_type_id": lesson_type_id,
+                "capacity": 3,
+                "schedule_slots": [{"weekday": 1, "start_time": "18:00:00"}],
+            },
+        )
+    ).json()["id"]
+
+    application = await client.post(
+        f"/api/v1/groups/{group_id}/apply", headers=student["headers"], json={}
+    )
+    accept = await client.post(
+        f"/api/v1/groups/{group_id}/applications/{application.json()['id']}/accept",
+        headers=tutor["headers"],
+    )
+    assert accept.status_code == 200, accept.text
+
+    student_id = student["user"]["id"]
+    assert "group_member_removed" not in await _events_for_user(db_session, student_id)
+
+    removal = await client.delete(
+        f"/api/v1/groups/{group_id}/members/{student_id}", headers=tutor["headers"]
+    )
+    assert removal.status_code == 200, removal.text
+
+    assert "group_member_removed" in await _events_for_user(db_session, student_id)
+    body = await _notification_body(db_session, student_id, "group_member_removed")
+    assert "Группа исключения" in body

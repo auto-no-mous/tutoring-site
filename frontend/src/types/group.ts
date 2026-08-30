@@ -27,6 +27,10 @@ export interface GroupPublic {
   price: number;
   duration_minutes: number;
   schedule_slots: GroupScheduleSlot[];
+  // Состояние текущего ученика: сервер заполняет их только для авторизованного
+  // ученика, гостю и репетитору всегда false.
+  is_member: boolean;
+  has_pending_application: boolean;
 }
 
 export interface GroupApplication {

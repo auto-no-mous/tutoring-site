@@ -12,6 +12,7 @@ const EVENT_LABELS: Record<string, string> = {
   booking_rescheduled_by_student: "Ученик перенёс занятие",
   group_application_received: "Новая заявка в группу",
   group_member_left: "Ученик покинул группу",
+  group_member_removed: "Ученика исключили из группы",
   booking_cancelled_by_tutor: "Репетитор отменил занятие",
   booking_rescheduled_by_tutor: "Репетитор перенёс занятие",
   group_schedule_changed: "Изменилось расписание группы",

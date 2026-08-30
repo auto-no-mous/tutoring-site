@@ -8,7 +8,7 @@ import { useNotificationsStore } from "@/stores/notifications";
 import type { ChatMessage, ChatThread } from "@/types/chat";
 import type { SystemNotification } from "@/types/notification";
 import type { TutorStudent } from "@/types/tutor";
-import { linkifySegments } from "@/utils/linkify";
+import { internalPath, linkifySegments } from "@/utils/linkify";
 import { formatDayLabel, formatThreadTimestamp, formatTime } from "@/utils/time";
 
 // Lets other tabs (e.g. tutor/GroupsTab.vue's "написать" / "чат группы" buttons) deep-
@@ -393,8 +393,17 @@ defineExpose({ loadThreads });
                      произвольной разметке. -->
                 <p class="whitespace-pre-wrap">
                   <template v-for="(segment, i) in linkifySegments(item.body)" :key="i">
+                    <!-- Ссылка на наш же кабинет (например, на вкладку «Группы» в
+                         уведомлении о заявке) ведёт через роутер: перезагружать
+                         приложение ради перехода на соседнюю вкладку незачем. -->
+                    <RouterLink
+                      v-if="segment.type === 'link' && internalPath(segment.value)"
+                      :to="internalPath(segment.value)!"
+                      class="text-brand-700 underline underline-offset-2 hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
+                      >{{ segment.value }}</RouterLink
+                    >
                     <a
-                      v-if="segment.type === 'link'"
+                      v-else-if="segment.type === 'link'"
                       :href="segment.value"
                       target="_blank"
                       rel="noopener noreferrer"

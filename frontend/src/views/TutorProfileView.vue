@@ -1,19 +1,16 @@
 <script setup lang="ts">
-import { CalendarPlus, MessageCircle, Star, Users } from "lucide-vue-next";
+import { Star } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 
-import { openThreadWithTutor } from "@/api/chat";
 import { getPublicProfile, getReviews } from "@/api/tutors";
-import SocialLinks from "@/components/tutor/SocialLinks.vue";
-import { useAuthStore } from "@/stores/auth";
+import TutorBookingButtons from "@/components/tutor/TutorBookingButtons.vue";
+import TutorContactRow from "@/components/tutor/TutorContactRow.vue";
 import { sanitizeRichText } from "@/utils/richText";
 import type { TutorPublicProfile } from "@/types/tutor";
 import type { Review } from "@/types/stats";
 
 const route = useRoute();
-const router = useRouter();
-const auth = useAuthStore();
 const tutorId = route.params.id as string;
 
 const profile = ref<TutorPublicProfile | null>(null);
@@ -35,21 +32,6 @@ async function load(): Promise<void> {
 }
 
 const aboutHtml = computed(() => (profile.value?.about ? sanitizeRichText(profile.value.about) : ""));
-
-const hasSocialLinks = computed(
-  () =>
-    !!profile.value &&
-    (!!profile.value.telegram_url ||
-      !!profile.value.vk_url ||
-      !!profile.value.youtube_url ||
-      profile.value.extra_links.length > 0),
-);
-
-async function openChat(): Promise<void> {
-  if (!profile.value) return;
-  const thread = await openThreadWithTutor(profile.value.id);
-  await router.push({ path: "/cabinet", query: { tab: "chat", thread: thread.id } });
-}
 
 onMounted(load);
 </script>
@@ -79,46 +61,25 @@ onMounted(load);
               <Star class="h-4 w-4 fill-aqua-400 text-aqua-400" /> {{ profile.avg_rating.toFixed(1) }}
               <span class="font-normal text-slate-500 dark:text-slate-400">({{ profile.reviews_count }} отзывов)</span>
             </p>
-            <SocialLinks
-              v-if="hasSocialLinks"
-              class="mt-3 justify-center sm:justify-start"
-              :telegram-url="profile.telegram_url"
-              :vk-url="profile.vk_url"
-              :youtube-url="profile.youtube_url"
-              :extra-links="profile.extra_links"
-            />
-            <div
-              v-if="profile.show_individual_booking || profile.show_group_booking || auth.user?.role === 'student'"
-              class="mt-5 flex flex-wrap justify-center gap-3 sm:justify-start"
-            >
-              <RouterLink v-if="profile.show_individual_booking" :to="`/tutors/${profile.id}/book`" class="btn-primary text-base">
-                <CalendarPlus class="h-4 w-4" />
-                Запись на индивидуальное занятие
-              </RouterLink>
-              <RouterLink v-if="profile.show_group_booking" :to="`/tutors/${profile.id}/groups`" class="btn-outline text-base">
-                <Users class="h-4 w-4" />
-                Запись на групповое занятие
-              </RouterLink>
-              <button v-if="auth.user?.role === 'student'" type="button" class="btn-outline text-base" @click="openChat">
-                <MessageCircle class="h-4 w-4" />
-                Написать сообщение
-              </button>
+            <!-- Предметы стоят прямо в шапке, а не отдельной секцией ниже: это первое,
+                 что ищут в анкете, и ради него не стоит скроллить. -->
+            <div v-if="profile.subjects.length > 0" class="mt-3 flex flex-col gap-1">
+              <div v-for="subject in profile.subjects" :key="subject.subject_id" class="text-base">
+                <span class="font-semibold">{{ subject.subject_name }}</span>
+                <span v-if="subject.directions.length > 0" class="text-slate-500 dark:text-slate-400">
+                  — {{ subject.directions.map((d) => d.name).join(", ") }}
+                </span>
+              </div>
             </div>
+            <TutorContactRow :profile="profile" class="mt-4" />
           </div>
         </div>
       </div>
 
-      <section v-if="profile.subjects.length > 0" class="surface-card animate-fade-in-up mt-5 p-5 [animation-delay:60ms]">
-        <h2 class="text-xl font-semibold">Предметы и направления</h2>
-        <div class="mt-3 flex flex-col gap-2">
-          <div v-for="subject in profile.subjects" :key="subject.subject_id" class="text-base">
-            <span class="font-semibold">{{ subject.subject_name }}</span>
-            <span v-if="subject.directions.length > 0" class="text-slate-500 dark:text-slate-400">
-              — {{ subject.directions.map((d) => d.name).join(", ") }}
-            </span>
-          </div>
-        </div>
-      </section>
+      <TutorBookingButtons
+        :profile="profile"
+        class="surface-card animate-fade-in-up mt-5 p-5 [animation-delay:30ms]"
+      />
 
       <section class="surface-card animate-fade-in-up mt-5 p-5 [animation-delay:120ms]">
         <h2 class="text-xl font-semibold">О себе</h2>

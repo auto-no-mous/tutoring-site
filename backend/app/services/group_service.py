@@ -6,6 +6,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.models.enums import (
     BookedBy,
     GroupApplicationStatus,
@@ -42,6 +43,21 @@ async def _notify_tutor_system(db: AsyncSession, tutor_id: uuid.UUID, event: Sys
     await system_notification_service.notify(db, profile.user_id, event, **params)
 
 
+async def _notify_student_removed(db: AsyncSession, student_id: uuid.UUID, group: Group) -> None:
+    """Сообщает ученику, что его исключили из группы.
+
+    Раньше исключение проходило молча: занятия просто исчезали из расписания
+    (списки фильтруются по активному участию), и ученик оставался ждать занятия,
+    которого не будет.
+    """
+    await system_notification_service.notify(
+        db,
+        student_id,
+        SystemNotificationEvent.GROUP_MEMBER_REMOVED,
+        group_name=group.name,
+    )
+
+
 async def _get_group_lesson_type(db: AsyncSession, tutor_id: uuid.UUID, lesson_type_id: uuid.UUID) -> LessonType:
     result = await db.execute(
         select(LessonType).where(LessonType.id == lesson_type_id, LessonType.tutor_id == tutor_id)
@@ -74,6 +90,34 @@ async def get_group_or_404(db: AsyncSession, group_id: uuid.UUID) -> Group:
 def require_owner(group: Group, tutor: TutorProfile) -> None:
     if group.tutor_id != tutor.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша группа")
+
+
+async def get_student_group_states(
+    db: AsyncSession, student_id: uuid.UUID, group_ids: list[uuid.UUID]
+) -> tuple[set[uuid.UUID], set[uuid.UUID]]:
+    """(группы, где ученик состоит; группы, где его заявка ждёт решения).
+
+    Двумя запросами на весь список, а не по запросу на группу: страница групп
+    репетитора рисует их все сразу.
+    """
+    if not group_ids:
+        return set(), set()
+
+    memberships = await db.execute(
+        select(GroupMembership.group_id).where(
+            GroupMembership.student_id == student_id,
+            GroupMembership.group_id.in_(group_ids),
+            GroupMembership.status == GroupMembershipStatus.ACTIVE.value,
+        )
+    )
+    applications = await db.execute(
+        select(GroupApplication.group_id).where(
+            GroupApplication.student_id == student_id,
+            GroupApplication.group_id.in_(group_ids),
+            GroupApplication.status == GroupApplicationStatus.PENDING.value,
+        )
+    )
+    return set(memberships.scalars().all()), set(applications.scalars().all())
 
 
 async def count_active_members(db: AsyncSession, group_id: uuid.UUID) -> int:
@@ -409,6 +453,9 @@ async def apply_to_group(db: AsyncSession, student: User, group: Group) -> Group
     await _notify_tutor_system(
         db, group.tutor_id, SystemNotificationEvent.GROUP_APPLICATION_RECEIVED,
         student_name=student.display_name, group_name=group.name,
+        # Адрес собирается здесь, а не зашит в шаблон: он различается между локальной
+        # разработкой и продом (FRONTEND_BASE_URL), а шаблон один на всех.
+        groups_url=f"{settings.frontend_base_url.rstrip('/')}/cabinet?tab=groups",
     )
     return application
 
@@ -533,7 +580,9 @@ async def remove_member_by_tutor(db: AsyncSession, group: Group, student_id: uui
     membership = result.scalar_one_or_none()
     if membership is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не состоит в этой группе")
-    return await _leave(db, membership, BookedBy.TUTOR.value)
+    membership = await _leave(db, membership, BookedBy.TUTOR.value)
+    await _notify_student_removed(db, student_id, group)
+    return membership
 
 
 async def admin_remove_member(db: AsyncSession, group: Group, student_id: uuid.UUID) -> GroupMembership:
@@ -547,7 +596,11 @@ async def admin_remove_member(db: AsyncSession, group: Group, student_id: uuid.U
     membership = result.scalar_one_or_none()
     if membership is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ученик не состоит в этой группе")
-    return await _leave(db, membership, BookedBy.ADMIN.value)
+    membership = await _leave(db, membership, BookedBy.ADMIN.value)
+    # Для ученика разницы нет, кто именно его исключил: занятия группы одинаково
+    # пропадают из расписания, и узнать об этом он должен в обоих случаях.
+    await _notify_student_removed(db, student_id, group)
+    return membership
 
 
 async def admin_reassign_tutor(db: AsyncSession, group: Group, tutor_id: uuid.UUID, lesson_type_id: uuid.UUID) -> Group:

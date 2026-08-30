@@ -59,6 +59,11 @@ class GroupPublicOut(BaseModel):
     price: float
     duration_minutes: int
     schedule_slots: list[GroupScheduleSlotOut]
+    # Состояние текущего ученика по отношению к группе - чтобы страница групп
+    # репетитора сразу показывала неактивную кнопку с понятной подписью, а не давала
+    # нажать её и получить отказ. Для гостя и репетитора всегда False.
+    is_member: bool = False
+    has_pending_application: bool = False
 
 
 class GroupApplicationCreate(BaseModel):

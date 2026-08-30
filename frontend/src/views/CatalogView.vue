@@ -169,31 +169,35 @@ onBeforeUnmount(() => {
       <p v-if="isLoading" class="mt-8 text-base text-slate-400">Загрузка…</p>
       <p v-else-if="tutors.length === 0" class="mt-8 text-base text-slate-400">Репетиторы не найдены.</p>
 
-      <TransitionGroup v-else name="list" tag="div" class="relative mt-8 flex flex-col gap-4">
+      <!-- Сетка в одну колонку, а не flex-колонка: auto-rows-fr выравнивает все
+           карточки по высоте самой содержательной, так что список выглядит ровным
+           независимо от длины описания и наличия кнопок записи. -->
+      <TransitionGroup v-else name="list" tag="div" class="relative mt-8 grid auto-rows-fr grid-cols-1 gap-4">
         <RouterLink
           v-for="(tutor, index) in tutors"
           :key="tutor.id"
           :to="`/tutors/${tutor.slug ?? tutor.id}`"
           :style="{ '--stagger': `${(index % PAGE_SIZE) * 35}ms` }"
-          class="surface-card flex gap-5 p-5 transition-all duration-200 ease-out hover:z-10 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg dark:hover:border-brand-700"
+          class="surface-card flex h-full min-h-36 gap-5 p-5 transition-all duration-200 ease-out hover:z-10 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg dark:hover:border-brand-700"
         >
-          <!-- Фото тянется на всю высоту карточки (self-stretch вместо фиксированной
-               h-28): высоту задаёт колонка с текстом, и квадрат 112px занимал рядом
-               с ней примерно половину. object-cover обрезает, а не растягивает лицо.
-               max-h-44 только до sm: на узком экране текст переносится и карточка
-               становится настолько высокой, что фото при своей ширине выродилось бы
-               в тонкую полосу. -->
-          <img
-            v-if="tutor.photo_url"
-            :src="tutor.photo_url"
-            alt=""
-            class="max-h-44 min-h-28 w-28 shrink-0 self-stretch rounded-xl object-cover ring-2 ring-brand-100 sm:max-h-none sm:w-36 dark:ring-brand-900/50"
-          />
+          <!-- Фото занимает всю высоту карточки, но не участвует в её вычислении:
+               растягивается обёртка (self-stretch), а сама картинка позиционирована
+               абсолютно, поэтому её собственные пропорции больше не могут раздуть
+               карточку по вертикали - как это было, когда img стоял здесь напрямую.
+               Высоту задаёт текстовая колонка, object-cover обрезает, а не растягивает.
+               max-h-44 только до sm: на узком экране текст переносится, карточка
+               становится высокой, и фото при своей ширине выродилось бы в полосу. -->
           <div
-            v-else
-            class="max-h-44 min-h-28 w-28 shrink-0 self-stretch rounded-xl bg-brand-50 ring-2 ring-brand-100 sm:max-h-none sm:w-36 dark:bg-slate-800 dark:ring-brand-900/50"
-          ></div>
-          <div class="flex-1">
+            class="relative max-h-44 w-28 shrink-0 self-stretch overflow-hidden rounded-xl bg-brand-50 ring-2 ring-brand-100 sm:max-h-none sm:w-36 dark:bg-slate-800 dark:ring-brand-900/50"
+          >
+            <img
+              v-if="tutor.photo_url"
+              :src="tutor.photo_url"
+              alt=""
+              class="absolute inset-0 h-full w-full object-cover"
+            />
+          </div>
+          <div class="min-w-0 flex-1">
             <div class="text-xl font-semibold">{{ tutor.name_patronymic }}</div>
             <div v-if="tutor.hourly_price != null" class="mt-1 text-base font-medium text-brand-700 dark:text-brand-300">
               от {{ tutor.hourly_price }} ₽/час
@@ -211,7 +215,12 @@ onBeforeUnmount(() => {
                 {{ subjectName }}
               </span>
             </div>
-            <p v-if="tutor.about_snippet" class="mt-2 text-base leading-relaxed text-slate-600 dark:text-slate-300">
+            <!-- Бэкенд обрезает описание до 140 символов, но в узкой колонке они
+                 занимают разное число строк; line-clamp держит карточки одинаковыми. -->
+            <p
+              v-if="tutor.about_snippet"
+              class="mt-2 line-clamp-2 text-base leading-relaxed text-slate-600 dark:text-slate-300"
+            >
               {{ tutor.about_snippet }}
             </p>
             <!-- Обе кнопки-ярлыка ведут туда же, куда кнопки на самом профиле

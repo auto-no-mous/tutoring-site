@@ -141,6 +141,9 @@ class SystemNotificationEvent(StrEnum):
     BOOKING_RESCHEDULED_BY_STUDENT = "booking_rescheduled_by_student"
     GROUP_APPLICATION_RECEIVED = "group_application_received"
     GROUP_MEMBER_LEFT = "group_member_left"
+    # Обратная сторона GROUP_MEMBER_LEFT: там ученик ушёл сам и уведомляется
+    # репетитор, здесь исключил репетитор (или админ) и уведомляется ученик.
+    GROUP_MEMBER_REMOVED = "group_member_removed"
     GROUP_LESSON_NO_SHOW_BY_STUDENT = "group_lesson_no_show_by_student"
     BOOKING_CANCELLED_BY_TUTOR = "booking_cancelled_by_tutor"
     BOOKING_RESCHEDULED_BY_TUTOR = "booking_rescheduled_by_tutor"

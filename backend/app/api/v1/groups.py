@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, CurrentUserOptional, DbSession
 from app.models.enums import GroupAttendanceOutcome, UserRole
 from app.models.group import Group
 from app.models.lesson_type import LessonType
@@ -376,9 +376,22 @@ async def leave_group(group_id: uuid.UUID, current_user: CurrentUser, db: DbSess
 
 
 @public_router.get("/tutors/{tutor_id}/groups", response_model=list[GroupPublicOut], tags=["groups"])
-async def list_tutor_groups(tutor_id: uuid.UUID, db: DbSession) -> list[GroupPublicOut]:
+async def list_tutor_groups(
+    tutor_id: uuid.UUID, db: DbSession, current_user: CurrentUserOptional
+) -> list[GroupPublicOut]:
+    """Список групп репетитора. Ручка публичная, но авторизованному ученику
+    дополнительно отвечает, где он уже состоит и где ждёт решения его заявка: без
+    этого страница предлагала бы подать заявку туда, где она заведомо отклонится."""
     await tutor_service.get_profile_by_id(db, tutor_id)
     groups = await group_service.list_public_groups(db, tutor_id)
+
+    member_of: set[uuid.UUID] = set()
+    applied_to: set[uuid.UUID] = set()
+    if current_user is not None and current_user.role == UserRole.STUDENT:
+        member_of, applied_to = await group_service.get_student_group_states(
+            db, current_user.id, [group.id for group in groups]
+        )
+
     out = []
     for group in groups:
         lesson_type = await db.get(LessonType, group.lesson_type_id)
@@ -395,6 +408,8 @@ async def list_tutor_groups(tutor_id: uuid.UUID, db: DbSession) -> list[GroupPub
                 schedule_slots=[
                     GroupScheduleSlotOut.model_validate(s, from_attributes=True) for s in group.schedule_slots
                 ],
+                is_member=group.id in member_of,
+                has_pending_application=group.id in applied_to,
             )
         )
     return out

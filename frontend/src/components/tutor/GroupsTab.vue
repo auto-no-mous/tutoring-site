@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { X } from "lucide-vue-next";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import {
@@ -99,14 +99,35 @@ async function refreshGroup(groupId: string): Promise<void> {
   }
 }
 
+// Заявки со всех групп одним списком - для блока наверху вкладки. Внутри карточки
+// группы они остаются на прежнем месте, но там их надо сначала найти и раскрыть, а
+// заявка ждёт ответа и должна попадаться на глаза сразу.
+const pendingApplications = computed(() =>
+  groups.value.flatMap((group) => pendingApplicationsByGroup.value[group.id] ?? []),
+);
+
+// Пока идёт запрос, кнопки этой заявки заблокированы: второй клик по "Принять"
+// упёрся бы в 409 (заявка уже рассмотрена) и показал бы ошибку на ровном месте.
+const decidingApplicationId = ref<string | null>(null);
+
 async function accept(app: GroupApplication): Promise<void> {
-  await acceptApplication(app.group_id, app.id);
-  await refreshGroup(app.group_id);
+  decidingApplicationId.value = app.id;
+  try {
+    await acceptApplication(app.group_id, app.id);
+    await refreshGroup(app.group_id);
+  } finally {
+    decidingApplicationId.value = null;
+  }
 }
 
 async function reject(app: GroupApplication): Promise<void> {
-  await rejectApplication(app.group_id, app.id);
-  await refreshGroup(app.group_id);
+  decidingApplicationId.value = app.id;
+  try {
+    await rejectApplication(app.group_id, app.id);
+    await refreshGroup(app.group_id);
+  } finally {
+    decidingApplicationId.value = null;
+  }
 }
 
 async function remove(member: GroupMembership): Promise<void> {
@@ -264,6 +285,53 @@ onMounted(load);
 <template>
   <div class="flex max-w-3xl flex-col gap-6">
     <p v-if="isLoading" class="text-sm text-slate-400">Загрузка…</p>
+
+    <!-- Заявки ждут ответа, поэтому висят наверху вкладки, а не только внутри
+         карточки группы под спойлером. Блок стоит выше проверки на типы занятий:
+         даже если групповой тип занятия удалён, ответить на заявку надо. -->
+    <section
+      v-if="!isLoading && pendingApplications.length > 0"
+      class="rounded-lg border-2 border-brand-300 bg-brand-50 p-4 dark:border-brand-700 dark:bg-brand-900/30"
+    >
+      <h3 class="text-base font-semibold text-brand-900 dark:text-brand-100">
+        {{
+          pendingApplications.length === 1
+            ? "Новая заявка в группу"
+            : `Заявки в группы (${pendingApplications.length})`
+        }}
+      </h3>
+      <div class="mt-3 flex flex-col gap-2">
+        <div
+          v-for="app in pendingApplications"
+          :key="app.id"
+          class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-sm dark:bg-slate-900"
+        >
+          <span>
+            <span class="font-medium">{{ app.student_display_name }}</span>
+            — в группу «{{ app.group_name }}»
+            <span v-if="app.message" class="text-slate-500 dark:text-slate-400">: {{ app.message }}</span>
+          </span>
+          <div class="flex gap-2">
+            <button
+              type="button"
+              :disabled="decidingApplicationId === app.id"
+              class="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              @click="accept(app)"
+            >
+              Принять
+            </button>
+            <button
+              type="button"
+              :disabled="decidingApplicationId === app.id"
+              class="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-600 disabled:opacity-50 dark:border-red-800"
+              @click="reject(app)"
+            >
+              Отклонить
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <div v-else-if="groupLessonTypes.length === 0" class="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
       Чтобы создавать группы, сначала добавьте тип занятия с форматом «групповое».

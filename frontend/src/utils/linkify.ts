@@ -54,3 +54,24 @@ export function linkifySegments(text: string): LinkifySegment[] {
   if (lastIndex < text.length) segments.push({ type: "text", value: text.slice(lastIndex) });
   return segments;
 }
+
+/**
+ * Путь внутри сайта для ссылки из уведомления, либо null для внешнего адреса.
+ *
+ * Шаблоны уведомлений собираются на бэкенде из FRONTEND_BASE_URL, поэтому ссылка
+ * на вкладку кабинета приходит абсолютной. Открывать её как обычный <a> значит
+ * перезагружать всё приложение ради перехода на соседнюю вкладку - вместо этого
+ * ChatPanel рисует такие ссылки через RouterLink.
+ */
+export function internalPath(url: string): string | null {
+  let parsed: URL;
+  try {
+    // Разбираем без базового адреса: с ним любая строка стала бы "внутренней"
+    // ссылкой относительно текущего origin.
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.origin !== window.location.origin) return null;
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}

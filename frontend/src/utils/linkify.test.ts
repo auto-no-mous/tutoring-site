@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { linkifySegments } from "@/utils/linkify";
+import { internalPath, linkifySegments } from "@/utils/linkify";
 
 describe("linkifySegments", () => {
   it("returns a single text segment when there is nothing to link", () => {
@@ -48,5 +48,19 @@ describe("linkifySegments", () => {
   it("reassembles into the original text", () => {
     const text = "Начало https://my-tutor.ru/, середина http://x.example конец";
     expect(linkifySegments(text).map((s) => s.value).join("")).toBe(text);
+  });
+});
+
+describe("internalPath", () => {
+  it("возвращает путь для ссылки на наш же сайт", () => {
+    // Уведомления собираются на бэкенде из FRONTEND_BASE_URL, поэтому адрес вкладки
+    // кабинета приходит абсолютным - и должен открываться без перезагрузки.
+    expect(internalPath(`${window.location.origin}/cabinet?tab=groups`)).toBe("/cabinet?tab=groups");
+    expect(internalPath(`${window.location.origin}/blog/post#top`)).toBe("/blog/post#top");
+  });
+
+  it("не трогает внешние адреса и мусор", () => {
+    expect(internalPath("https://vk.com/tutor")).toBeNull();
+    expect(internalPath("not a url")).toBeNull();
   });
 });

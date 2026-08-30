@@ -6,6 +6,7 @@ import { useRoute } from "vue-router";
 import { applyToGroup } from "@/api/groups";
 import { getPublicGroups, getPublicProfile } from "@/api/tutors";
 import { useAuthStore } from "@/stores/auth";
+import { apiErrorMessage } from "@/utils/apiError";
 import type { GroupPublic } from "@/types/group";
 import type { TutorPublicProfile } from "@/types/tutor";
 
@@ -17,7 +18,10 @@ const routeTutorId = route.params.id as string;
 
 const profile = ref<TutorPublicProfile | null>(null);
 const groups = ref<GroupPublic[]>([]);
-const applyStatus = ref<Record<string, string>>({});
+// Группы, в которые заявка ушла прямо сейчас: до перезагрузки страницы сервер о них
+// ещё не знает, а кнопку надо погасить сразу.
+const justApplied = ref<Record<string, boolean>>({});
+const applyError = ref<Record<string, string>>({});
 const isLoading = ref(true);
 
 const weekdayNames = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -33,9 +37,32 @@ async function load(): Promise<void> {
   }
 }
 
+// Кнопка гасится заранее, а не после отказа сервера: раньше ученик, уже состоящий в
+// группе, жал "Подать заявку", получал 409 - и не видел ничего, потому что ошибку
+// никто не показывал. Выглядело как сломанная кнопка.
+function applyLabel(group: GroupPublic): string {
+  if (group.is_member) return "Вы уже состоите в этой группе";
+  if (group.has_pending_application || justApplied.value[group.id]) return "Заявка отправлена";
+  return "Подать заявку";
+}
+
+function canApply(group: GroupPublic): boolean {
+  return !group.is_member && !group.has_pending_application && !justApplied.value[group.id];
+}
+
 async function apply(groupId: string): Promise<void> {
-  await applyToGroup(groupId);
-  applyStatus.value[groupId] = "Заявка отправлена";
+  applyError.value = { ...applyError.value, [groupId]: "" };
+  try {
+    await applyToGroup(groupId);
+    justApplied.value = { ...justApplied.value, [groupId]: true };
+  } catch (err) {
+    // Причину знает сервер (группа неактивна, заявка уже есть) - показываем её,
+    // а не оставляем нажатие без ответа.
+    applyError.value = {
+      ...applyError.value,
+      [groupId]: apiErrorMessage(err, "Не удалось подать заявку"),
+    };
+  }
 }
 
 onMounted(load);
@@ -64,15 +91,19 @@ onMounted(load);
           <div class="text-slate-500 dark:text-slate-400">
             {{ group.schedule_slots.map((s) => `${weekdayNames[s.weekday]} ${s.start_time.slice(0, 5)}`).join(", ") }}
           </div>
-          <button
-            v-if="auth.isAuthenticated && auth.user?.role === 'student'"
-            type="button"
-            class="btn-outline mt-3 text-base"
-            :disabled="!!applyStatus[group.id]"
-            @click="apply(group.id)"
-          >
-            {{ applyStatus[group.id] ?? "Подать заявку" }}
-          </button>
+          <template v-if="auth.isAuthenticated && auth.user?.role === 'student'">
+            <button
+              type="button"
+              class="btn-outline mt-3 text-base"
+              :disabled="!canApply(group)"
+              @click="apply(group.id)"
+            >
+              {{ applyLabel(group) }}
+            </button>
+            <p v-if="applyError[group.id]" class="mt-2 text-sm text-red-600 dark:text-red-400">
+              {{ applyError[group.id] }}
+            </p>
+          </template>
         </div>
       </div>
     </template>
