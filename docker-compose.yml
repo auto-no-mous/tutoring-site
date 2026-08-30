@@ -1,15 +1,40 @@
 services:
+  # База живёт в собственном контейнере и наружу не публикуется: ходят к ней только
+  # backend и bot по внутренней сети compose. Порт на хост не пробрасываем специально
+  # - открытый в интернет 5432 с парольной аутентификацией это ровно тот сервис,
+  # который перебирают в первую очередь.
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mytutor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD обязателен - задайте его в .env рядом с docker-compose.yml}
+      POSTGRES_DB: ${POSTGRES_DB:-mytutor}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # backend стартует с "alembic upgrade head" в entrypoint, поэтому ждать готовности
+      # базы обязательно: иначе первая же миграция упрётся в ещё не поднятый сервер.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mytutor} -d ${POSTGRES_DB:-mytutor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   backend:
     build: ./backend
     restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
-      # Overrides whatever DATABASE_URL is in .env so the SQLite file always lives on
-      # the named volume below. Point this at a postgresql+asyncpg:// DSN instead when
-      # migrating off SQLite (section 9) - drop the override and set it in .env.
-      DATABASE_URL: sqlite+aiosqlite:///storage/db.sqlite3
+      # Переопределяет DATABASE_URL из .env: адрес базы задаётся составом compose, а
+      # не файлом окружения, чтобы контейнер и база не разъезжались.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mytutor}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mytutor}
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
+      # Том остаётся и после переезда на Postgres: в нём лежат загруженные файлы -
+      # фото анкет и аккаунтов, вложения чата, домашние задания (/files).
       - backend_storage:/app/storage
     expose:
       - "8000"
@@ -40,10 +65,14 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: sqlite+aiosqlite:///storage/db.sqlite3
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mytutor}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mytutor}
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - backend_storage:/app/storage
     command: ["python", "-m", "app.scripts.run_telegram_bot"]
 
 volumes:
   backend_storage:
+  postgres_data:

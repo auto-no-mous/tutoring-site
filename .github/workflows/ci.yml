@@ -11,6 +11,23 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      # Прод работает на PostgreSQL, а быстрый прогон тестов - на SQLite в памяти.
+      # Чтобы различия движков не всплывали только на сервере, тот же набор тестов
+      # прогоняется ещё раз против настоящей базы (шаг "Test (pytest, PostgreSQL)").
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: mytutor
+          POSTGRES_PASSWORD: mytutor
+          POSTGRES_DB: mytutor_test
+        options: >-
+          --health-cmd "pg_isready -U mytutor -d mytutor_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v4
 
@@ -44,8 +61,23 @@ jobs:
         run: poetry run mypy app
         continue-on-error: true
 
-      - name: Test (pytest)
+      - name: Test (pytest, SQLite)
         run: poetry run pytest -q
+
+      - name: Test (pytest, PostgreSQL)
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://mytutor:mytutor@localhost:5432/mytutor_test
+        run: poetry run pytest -q
+
+      - name: Migrations apply to a clean PostgreSQL
+        # Тесты поднимают схему через metadata.create_all, а прод - миграциями.
+        # Проверяем и этот путь: на сервере выполняется именно он.
+        env:
+          DATABASE_URL: postgresql+asyncpg://mytutor:mytutor@localhost:5432/mytutor_migrations
+        run: |
+          PGPASSWORD=mytutor psql -h localhost -U mytutor -d postgres -c "CREATE DATABASE mytutor_migrations"
+          poetry run alembic upgrade head
+          poetry run alembic downgrade base
 
   frontend:
     runs-on: ubuntu-latest

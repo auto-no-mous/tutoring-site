@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, UUIDPKMixin
@@ -75,6 +75,8 @@ class OAuthState(UUIDPKMixin, Base):
     # True для ссылки-приглашения: после привязки провайдера аккаунт перестаёт быть
     # управляемым репетитором, а человек сразу получает сессию (в отличие от привязки
     # из настроек, где он уже залогинен).
-    is_claim: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # server_default именно false(), а не text("0"): SQLite проглотит ноль, а
+    # PostgreSQL на boolean-колонке с целочисленным DEFAULT откажется создавать таблицу.
+    is_claim: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

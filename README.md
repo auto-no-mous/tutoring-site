@@ -21,6 +21,7 @@
 - [Backend вручную](#backend-fastapi--poetry)
 - [Frontend вручную](#frontend-vue-3--vite--tailwind)
 - [Оформление: логотип, палитра, анимации](#оформление-логотип-палитра-анимации)
+- [База данных](#база-данных)
 - [Тесты, линтеры, CI](#тесты-линтеры-ci)
 - [Начальные данные](#начальные-данные-администратор-и-справочник-предметов)
 - [Почта](#почта-подтверждение-регистрации-сброс-пароля)
@@ -147,6 +148,52 @@ Escape и клик по подложке закрывают его, фокус �
 (модальные окна, карточки) и плавные ховеры для всех интерактивных элементов из
 `@layer base`. Всё движение отключается при системной настройке
 `prefers-reduced-motion: reduce`.
+
+## База данных
+
+**Прод — PostgreSQL** (контейнер `postgres` в `docker-compose.yml`, том
+`postgres_data`). Наружу порт не публикуется: к базе ходят только `backend` и `bot`
+по внутренней сети compose. Пароль задаётся в корневом `.env` рядом с
+`docker-compose.yml` (см. `.env.example`) и оттуда подставляется и в саму базу, и в
+`DATABASE_URL` обоих сервисов — чтобы они не могли разъехаться.
+
+**Локальная разработка — SQLite** (`backend/storage/db.sqlite3`), ничего ставить не
+нужно: `run-local.ps1` работает из коробки. Если хотите разрабатывать на той же СУБД,
+что в проде, поднимите PostgreSQL любым способом и укажите его в `backend/.env`:
+
+```
+DATABASE_URL=postgresql+asyncpg://mytutor:mytutor@localhost:5432/mytutor
+```
+
+Схема одна и та же: миграции Alembic накатываются на обе СУБД без ветвлений.
+
+**Почему тесты остались на SQLite.** Прогон в памяти на порядок быстрее и не требует
+поднятого сервера, а разница движков ловится в CI: там тот же набор тестов прогоняется
+ещё раз против настоящего PostgreSQL (`TEST_DATABASE_URL`), плюс отдельным шагом
+проверяется, что миграции накатываются и откатываются на чистой базе. Локально это
+тоже доступно:
+
+```
+TEST_DATABASE_URL=postgresql+asyncpg://mytutor:mytutor@localhost:5432/mytutor_test poetry run pytest -q
+```
+
+**Переезд с SQLite** (выполняется один раз, скрипт остаётся в репозитории на случай
+разворачивания старого бэкапа): поднять пустую базу, накатить на неё миграции и
+перенести данные —
+
+```
+docker compose up -d postgres
+docker compose run --rm backend alembic upgrade head
+docker compose run --rm backend python -m app.scripts.sqlite_to_postgres \
+    --source sqlite:///storage/db.sqlite3 \
+    --target postgresql+psycopg://mytutor:ПАРОЛЬ@postgres:5432/mytutor
+```
+
+Скрипт копирует таблицы в порядке внешних ключей, читая и записывая через типы самих
+моделей (CHAR(32) → uuid, 0/1 → boolean, JSON-текст → структура) и проставляя UTC
+наивным датам из SQLite. Он отказывается работать по непустой базе и в конце сверяет
+количество строк по каждой таблице. Файл SQLite при этом не трогается — он и остаётся
+путём отката.
 
 ## Тесты, линтеры, CI
 
@@ -491,16 +538,18 @@ YANDEX_REDIRECT_URI=https://my-tutor.ru/oauth/yandex/callback
 ```
 cd backend && copy .env.example .env   # заполнить JWT_SECRET_KEY и остальные секреты
 cd ..
+copy .env.example .env                 # заполнить POSTGRES_PASSWORD
 docker compose up --build -d
 ```
 
-Поднимает два контейнера: `backend` (Gunicorn + Uvicorn-воркеры, применяет
-миграции при каждом старте через `docker-entrypoint.sh`) и `nginx` (отдаёт
+Поднимает три контейнера: `postgres` (база, наружу не публикуется), `backend`
+(Gunicorn + Uvicorn-воркер, применяет миграции при каждом старте через
+`docker-entrypoint.sh`, ждёт готовности базы по healthcheck) и `nginx` (отдаёт
 собранный фронтенд и проксирует `/api`, `/files` на backend). Опциональный
-третий — `bot` (см. раздел «Telegram-бот» выше), включается флагом
-`--profile bot`. SQLite-файл и загруженные файлы живут на именованном томе
-`backend_storage` — переживают `docker compose up --build`. Порт 80
-публикуется наружу.
+четвёртый — `bot` (см. раздел «Telegram-бот» выше), включается флагом
+`--profile bot`. Данные живут на именованных томах: база в `postgres_data`,
+загруженные файлы в `backend_storage` — оба переживают `docker compose up --build`.
+Порт 80 публикуется наружу.
 
 **Пошагово, с нуля, на чистом Linux-сервере:**
 
@@ -582,28 +631,33 @@ docker compose up --build -d
 миграции) или восстанавливайтесь из бэкапа тома, снятого перед деплоем
 (ниже).
 
-**Бэкап.** Всё, что нужно сохранить — именованный том `backend_storage`
-(SQLite-файл `db.sqlite3` + все загруженные фото/файлы):
+**Бэкап.** Сохранять нужно две вещи: базу и загруженные файлы. Ежедневно это
+делает `ops/backup.sh` по таймеру systemd (см. `ops/README.md`) — он снимает
+`pg_dump -Fc` изнутри контейнера базы, забирает том `backend_storage` и серверный
+конфиг, которого нет в git. Разово то же самое:
 
 ```
-docker run --rm -v my-tutor_backend_storage:/data -v $(pwd):/backup alpine \
-  tar czf /backup/my-tutor-backup-$(date +%F).tar.gz -C /data .
+docker exec my-tutor-postgres-1 pg_dump -U mytutor -d mytutor -Fc > db.dump
+docker cp my-tutor-backend-1:/app/storage ./storage
 ```
 
-(имя тома может отличаться в зависимости от имени папки проекта — уточните
-через `docker volume ls`).
+Восстановление из архива: распаковать, поднять `postgres`, затем
+
+```
+docker exec -i my-tutor-postgres-1 pg_restore -U mytutor -d mytutor --clean --if-exists < db.dump
+```
+
+`storage/` вернуть в том `backend_storage`, `config/` разложить по местам
+(`backend/.env`, корневой `.env`, `docker-compose.override.yml`, `ops-nginx/`).
 
 **Логи:** `docker compose logs -f backend` / `docker compose logs -f nginx`.
 Backend логирует одним JSON-объектом на строку вне режима отладки
 (`DEBUG=false`) — удобно скармливать любому агрегатору логов без
 допарсинга.
 
-**Миграция с SQLite на PostgreSQL** (раздел 9 `project_description.md`) —
-поднять Postgres (отдельным сервисом в `docker-compose.yml` или managed
-БД), сменить `DATABASE_URL` в конфиге `backend`-сервиса на
-`postgresql+asyncpg://user:pass@host/dbname` (убрав override SQLite-пути) и
-перезапустить — миграции Alembic отработают на новой БД так же, как на
-SQLite, схема не отличается.
+**Миграция с SQLite на PostgreSQL** уже выполнена — см. раздел
+[«База данных»](#база-данных): там же описан скрипт переноса на случай, если
+понадобится развернуть старый SQLite-бэкап.
 
 ## Переменные окружения
 
@@ -613,7 +667,9 @@ SQLite, схема не отличается.
 |---|---|---|
 | `ENVIRONMENT` | `development` | произвольная метка окружения (попадает в Sentry, если подключён) |
 | `DEBUG` | `true` | человекочитаемые логи и подробные ошибки; `false` в проде включает JSON-логи |
-| `DATABASE_URL` | локальный SQLite-файл | строка подключения к БД (SQLite или `postgresql+asyncpg://...`) |
+| `DATABASE_URL` | локальный SQLite-файл | строка подключения к БД. На сервере задаётся в `docker-compose.yml` (PostgreSQL в контейнере) и перебивает значение из `.env` |
+| `POSTGRES_PASSWORD` (корневой `.env`) | пусто | **обязателен на сервере** — пароль базы; compose подставляет его и в контейнер `postgres`, и в `DATABASE_URL` backend'а с bot'ом |
+| `POSTGRES_USER`/`POSTGRES_DB` (корневой `.env`) | `mytutor` | имя пользователя и базы |
 | `JWT_SECRET_KEY` | небезопасный дефолт | **обязательно сменить в проде** — секрет для подписи JWT; backend откажется стартовать с дефолтом при `DEBUG=false` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | срок жизни access-токена |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `30` | срок жизни refresh-токена |

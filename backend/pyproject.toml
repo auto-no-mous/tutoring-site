@@ -11,6 +11,10 @@ dependencies = [
     "alembic (>=1.14.0)",
     "aiosqlite (>=0.20.0)",
     "asyncpg (>=0.30.0)",
+    # Синхронный драйвер нужен разовому переносу данных (app.scripts.sqlite_to_postgres):
+    # приложение ходит в базу через asyncpg, но операции обслуживания проще делать без
+    # асинхронного стека.
+    "psycopg[binary] (>=3.2.0)",
     "pydantic (>=2.9.0)",
     "pydantic-settings (>=2.6.0)",
     "python-jose[cryptography] (>=3.3.0)",
