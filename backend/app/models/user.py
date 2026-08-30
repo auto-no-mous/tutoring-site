@@ -84,8 +84,21 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     # обнуляется - дальше он распоряжается своими данными сам.
     # CASCADE: такой аккаунт существует только ради занятий у этого репетитора, и
     # переживать его удаление ему незачем.
+    # use_alter + имя: этот ключ замыкает цикл (tutor_profiles.user_id смотрит на
+    # users, а здесь users смотрит на tutor_profiles). Без подсказки SQLAlchemy не
+    # может упорядочить таблицы для CREATE/DROP на СУБД, которая внешние ключи
+    # действительно исполняет, - с use_alter ограничение навешивается отдельным
+    # ALTER TABLE после создания обеих таблиц. Имя совпадает с миграцией
+    # e1f7a3c62d94, чтобы schema из моделей и из миграций не расходились.
     managed_by_tutor_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("tutor_profiles.id", ondelete="CASCADE"), nullable=True, index=True
+        ForeignKey(
+            "tutor_profiles.id",
+            ondelete="CASCADE",
+            use_alter=True,
+            name="fk_users_managed_by_tutor_id",
+        ),
+        nullable=True,
+        index=True,
     )
     # Одноразовый токен из ссылки-приглашения, по которой ученик привязывает к этому
     # аккаунту почту с паролем или VK/Яндекс (см. app.services.claim_service).
