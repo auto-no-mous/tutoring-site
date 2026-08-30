@@ -22,8 +22,9 @@ from app.schemas.oauth import (
     OAuthStartRequest,
     OAuthStartResponse,
 )
+from app.schemas.student import ClaimPreviewOut, ClaimResponse, ClaimWithPasswordRequest
 from app.schemas.user import UserOut, UserSettingsUpdate
-from app.services import auth_service, file_service, oauth_service, telegram_service
+from app.services import auth_service, claim_service, file_service, oauth_service, telegram_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -127,9 +128,10 @@ async def oauth_start(
     current_user: CurrentUserOptional,
 ) -> OAuthStartResponse:
     """Начало авторизации у провайдера. С токеном в заголовке это привязка провайдера
-    к текущему аккаунту, без токена - вход или регистрация."""
+    к текущему аккаунту, с claim_token - получение профиля, заведённого репетитором,
+    без того и другого - обычный вход или регистрация."""
     auth_url = await oauth_service.start_authorization(
-        db, provider, payload.redirect_to, current_user
+        db, provider, payload.redirect_to, current_user, payload.claim_token
     )
     return OAuthStartResponse(auth_url=auth_url)
 
@@ -151,6 +153,25 @@ async def oauth_complete(
     user = await oauth_service.complete_signup(db, payload)
     tokens = await auth_service.issue_token_pair(db, user)
     return RegisterResponse(user=UserOut.model_validate(user), tokens=tokens)
+
+
+@router.get("/claim/{token}", response_model=ClaimPreviewOut)
+async def preview_claim(token: str, db: DbSession) -> ClaimPreviewOut:
+    """Что за профиль стоит за ссылкой-приглашением: имя и репетитор, который его
+    завёл, - чтобы человек понимал, что именно забирает."""
+    return await claim_service.preview(db, token)
+
+
+@router.post("/claim/password", response_model=ClaimResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/hour")
+async def claim_with_password(
+    request: Request, payload: ClaimWithPasswordRequest, db: DbSession
+) -> ClaimResponse:
+    """Забрать профиль, задав почту и пароль. Через VK/Яндекс это делается обычным
+    потоком /auth/oauth/{provider}/start с claim_token."""
+    user = await claim_service.claim_with_password(db, payload)
+    tokens = await auth_service.issue_token_pair(db, user)
+    return ClaimResponse(user=UserOut.model_validate(user), tokens=tokens)
 
 
 @router.delete("/me/identities/{provider}", response_model=UserOut)

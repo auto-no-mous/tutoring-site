@@ -77,6 +77,21 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     # so a tutor and student on the same lesson can be reminded at different times.
     reminder_lead_minutes: Mapped[int] = mapped_column(Integer, default=60)
 
+    # Ученик, заведённый репетитором вручную (раздел "Ученики" в статистике): обычный
+    # аккаунт без единого способа входа. Поле указывает, чей он: пока оно заполнено,
+    # репетитор правит ФИО и класс, а сам "ученик" войти не может (пароля нет,
+    # привязок нет). Когда человек забирает аккаунт по ссылке-приглашению, поле
+    # обнуляется - дальше он распоряжается своими данными сам.
+    # CASCADE: такой аккаунт существует только ради занятий у этого репетитора, и
+    # переживать его удаление ему незачем.
+    managed_by_tutor_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("tutor_profiles.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Одноразовый токен из ссылки-приглашения, по которой ученик привязывает к этому
+    # аккаунту почту с паролем или VK/Яндекс (см. app.services.claim_service).
+    claim_token: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    claim_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Short-lived token for the "Подключить Telegram" deep-link flow (see
     # app.services.telegram_service.create_link_token / the bot's /start handler in
     # app.scripts.run_telegram_bot) - only one pending link attempt at a time, so this
@@ -85,7 +100,12 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     telegram_link_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tutor_profile: Mapped["TutorProfile | None"] = relationship(
-        back_populates="user", uselist=False, cascade="all, delete-orphan"
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+        # Своя анкета, а не репетитор, который завёл этого ученика вручную (второй
+        # внешний ключ между теми же таблицами - managed_by_tutor_id).
+        foreign_keys="TutorProfile.user_id",
     )
     # lazy="selectin": UserOut.auth_providers читается на каждом /auth/me, а ленивая
     # подгрузка в async-сессии падает (MissingGreenlet), так что грузим сразу.
@@ -95,6 +115,11 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+
+    @property
+    def is_managed(self) -> bool:
+        """Аккаунт заведён репетитором и пока никем не забран."""
+        return self.managed_by_tutor_id is not None
 
     @property
     def auth_providers(self) -> list[str]:

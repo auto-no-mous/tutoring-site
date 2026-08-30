@@ -170,3 +170,69 @@ export async function replaceMySubjects(selections: TutorSubjectSelection[]) {
   const { data } = await apiClient.put<TutorSubject[]>("/tutors/me/subjects", { selections });
   return data;
 }
+
+// --- Ученики репетитора: заведённые вручную, статистика, примечания ------------------
+
+export interface TutorStudentStats {
+  id: string;
+  first_name: string;
+  last_name: string;
+  patronymic: string | null;
+  grade: number | null;
+  photo_url: string | null;
+  // Заведён репетитором и ещё не забран учеником: только такого можно править,
+  // удалять и приглашать по ссылке.
+  is_managed: boolean;
+  has_login: boolean;
+  note: string | null;
+  lessons_held: number;
+  no_shows: number;
+  last_lesson_at: string | null;
+  next_lesson_at: string | null;
+  homework_done: number;
+  homework_pending: number;
+}
+
+export interface ManagedStudentPayload {
+  first_name: string;
+  last_name: string;
+  patronymic?: string | null;
+  grade?: number | null;
+  note?: string | null;
+}
+
+export async function getMyStudentsWithStats() {
+  const { data } = await apiClient.get<TutorStudentStats[]>("/tutors/me/students/stats");
+  return data;
+}
+
+export async function createManagedStudent(payload: ManagedStudentPayload) {
+  const { data } = await apiClient.post<TutorStudentStats>("/tutors/me/students", payload);
+  return data;
+}
+
+export async function updateManagedStudent(studentId: string, payload: ManagedStudentPayload) {
+  const { data } = await apiClient.patch<TutorStudentStats>(
+    `/tutors/me/students/${studentId}`,
+    payload,
+  );
+  return data;
+}
+
+export async function deleteManagedStudent(studentId: string) {
+  await apiClient.delete(`/tutors/me/students/${studentId}`);
+}
+
+export async function setStudentNote(studentId: string, text: string) {
+  await apiClient.put(`/tutors/me/students/${studentId}/note`, { text });
+}
+
+export interface ClaimLink {
+  url: string;
+  expires_at: string;
+}
+
+export async function createClaimLink(studentId: string) {
+  const { data } = await apiClient.post<ClaimLink>(`/tutors/me/students/${studentId}/claim-link`);
+  return data;
+}

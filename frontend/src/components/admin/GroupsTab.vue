@@ -200,7 +200,7 @@ onMounted(load);
             <span v-if="!group.is_active" class="ml-1 text-xs text-slate-400">(неактивна)</span>
           </div>
           <div class="text-slate-500">
-            Репетитор: {{ tutorNameById[group.tutor_id] ?? "—" }} · Мест: {{ group.member_count }}/{{ group.capacity }}
+            Репетитор: {{ tutorNameById[group.tutor_id] ?? "—" }} · Мест занято: {{ group.member_count }}/{{ group.capacity }}
           </div>
         </button>
         <div class="flex shrink-0 gap-2">

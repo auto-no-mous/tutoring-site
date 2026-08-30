@@ -20,14 +20,23 @@ from app.schemas.tutor import (
     TutorStudentOut,
     UploadedImageOut,
 )
+from app.schemas.student import (
+    ClaimLinkOut,
+    ManagedStudentCreate,
+    ManagedStudentUpdate,
+    StudentNoteUpdate,
+    TutorStudentStatsOut,
+)
 from app.services import (
     availability_service,
+    claim_service,
     booking_service,
     file_service,
     group_service,
     lesson_type_service,
     review_service,
     schedule_service,
+    student_service,
     subject_service,
     tutor_service,
 )
@@ -39,6 +48,28 @@ router = APIRouter(prefix="/tutors", tags=["tutors"])
 def _require_tutor(user: CurrentUser) -> None:
     if user.role != UserRole.TUTOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Доступно только репетиторам")
+
+
+def _to_student_stats(student: User, note: str | None = None) -> TutorStudentStatsOut:
+    """Только что созданный или отредактированный ученик - без цифр: занятий у него
+    либо ещё нет, либо они не менялись, а список статистики фронтенд перезапросит."""
+    return TutorStudentStatsOut(
+        id=student.id,
+        first_name=student.first_name,
+        last_name=student.last_name,
+        patronymic=student.patronymic,
+        grade=student.grade,
+        photo_url=student.photo_url,
+        is_managed=student.is_managed,
+        has_login=bool(student.auth_providers),
+        note=note,
+        lessons_held=0,
+        no_shows=0,
+        last_lesson_at=None,
+        next_lesson_at=None,
+        homework_done=0,
+        homework_pending=0,
+    )
 
 
 def _to_profile_out(profile, user: User) -> TutorProfileOut:
@@ -189,6 +220,70 @@ async def get_my_students(current_user: CurrentUser, db: DbSession) -> list[Tuto
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     rows = await booking_service.list_students_for_tutor(db, profile.id)
     return [TutorStudentOut(**row) for row in rows]
+
+
+@router.get("/me/students/stats", response_model=list[TutorStudentStatsOut])
+async def get_my_students_with_stats(
+    current_user: CurrentUser, db: DbSession
+) -> list[TutorStudentStatsOut]:
+    """Блок «Ученики» в статистике: занятия, домашка и примечание по каждому."""
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    rows = await student_service.list_students_with_stats(db, profile)
+    return [TutorStudentStatsOut(**row) for row in rows]
+
+
+@router.post("/me/students", response_model=TutorStudentStatsOut, status_code=status.HTTP_201_CREATED)
+async def create_managed_student(
+    payload: ManagedStudentCreate, current_user: CurrentUser, db: DbSession
+) -> TutorStudentStatsOut:
+    """Ученик, заведённый репетитором вручную: без почты и пароля, войти в него
+    нельзя, пока сам ученик не заберёт аккаунт по ссылке-приглашению."""
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    student = await student_service.create_managed_student(db, profile, payload)
+    return _to_student_stats(student, note=payload.note)
+
+
+@router.patch("/me/students/{student_id}", response_model=TutorStudentStatsOut)
+async def update_managed_student(
+    student_id: uuid.UUID, payload: ManagedStudentUpdate, current_user: CurrentUser, db: DbSession
+) -> TutorStudentStatsOut:
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    student = await student_service.update_managed_student(db, profile, student_id, payload)
+    return _to_student_stats(student)
+
+
+@router.delete("/me/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_managed_student(
+    student_id: uuid.UUID, current_user: CurrentUser, db: DbSession
+) -> None:
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    await student_service.delete_managed_student(db, profile, student_id)
+
+
+@router.put("/me/students/{student_id}/note", status_code=status.HTTP_204_NO_CONTENT)
+async def set_student_note(
+    student_id: uuid.UUID, payload: StudentNoteUpdate, current_user: CurrentUser, db: DbSession
+) -> None:
+    """Приватная заметка репетитора об ученике - ученику она не показывается нигде."""
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    await student_service.set_note(db, profile, student_id, payload.text)
+
+
+@router.post("/me/students/{student_id}/claim-link", response_model=ClaimLinkOut)
+async def create_claim_link(
+    student_id: uuid.UUID, current_user: CurrentUser, db: DbSession
+) -> ClaimLinkOut:
+    """Ссылка, по которой ученик забирает заведённый профиль себе. Каждый вызов
+    выдаёт новую и обесценивает прежнюю."""
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    student = await student_service.get_managed_student(db, profile, student_id)
+    return await claim_service.issue_claim_link(db, student)
 
 
 @router.get("/me/students/{student_id}", response_model=TutorStudentDetailOut)

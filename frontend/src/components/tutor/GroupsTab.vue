@@ -5,6 +5,7 @@ import { useRouter } from "vue-router";
 
 import {
   acceptApplication,
+  addGroupMember,
   createGroup,
   deleteGroup,
   getOccurrenceAttendance,
@@ -20,8 +21,9 @@ import {
   updateOccurrence,
 } from "@/api/groups";
 import { getGroupThread, openThreadWithStudent } from "@/api/chat";
-import { getMyLessonTypes } from "@/api/tutors";
+import { getMyLessonTypes, getMyStudentsWithStats, type TutorStudentStats } from "@/api/tutors";
 import { useToastStore } from "@/stores/toast";
+import { apiErrorMessage } from "@/utils/apiError";
 import type { Group, GroupApplication, GroupAttendanceEntry, GroupMembership, GroupOccurrence } from "@/types/group";
 import type { LessonType } from "@/types/tutor";
 import { formatDateTimeWithMsk } from "@/utils/time";
@@ -96,6 +98,41 @@ async function refreshGroup(groupId: string): Promise<void> {
   pendingApplicationsByGroup.value = { ...pendingApplicationsByGroup.value, [groupId]: pending };
   if (membersByGroup.value[groupId]) {
     membersByGroup.value = { ...membersByGroup.value, [groupId]: await listMembers(groupId) };
+  }
+}
+
+// Ученики, заведённые репетитором вручную: заявку они подать не могут (в аккаунт
+// никто не входит), поэтому в группу их зачисляет сам репетитор.
+const managedStudents = ref<TutorStudentStats[]>([]);
+const addingToGroupId = ref<string | null>(null);
+const studentToAdd = ref("");
+const addMemberError = ref("");
+
+function availableManagedStudents(groupId: string): TutorStudentStats[] {
+  const memberIds = new Set((membersByGroup.value[groupId] ?? []).map((m) => m.student_id));
+  return managedStudents.value.filter((s) => s.is_managed && !memberIds.has(s.id));
+}
+
+async function openAddMember(groupId: string): Promise<void> {
+  addMemberError.value = "";
+  studentToAdd.value = "";
+  addingToGroupId.value = addingToGroupId.value === groupId ? null : groupId;
+  if (addingToGroupId.value === null) return;
+  // Состав группы нужен, чтобы не предлагать уже зачисленных.
+  membersByGroup.value = { ...membersByGroup.value, [groupId]: await listMembers(groupId) };
+  managedStudents.value = await getMyStudentsWithStats();
+}
+
+async function addStudentToGroup(groupId: string): Promise<void> {
+  if (!studentToAdd.value) return;
+  addMemberError.value = "";
+  try {
+    await addGroupMember(groupId, studentToAdd.value);
+    addingToGroupId.value = null;
+    studentToAdd.value = "";
+    await refreshGroup(groupId);
+  } catch (err) {
+    addMemberError.value = apiErrorMessage(err, "Не удалось добавить ученика");
   }
 }
 
@@ -333,12 +370,12 @@ onMounted(load);
       </div>
     </section>
 
-    <div v-else-if="groupLessonTypes.length === 0" class="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+    <div v-if="!isLoading && groupLessonTypes.length === 0" class="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
       Чтобы создавать группы, сначала добавьте тип занятия с форматом «групповое».
       <RouterLink to="/cabinet?tab=schedule" class="underline">Перейти к типам занятий</RouterLink>
     </div>
 
-    <template v-else>
+    <template v-else-if="!isLoading">
       <div class="flex justify-end">
         <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700" @click="showForm = !showForm">
           {{ showForm ? "Отмена" : "+ Новая группа" }}
@@ -382,7 +419,12 @@ onMounted(load);
       <div v-for="group in groups" :key="group.id" class="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
         <div class="flex items-start justify-between gap-3">
           <h3 class="text-lg font-medium">{{ group.name }}</h3>
-          <span class="shrink-0 text-sm text-slate-500">{{ group.member_count }}/{{ group.capacity }}</span>
+          <span class="shrink-0 text-sm text-slate-500">
+            Мест занято: {{ group.member_count }}/{{ group.capacity }}
+            <span v-if="group.member_count >= group.capacity" class="font-medium text-red-600 dark:text-red-400">
+              · мест нет
+            </span>
+          </span>
         </div>
 
         <div class="mt-2 text-sm text-slate-600 dark:text-slate-300">
@@ -485,6 +527,39 @@ onMounted(load);
                   Исключить
                 </button>
               </div>
+            </div>
+
+            <!-- Ученик, заведённый репетитором вручную, сам заявку подать не может -
+                 в аккаунт никто не входит, поэтому его зачисляют отсюда. -->
+            <div class="flex flex-col gap-2">
+              <button type="button" class="w-fit text-xs text-slate-500 underline" @click="openAddMember(group.id)">
+                {{ addingToGroupId === group.id ? "Отмена" : "+ Добавить ученика без аккаунта" }}
+              </button>
+              <div v-if="addingToGroupId === group.id" class="flex flex-wrap items-center gap-2">
+                <select
+                  v-model="studentToAdd"
+                  class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700"
+                >
+                  <option value="">Выберите ученика</option>
+                  <option v-for="student in availableManagedStudents(group.id)" :key="student.id" :value="student.id">
+                    {{ student.last_name }} {{ student.first_name }}{{ student.grade ? `, ${student.grade}-й класс` : "" }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  :disabled="!studentToAdd"
+                  class="rounded-md bg-brand-500 px-3 py-1 text-xs text-white disabled:opacity-50"
+                  @click="addStudentToGroup(group.id)"
+                >
+                  Добавить
+                </button>
+                <span v-if="availableManagedStudents(group.id).length === 0" class="text-xs text-slate-400">
+                  Учеников без аккаунта нет — их можно завести в «Статистике».
+                </span>
+              </div>
+              <span v-if="addMemberError && addingToGroupId === group.id" class="text-xs text-red-600 dark:text-red-400">
+                {{ addMemberError }}
+              </span>
             </div>
           </div>
         </details>

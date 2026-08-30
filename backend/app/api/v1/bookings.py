@@ -16,6 +16,7 @@ from app.schemas.booking import (
     ManualBookingCreate,
     RecurringSeriesDetailOut,
     RecurringSeriesOut,
+    TutorRecurringSeriesOut,
 )
 from app.schemas.schedule import SlotOut
 from app.services import booking_service, schedule_service, tutor_service
@@ -201,9 +202,21 @@ async def list_my_recurring_series(current_user: CurrentUser, db: DbSession) -> 
     return [RecurringSeriesDetailOut(**row) for row in rows]
 
 
+@router.get("/series/tutor", response_model=list[TutorRecurringSeriesOut])
+async def list_tutor_recurring_series(
+    current_user: CurrentUser, db: DbSession
+) -> list[TutorRecurringSeriesOut]:
+    """Действующие еженедельные серии репетитора - блок «Ученики» в статистике."""
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    rows = await booking_service.list_active_series_for_tutor(db, profile.id)
+    return [TutorRecurringSeriesOut(**row) for row in rows]
+
+
 @router.post("/series/{series_id}/stop", response_model=RecurringSeriesOut)
 async def stop_recurring_series(series_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> RecurringSeriesOut:
-    _require_student(current_user)
+    # Остановить может и ученик, и репетитор, который ведёт серию: у ученика,
+    # заведённого вручную, доступа к сайту нет вовсе.
     series = await db.get(RecurringSeries, series_id)
     if series is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Серия занятий не найдена")

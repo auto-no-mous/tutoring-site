@@ -4,11 +4,18 @@ import { computed, onMounted, ref, watch } from "vue";
 import { createManualBooking, listTutorBookings, setBookingOutcome } from "@/api/bookings";
 import { createOccurrence, listMyGroups } from "@/api/groups";
 import { getMyStudentsHomeworkStatus } from "@/api/homework";
-import { getManualBookingDates, getManualBookingSlots, getMyLessonTypes, getMyStudents } from "@/api/tutors";
+import {
+  createManagedStudent,
+  getManualBookingDates,
+  getManualBookingSlots,
+  getMyLessonTypes,
+  getMyStudents,
+} from "@/api/tutors";
 import BookingCard from "@/components/BookingCard.vue";
 import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
 import RescheduleModal from "@/components/RescheduleModal.vue";
 import { useToastStore } from "@/stores/toast";
+import { apiErrorMessage } from "@/utils/apiError";
 import type { Booking } from "@/types/booking";
 import type { Group } from "@/types/group";
 import type { LessonType, Slot, TutorStudent } from "@/types/tutor";
@@ -30,6 +37,39 @@ const groups = ref<Group[]>([]);
 const lessonTypes = ref<LessonType[]>([]);
 const visibleCount = ref(20);
 const selectedKey = ref(""); // "" = <Пусто> (personal time block)
+
+// Отдельное значение в том же списке: ученика, который не хочет регистрироваться,
+// заводит сам репетитор, и удобнее это делать прямо здесь, а не уходя в статистику.
+const NEW_STUDENT_KEY = "new-student";
+const newStudentLastName = ref("");
+const newStudentFirstName = ref("");
+const newStudentPatronymic = ref("");
+const newStudentGrade = ref<number | null>(null);
+const isCreatingStudent = ref(false);
+
+async function createStudentInline(): Promise<void> {
+  error.value = "";
+  isCreatingStudent.value = true;
+  try {
+    const created = await createManagedStudent({
+      first_name: newStudentFirstName.value.trim(),
+      last_name: newStudentLastName.value.trim(),
+      patronymic: newStudentPatronymic.value.trim() || null,
+      grade: newStudentGrade.value,
+    });
+    students.value = await getMyStudents();
+    // Сразу выбираем созданного: за этим репетитор сюда и пришёл.
+    selectedKey.value = `student:${created.id}`;
+    newStudentLastName.value = "";
+    newStudentFirstName.value = "";
+    newStudentPatronymic.value = "";
+    newStudentGrade.value = null;
+  } catch (err) {
+    error.value = apiErrorMessage(err, "Не удалось создать ученика");
+  } finally {
+    isCreatingStudent.value = false;
+  }
+}
 
 interface PickerEntry {
   key: string;
@@ -275,6 +315,11 @@ function resetForm(): void {
 
 async function createBlock(): Promise<void> {
   error.value = "";
+  if (selectedKey.value === NEW_STUDENT_KEY) {
+    // Иначе запись ушла бы пустым блоком времени: созданного ученика ещё нет.
+    error.value = "Сначала создайте ученика или выберите другого в списке";
+    return;
+  }
   if (!selectedStartAtIso.value) {
     error.value = "Укажите дату и время";
     return;
@@ -332,6 +377,7 @@ onMounted(load);
             Ученик / группа
             <select v-model="selectedKey" class="w-64 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700">
               <option value="">&lt;Пусто&gt; (для блока времени)</option>
+              <option :value="NEW_STUDENT_KEY">+ Создать нового ученика</option>
               <option v-for="entry in visibleEntries" :key="entry.key" :value="entry.key">{{ entry.label }}</option>
             </select>
             <button
@@ -343,6 +389,32 @@ onMounted(load);
               Показать ещё 20
             </button>
           </label>
+
+          <div
+            v-if="selectedKey === NEW_STUDENT_KEY"
+            class="flex w-full flex-col gap-2 rounded-md border border-slate-200 p-3 dark:border-slate-800"
+          >
+            <span class="text-sm text-slate-500">
+              Ученик без аккаунта: он не регистрируется, но его можно записывать на занятия и добавлять в группы. Позже он сможет забрать профиль себе — ссылка выдаётся в «Статистике».
+            </span>
+            <div class="flex flex-wrap gap-2">
+              <input v-model="newStudentLastName" placeholder="Фамилия" class="w-40 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700" />
+              <input v-model="newStudentFirstName" placeholder="Имя" class="w-40 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700" />
+              <input v-model="newStudentPatronymic" placeholder="Отчество" class="w-40 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700" />
+              <select v-model.number="newStudentGrade" class="w-32 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700">
+                <option :value="null">Класс —</option>
+                <option v-for="n in 11" :key="n" :value="n">{{ n }}-й класс</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              :disabled="isCreatingStudent || !newStudentFirstName.trim() || !newStudentLastName.trim()"
+              class="w-fit rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+              @click="createStudentInline"
+            >
+              Создать и выбрать
+            </button>
+          </div>
 
           <label class="flex flex-col gap-1 text-sm">
             Длительность

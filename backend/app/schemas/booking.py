@@ -119,3 +119,11 @@ class RecurringSeriesDetailOut(RecurringSeriesOut):
     # flow) - "Понедельник, 09:00 - <lesson_type_name>. Репетитор <tutor_name>".
     lesson_type_name: str
     tutor_display_name: str
+
+
+class TutorRecurringSeriesOut(RecurringSeriesOut):
+    """То же для блока «Ученики» в статистике: там серия подписывается учеником, а не
+    репетитором - он и так знает, чьи это занятия."""
+
+    lesson_type_name: str
+    student_display_name: str

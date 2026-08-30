@@ -15,6 +15,7 @@ from app.schemas.group import (
     GroupAttendanceEntryOut,
     GroupAttendanceReplace,
     GroupCreate,
+    GroupMemberAdd,
     GroupMembershipOut,
     GroupOccurrenceCreate,
     GroupOccurrenceOut,
@@ -272,6 +273,18 @@ async def list_members(group_id: uuid.UUID, current_user: CurrentUser, db: DbSes
         )
         for r in rows
     ]
+
+
+@router.post("/{group_id}/members", response_model=GroupMembershipOut, status_code=status.HTTP_201_CREATED)
+async def add_member(
+    group_id: uuid.UUID, payload: GroupMemberAdd, current_user: CurrentUser, db: DbSession
+) -> GroupMembershipOut:
+    """Зачисление без заявки - только для учеников, заведённых этим репетитором
+    вручную (подать заявку сами они не могут)."""
+    _require_tutor(current_user)
+    group = await _owned_group(db, current_user, group_id)
+    membership = await group_service.add_member_by_tutor(db, group, payload.student_id)
+    return GroupMembershipOut.model_validate(membership, from_attributes=True)
 
 
 @router.delete("/{group_id}/members/{student_id}", response_model=GroupMembershipOut)

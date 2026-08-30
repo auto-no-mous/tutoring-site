@@ -142,3 +142,12 @@ export async function setOccurrenceAttendance(
   );
   return data;
 }
+
+/** Прямое зачисление в группу - только для учеников, заведённых репетитором вручную:
+ * подать заявку сами они не могут, в аккаунт никто не входит. */
+export async function addGroupMember(groupId: string, studentId: string) {
+  const { data } = await apiClient.post<GroupMembership>(`/groups/${groupId}/members`, {
+    student_id: studentId,
+  });
+  return data;
+}

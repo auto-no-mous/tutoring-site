@@ -74,3 +74,33 @@ export function formatArticleDate(isoUtc: string): string {
     new Date(isoUtc),
   );
 }
+
+/**
+ * Ближайшая дата (YYYY-MM-DD) указанного дня недели по московскому времени.
+ *
+ * Нужна там, где репетитор назначает еженедельное занятие днём недели и временем
+ * (components/tutor/StudentsBlock.vue), а серия на бэкенде отсчитывается от даты
+ * первого занятия. Сегодняшний день годится, только если это время ещё не прошло:
+ * иначе первое занятие серии оказалось бы в прошлом.
+ *
+ * weekday: 0 = понедельник ... 6 = воскресенье, как в бэкендовых WeeklyAvailability
+ * и RecurringSeries.
+ */
+export function nextMskDateForWeekday(weekday: number, timeHm: string): string {
+  // Сдвигаем метку времени так, чтобы локальные поля Date показывали московские
+  // часы: считать день недели и час нужно именно по МСК - в нём живёт расписание.
+  const mskNow = new Date(Date.now() + new Date().getTimezoneOffset() * 60000 + 3 * 3600000);
+  const target = new Date(mskNow);
+  const mskWeekday = (mskNow.getDay() + 6) % 7;
+  const shift = (weekday - mskWeekday + 7) % 7;
+  target.setDate(target.getDate() + shift);
+
+  const [hours, minutes] = timeHm.split(":").map(Number);
+  const alreadyPassedToday =
+    shift === 0 &&
+    (mskNow.getHours() > hours || (mskNow.getHours() === hours && mskNow.getMinutes() >= minutes));
+  if (alreadyPassedToday) target.setDate(target.getDate() + 7);
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`;
+}

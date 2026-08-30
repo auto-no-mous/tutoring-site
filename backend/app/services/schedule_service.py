@@ -134,7 +134,24 @@ async def is_slot_available(
     if start_at_utc < not_before:
         return False
 
-    end_at_utc = start_at_utc + duration
+    return not await has_conflict(db, tutor, lesson_type, start_at_utc, exclude_booking_id)
+
+
+async def has_conflict(
+    db: AsyncSession,
+    tutor: TutorProfile,
+    lesson_type: LessonType,
+    start_at_utc: dt.datetime,
+    exclude_booking_id: uuid.UUID | None = None,
+) -> bool:
+    """Только пересечение с уже занятым временем, без оглядки на недельное расписание
+    и минимальный запас по времени.
+
+    Отдельно от is_slot_available, потому что репетитор - хозяин своей сетки: он может
+    поставить занятие вне расписания (ручная запись это уже позволяет), но поставить
+    два занятия на одно время не может никто.
+    """
+    end_at_utc = start_at_utc + dt.timedelta(minutes=lesson_type.duration_minutes)
     reserved_zones = await get_reserved_zones(
         db,
         tutor.id,
@@ -143,7 +160,7 @@ async def is_slot_available(
         tutor.break_between_lessons_minutes,
         exclude_booking_id=exclude_booking_id,
     )
-    return not slot_conflicts(start_at_utc, end_at_utc, tutor.break_between_lessons_minutes, reserved_zones)
+    return slot_conflicts(start_at_utc, end_at_utc, tutor.break_between_lessons_minutes, reserved_zones)
 
 
 async def compute_day_slots_by_duration(

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { addDaysIso, formatDate, formatDateTimeWithMsk, formatDayLabel, formatThreadTimestamp, todayIso } from "@/utils/time";
+import { addDaysIso, formatDate, formatDateTimeWithMsk, formatDayLabel, formatThreadTimestamp, todayIso, nextMskDateForWeekday } from "@/utils/time";
 
 describe("formatDate", () => {
   it("renders as DD.MM.YYYY", () => {
@@ -56,5 +56,33 @@ describe("formatThreadTimestamp", () => {
 
   it("returns a short date for older messages", () => {
     expect(formatThreadTimestamp("2020-01-01T12:00:00Z")).toMatch(/^\d{2}\.\d{2}$/);
+  });
+});
+
+describe("nextMskDateForWeekday", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("выбирает ближайший нужный день недели по МСК", () => {
+    // Среда, 1 июля 2026, 10:00 МСК (07:00 UTC).
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-01T07:00:00Z"));
+
+    // Пятница той же недели.
+    expect(nextMskDateForWeekday(4, "18:00")).toBe("2026-07-03");
+    // Понедельник - уже следующей.
+    expect(nextMskDateForWeekday(0, "18:00")).toBe("2026-07-06");
+  });
+
+  it("переносит на следующую неделю, если сегодня время уже прошло", () => {
+    vi.useFakeTimers();
+    // Среда, 19:00 МСК.
+    vi.setSystemTime(new Date("2026-07-01T16:00:00Z"));
+
+    // 18:00 сегодня уже позади - первое занятие серии не должно попасть в прошлое.
+    expect(nextMskDateForWeekday(2, "18:00")).toBe("2026-07-08");
+    // А 20:00 ещё впереди.
+    expect(nextMskDateForWeekday(2, "20:00")).toBe("2026-07-01");
   });
 });

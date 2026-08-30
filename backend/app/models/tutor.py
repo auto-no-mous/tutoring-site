@@ -75,7 +75,12 @@ class TutorProfile(UUIDPKMixin, TimestampMixin, Base):
     allow_individual_bookings: Mapped[bool] = mapped_column(Boolean, default=True)
     allow_group_bookings: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    user: Mapped["User"] = relationship(back_populates="tutor_profile")  # noqa: F821
+    # foreign_keys обязателен: между users и tutor_profiles теперь два внешних ключа
+    # (анкета ссылается на владельца, а ученик, заведённый вручную, - на репетитора
+    # через users.managed_by_tutor_id), и связь иначе неоднозначна.
+    user: Mapped["User"] = relationship(  # noqa: F821
+        back_populates="tutor_profile", foreign_keys=[user_id]
+    )
     lesson_types: Mapped[list["LessonType"]] = relationship(  # noqa: F821
         back_populates="tutor", cascade="all, delete-orphan"
     )

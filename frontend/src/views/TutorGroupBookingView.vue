@@ -86,7 +86,12 @@ onMounted(load);
           <div class="text-lg font-semibold">{{ group.name }}</div>
           <div class="mt-1 text-slate-500 dark:text-slate-400">
             <span class="font-medium text-brand-700 dark:text-brand-300">{{ group.price }} ₽/место</span>
-            · {{ group.duration_minutes }} мин · мест: {{ group.member_count }}/{{ group.capacity }}
+            · {{ group.duration_minutes }} мин · мест занято: {{ group.member_count }}/{{ group.capacity }}
+            <!-- Прежнее "мест: 0/5" читалось как "мест не осталось" - слово "занято"
+                 снимает двусмысленность, а полную группу подписываем отдельно. -->
+            <span v-if="group.member_count >= group.capacity" class="font-medium text-red-600 dark:text-red-400">
+              · мест нет
+            </span>
           </div>
           <div class="text-slate-500 dark:text-slate-400">
             {{ group.schedule_slots.map((s) => `${weekdayNames[s.weekday]} ${s.start_time.slice(0, 5)}`).join(", ") }}

@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 
 import { getTutorStats } from "@/api/stats";
 import ActivityLog from "@/components/ActivityLog.vue";
+import StudentsBlock from "@/components/tutor/StudentsBlock.vue";
 import type { TutorStats } from "@/types/stats";
 
 const stats = ref<TutorStats | null>(null);
@@ -28,6 +29,8 @@ onMounted(async () => {
         <div class="text-xs text-slate-500">учеников в этом месяце</div>
       </div>
     </div>
+
+    <StudentsBlock />
 
     <section>
       <h2 class="text-lg font-medium">Журнал событий</h2>

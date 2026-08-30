@@ -54,9 +54,16 @@ export async function listOAuthProviders() {
 
 /** Возвращает ссылку авторизации у провайдера. Если пользователь залогинен, сервер
  * трактует поток как привязку провайдера к его аккаунту, а не как вход. */
-export async function startOAuth(provider: OAuthProviderName, redirectTo?: string | null) {
+export async function startOAuth(
+  provider: OAuthProviderName,
+  redirectTo?: string | null,
+  claimToken?: string | null,
+) {
   const { data } = await apiClient.post<{ auth_url: string }>(`/auth/oauth/${provider}/start`, {
     redirect_to: redirectTo ?? null,
+    // Токен из ссылки-приглашения: провайдер привязывается к заведённому
+    // репетитором профилю, а не создаёт новый аккаунт.
+    claim_token: claimToken ?? null,
   });
   return data.auth_url;
 }
@@ -82,5 +89,29 @@ export async function completeOAuthSignup(payload: OAuthCompletePayload) {
 
 export async function unlinkOAuthProvider(provider: OAuthProviderName) {
   const { data } = await apiClient.delete<User>(`/auth/me/identities/${provider}`);
+  return data;
+}
+
+export interface ClaimPreview {
+  display_name: string;
+  grade: number | null;
+  tutor_display_name: string;
+}
+
+export async function getClaimPreview(token: string) {
+  const { data } = await apiClient.get<ClaimPreview>(`/auth/claim/${token}`);
+  return data;
+}
+
+export async function claimWithPassword(payload: {
+  token: string;
+  email: string;
+  password: string;
+  pd_consent: boolean;
+}) {
+  const { data } = await apiClient.post<{ user: User; tokens: TokenPair }>(
+    "/auth/claim/password",
+    payload,
+  );
   return data;
 }

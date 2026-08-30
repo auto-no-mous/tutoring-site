@@ -41,6 +41,7 @@ from app.schemas.oauth import (
 from app.schemas.user import UserOut
 from app.services import (
     auth_service,
+    claim_service,
     file_service,
     oauth_providers,
     system_notification_service,
@@ -68,9 +69,17 @@ async def start_authorization(
     provider: str,
     redirect_to: str | None,
     link_user: User | None,
+    claim_token: str | None = None,
 ) -> str:
     client = oauth_providers.get_client(provider)
     client.ensure_configured()
+
+    # Ссылка-приглашение: авторизует не сессия, а токен, поэтому пользователя для
+    # привязки достаём по нему - и только если аккаунт всё ещё никем не забран.
+    is_claim = False
+    if claim_token:
+        link_user = await claim_service.get_claimable_user(db, claim_token)
+        is_claim = True
 
     state = secrets.token_urlsafe(32)
     code_verifier, code_challenge = oauth_providers.generate_pkce_pair()
@@ -85,6 +94,7 @@ async def start_authorization(
             code_verifier=code_verifier,
             redirect_to=redirect_to,
             link_user_id=link_user.id if link_user is not None else None,
+            is_claim=is_claim,
             expires_at=utcnow() + STATE_TTL,
         )
     )
@@ -98,6 +108,7 @@ class _PendingAuth:
     code_verifier: str
     redirect_to: str | None
     link_user_id: uuid.UUID | None
+    is_claim: bool
 
 
 async def _consume_state(db: AsyncSession, provider: str, state: str) -> _PendingAuth:
@@ -116,6 +127,7 @@ async def _consume_state(db: AsyncSession, provider: str, state: str) -> _Pendin
         code_verifier=stored.code_verifier,
         redirect_to=stored.redirect_to,
         link_user_id=stored.link_user_id,
+        is_claim=stored.is_claim,
     )
     expired = ensure_aware(stored.expires_at) < utcnow()
     await db.delete(stored)
@@ -161,8 +173,20 @@ async def handle_callback(
     profile = await client.fetch_profile(payload.code, stored.code_verifier, payload.device_id)
 
     if stored.link_user_id is not None:
-        await _link_identity(db, stored.link_user_id, profile)
-        return OAuthCallbackResponse(status="linked", redirect_to=stored.redirect_to)
+        linked_user = await _link_identity(db, stored.link_user_id, profile)
+        if not stored.is_claim:
+            return OAuthCallbackResponse(status="linked", redirect_to=stored.redirect_to)
+
+        # Забрал аккаунт себе: он перестаёт быть управляемым, и человека надо сразу
+        # впустить - в отличие от привязки из настроек, он ещё не залогинен.
+        await claim_service.finalize(db, linked_user)
+        tokens = await auth_service.issue_token_pair(db, linked_user)
+        return OAuthCallbackResponse(
+            status="authenticated",
+            user=UserOut.model_validate(linked_user),
+            tokens=tokens,
+            redirect_to=stored.redirect_to,
+        )
 
     identity = await _get_identity(db, provider, profile.provider_user_id)
     if identity is not None:

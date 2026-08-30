@@ -66,6 +66,10 @@ class GroupPublicOut(BaseModel):
     has_pending_application: bool = False
 
 
+class GroupMemberAdd(BaseModel):
+    student_id: uuid.UUID
+
+
 class GroupApplicationCreate(BaseModel):
     message: str | None = None
 

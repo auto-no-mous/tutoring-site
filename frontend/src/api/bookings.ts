@@ -94,3 +94,21 @@ export async function setBookingOutcome(id: string, outcome: string) {
   const { data } = await apiClient.patch<Booking>(`/bookings/${id}/outcome`, { outcome });
   return data;
 }
+
+export interface TutorRecurringSeries {
+  id: string;
+  tutor_id: string;
+  student_id: string;
+  lesson_type_id: string;
+  weekday: number;
+  start_time: string;
+  is_active: boolean;
+  lesson_type_name: string;
+  student_display_name: string;
+}
+
+/** Действующие еженедельные серии репетитора - блок «Ученики» в статистике. */
+export async function listTutorRecurringSeries() {
+  const { data } = await apiClient.get<TutorRecurringSeries[]>("/bookings/series/tutor");
+  return data;
+}

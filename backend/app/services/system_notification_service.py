@@ -191,6 +191,11 @@ async def notify(db: AsyncSession, user_id: uuid.UUID, event: SystemNotification
         user = await db.get(User, user_id)
         if user is None:
             return
+        if user.managed_by_tutor_id is not None:
+            # Ученик, заведённый репетитором вручную: в аккаунт никто не входит, и
+            # копить в нём непрочитанные уведомления бессмысленно. Как только он
+            # заберёт аккаунт себе, уведомления начнут приходить как обычно.
+            return
         title, body_template = await _get_template(db, event, user.role)
         body = _render(body_template, params)
     except Exception:

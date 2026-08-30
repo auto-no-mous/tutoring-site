@@ -9,6 +9,7 @@ from app.models.email_log import EmailLog
 from app.models.notification import NotificationLog
 from app.models.review import Review
 from app.models.schedule import WeeklyAvailability
+from app.models.student_note import TutorStudentNote
 from app.models.subject import Direction, Subject, TutorSubject, TutorSubjectDirection
 from app.models.system_notification import NotificationTemplate, SystemNotification
 from app.models.tutor import TutorProfile
@@ -42,6 +43,7 @@ __all__ = [
     "TutorSubject",
     "TutorSubjectDirection",
     "TutorProfile",
+    "TutorStudentNote",
     "RefreshToken",
     "User",
 ]

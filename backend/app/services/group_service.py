@@ -569,6 +569,47 @@ async def leave_group(db: AsyncSession, student: User, group: Group) -> GroupMem
     return membership
 
 
+async def add_member_by_tutor(db: AsyncSession, group: Group, student_id: uuid.UUID) -> GroupMembership:
+    """Прямое зачисление в группу, без заявки.
+
+    Нужно для учеников, заведённых репетитором вручную: подать заявку они не могут -
+    в аккаунт никто не входит. Поэтому и разрешено только для своих управляемых
+    учеников; остальные по-прежнему вступают через заявку, чтобы репетитор не мог
+    записать в группу чужого человека без его ведома.
+    """
+    student = await db.get(User, student_id)
+    if student is None or student.managed_by_tutor_id != group.tutor_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Так можно добавить только ученика, заведённого вами вручную",
+        )
+
+    members = await count_active_members(db, group.id)
+    if members >= group.capacity:
+        raise HTTPException(status.HTTP_409_CONFLICT, "В группе нет свободных мест")
+
+    result = await db.execute(
+        select(GroupMembership).where(
+            GroupMembership.group_id == group.id, GroupMembership.student_id == student_id
+        )
+    )
+    membership = result.scalar_one_or_none()
+    if membership is not None and membership.status == GroupMembershipStatus.ACTIVE.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ученик уже в группе")
+
+    if membership is None:
+        membership = GroupMembership(group_id=group.id, student_id=student_id)
+        db.add(membership)
+    else:
+        # Возвращаем ранее вышедшего: строка та же, чтобы не плодить дубли в истории.
+        membership.status = GroupMembershipStatus.ACTIVE.value
+        membership.left_at = None
+        membership.left_by = None
+    await db.commit()
+    await db.refresh(membership)
+    return membership
+
+
 async def remove_member_by_tutor(db: AsyncSession, group: Group, student_id: uuid.UUID) -> GroupMembership:
     result = await db.execute(
         select(GroupMembership).where(

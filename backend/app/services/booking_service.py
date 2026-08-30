@@ -2,7 +2,7 @@ import datetime as dt
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.booking import Booking, RecurringSeries
@@ -82,8 +82,12 @@ async def get_student_names(db: AsyncSession, student_ids: list[uuid.UUID]) -> d
 
 
 async def list_students_for_tutor(db: AsyncSession, tutor_id: uuid.UUID) -> list[dict]:
-    """Distinct students who have (or had) a booking with this tutor, most recently
-    taught first - powers the student picker in the homework-assignment form."""
+    """Ученики репетитора для выпадающих списков (запись вручную, выдача домашки):
+    все, с кем есть или были занятия, плюс заведённые им вручную - последних надо
+    выбирать ещё до первой записи, иначе их незачем было бы заводить.
+
+    Сначала те, с кем занимались недавно; ученики без единого занятия - в конце.
+    """
     last_lesson = (
         select(Booking.student_id, func.max(Booking.start_at).label("last_start_at"))
         .where(Booking.tutor_id == tutor_id, Booking.student_id.is_not(None))
@@ -92,8 +96,14 @@ async def list_students_for_tutor(db: AsyncSession, tutor_id: uuid.UUID) -> list
     )
     result = await db.execute(
         select(User.id, User.first_name, User.last_name, User.grade, last_lesson.c.last_start_at)
-        .join(last_lesson, last_lesson.c.student_id == User.id)
-        .order_by(last_lesson.c.last_start_at.desc())
+        .outerjoin(last_lesson, last_lesson.c.student_id == User.id)
+        .where(
+            or_(
+                last_lesson.c.last_start_at.is_not(None),
+                User.managed_by_tutor_id == tutor_id,
+            )
+        )
+        .order_by(last_lesson.c.last_start_at.desc().nulls_last())
     )
     return [
         {
@@ -218,6 +228,7 @@ async def generate_recurring_occurrences(
     anchor_date: dt.date,
     weeks_ahead: int = RECURRING_WEEKS_AHEAD,
     start_offset: int = 1,
+    enforce_schedule: bool = True,
 ) -> list[Booking]:
     """Creates upcoming occurrences for an active series (section 2.4), weekly from
     `anchor_date` (the date of the booking the series was created from - NOT "today":
@@ -252,7 +263,14 @@ async def generate_recurring_occurrences(
         if existing.scalar_one_or_none() is not None:
             continue
 
-        if not await schedule_service.is_slot_available(db, tutor, lesson_type, candidate_start_utc):
+        # Серию, назначенную репетитором, недельная сетка не ограничивает: он ставит
+        # занятие там, где считает нужным, ровно как в ручной записи. Иначе
+        # "каждый вторник в 18:00" вне его расписания молча породило бы одно занятие
+        # вместо серии. Пересечения с занятым временем пропускаем в любом случае.
+        if enforce_schedule:
+            if not await schedule_service.is_slot_available(db, tutor, lesson_type, candidate_start_utc):
+                continue
+        elif await schedule_service.has_conflict(db, tutor, lesson_type, candidate_start_utc):
             continue
 
         booking = Booking(
@@ -427,7 +445,11 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
         await db.refresh(booking)
 
         await generate_recurring_occurrences(
-            db, series, initiated_by=BookedBy.TUTOR.value, anchor_date=start_msk.date()
+            db,
+            series,
+            initiated_by=BookedBy.TUTOR.value,
+            anchor_date=start_msk.date(),
+            enforce_schedule=False,
         )
 
     return booking
@@ -787,14 +809,45 @@ async def admin_reschedule_booking(
     return new_booking
 
 
-async def stop_recurring_series(db: AsyncSession, series: RecurringSeries, student: User) -> RecurringSeries:
-    if series.student_id != student.id:
+async def stop_recurring_series(db: AsyncSession, series: RecurringSeries, actor: User) -> RecurringSeries:
+    """Останавливает серию. Останавливать может и ученик, и репетитор, который её ведёт:
+    ученик, заведённый вручную, сам этого сделать не может - в аккаунт никто не входит."""
+    if actor.role == UserRole.TUTOR.value:
+        profile = await tutor_service.get_profile_by_user_id(db, actor.id)
+        if series.tutor_id != profile.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша серия занятий")
+    elif series.student_id != actor.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша серия занятий")
     series.is_active = False
     series.stopped_at = utcnow()
     await db.commit()
     await db.refresh(series)
     return series
+
+
+async def list_active_series_for_tutor(db: AsyncSession, tutor_id: uuid.UUID) -> list[dict]:
+    """Действующие еженедельные серии репетитора - для блока «Ученики» в статистике."""
+    result = await db.execute(
+        select(RecurringSeries, LessonType.name, User.display_name)
+        .join(LessonType, LessonType.id == RecurringSeries.lesson_type_id)
+        .join(User, User.id == RecurringSeries.student_id)
+        .where(RecurringSeries.tutor_id == tutor_id, RecurringSeries.is_active.is_(True))
+        .order_by(RecurringSeries.weekday, RecurringSeries.start_time)
+    )
+    return [
+        {
+            "id": series.id,
+            "tutor_id": series.tutor_id,
+            "student_id": series.student_id,
+            "lesson_type_id": series.lesson_type_id,
+            "weekday": series.weekday,
+            "start_time": series.start_time,
+            "is_active": series.is_active,
+            "lesson_type_name": lesson_type_name,
+            "student_display_name": student_display_name,
+        }
+        for series, lesson_type_name, student_display_name in result.all()
+    ]
 
 
 async def list_active_series_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[dict]:

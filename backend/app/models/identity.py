@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, UUIDPKMixin
@@ -66,9 +66,15 @@ class OAuthState(UUIDPKMixin, Base):
     # Куда вернуть пользователя во фронтенде после успешного входа.
     redirect_to: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Заполнен, если поток запущен из настроек залогиненным пользователем, который
-    # привязывает провайдера к существующему аккаунту, а не входит.
+    # привязывает провайдера к существующему аккаунту, а не входит. Он же заполняется
+    # при получении аккаунта по ссылке-приглашению - там привязка авторизуется
+    # одноразовым токеном вместо сессии, см. is_claim ниже.
     link_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
+    # True для ссылки-приглашения: после привязки провайдера аккаунт перестаёт быть
+    # управляемым репетитором, а человек сразу получает сессию (в отличие от привязки
+    # из настроек, где он уже залогинен).
+    is_claim: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
