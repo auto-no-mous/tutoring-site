@@ -22,6 +22,9 @@ import {
 } from "@/api/groups";
 import { getGroupThread, openThreadWithStudent } from "@/api/chat";
 import { getMyLessonTypes, getMyStudentsWithStats, type TutorStudentStats } from "@/api/tutors";
+import { listMyWhiteboards, type Whiteboard } from "@/api/whiteboards";
+import WhiteboardLinks from "@/components/WhiteboardLinks.vue";
+import WhiteboardsModal from "@/components/WhiteboardsModal.vue";
 import { useToastStore } from "@/stores/toast";
 import { apiErrorMessage } from "@/utils/apiError";
 import type { Group, GroupApplication, GroupAttendanceEntry, GroupMembership, GroupOccurrence } from "@/types/group";
@@ -62,6 +65,7 @@ async function load(): Promise<void> {
     groupLessonTypes.value = lessonTypesData.filter((t) => t.format === "group");
     // Needed up front (not lazily behind the spoiler) so the "Заявки" section only
     // renders for groups that actually have something pending.
+    await loadWhiteboards();
     const perGroupApplications = await Promise.all(
       groupsData.map((g) => listApplications(g.id, "pending")),
     );
@@ -99,6 +103,19 @@ async function refreshGroup(groupId: string): Promise<void> {
   if (membersByGroup.value[groupId]) {
     membersByGroup.value = { ...membersByGroup.value, [groupId]: await listMembers(groupId) };
   }
+}
+
+// Доски группы: общие на всех её участников, поэтому живут в карточке группы, а не
+// в отдельном занятии.
+const whiteboards = ref<Whiteboard[]>([]);
+const boardsModalGroupId = ref<string | null>(null);
+
+function boardsForGroup(groupId: string): Whiteboard[] {
+  return whiteboards.value.filter((board) => board.group_id === groupId);
+}
+
+async function loadWhiteboards(): Promise<void> {
+  whiteboards.value = await listMyWhiteboards();
 }
 
 // Ученики, заведённые репетитором вручную: заявку они подать не могут (в аккаунт
@@ -418,7 +435,14 @@ onMounted(load);
 
       <div v-for="group in groups" :key="group.id" class="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
         <div class="flex items-start justify-between gap-3">
-          <h3 class="text-lg font-medium">{{ group.name }}</h3>
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="text-lg font-medium">{{ group.name }}</h3>
+            <WhiteboardLinks
+              :boards="boardsForGroup(group.id)"
+              can-manage
+              @manage="boardsModalGroupId = group.id"
+            />
+          </div>
           <span class="shrink-0 text-sm text-slate-500">
             Мест занято: {{ group.member_count }}/{{ group.capacity }}
             <span v-if="group.member_count >= group.capacity" class="font-medium text-red-600 dark:text-red-400">
@@ -626,5 +650,13 @@ onMounted(load);
         </details>
       </div>
     </template>
+    <WhiteboardsModal
+      v-if="boardsModalGroupId"
+      :boards="boardsForGroup(boardsModalGroupId)"
+      :group-id="boardsModalGroupId"
+      :owner-name="groups.find((g) => g.id === boardsModalGroupId)?.name"
+      @changed="loadWhiteboards"
+      @close="boardsModalGroupId = null"
+    />
   </div>
 </template>

@@ -14,6 +14,7 @@ from app.models.subject import Direction, Subject, TutorSubject, TutorSubjectDir
 from app.models.system_notification import NotificationTemplate, SystemNotification
 from app.models.tutor import TutorProfile
 from app.models.user import RefreshToken, User
+from app.models.whiteboard import Whiteboard
 
 __all__ = [
     "BlogPost",
@@ -46,4 +47,5 @@ __all__ = [
     "TutorStudentNote",
     "RefreshToken",
     "User",
+    "Whiteboard",
 ]

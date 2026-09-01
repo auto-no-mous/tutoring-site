@@ -5,12 +5,22 @@ import { computed, ref } from "vue";
 import { cancelBooking, deleteBooking, updateBooking } from "@/api/bookings";
 import MeetingLinkModal from "@/components/MeetingLinkModal.vue";
 import StudentHomeworkModal from "@/components/StudentHomeworkModal.vue";
+import WhiteboardLinks from "@/components/WhiteboardLinks.vue";
+import WhiteboardsModal from "@/components/WhiteboardsModal.vue";
+import type { Whiteboard } from "@/api/whiteboards";
 import { useToastStore } from "@/stores/toast";
 import type { Booking } from "@/types/booking";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
-const props = defineProps<{ booking: Booking; role: "tutor" | "student"; homeworkStatus?: "none" | "pending" | "done" }>();
-const emit = defineEmits<{ changed: []; "reschedule-requested": [Booking] }>();
+// whiteboards приходят отобранными родителем: доски привязаны к паре
+// репетитор-ученик, а не к занятию, поэтому список грузится один раз на вкладку.
+const props = defineProps<{
+  booking: Booking;
+  role: "tutor" | "student";
+  homeworkStatus?: "none" | "pending" | "done";
+  whiteboards?: Whiteboard[];
+}>();
+const emit = defineEmits<{ changed: []; "reschedule-requested": [Booking]; "boards-changed": [] }>();
 
 const toast = useToastStore();
 
@@ -18,12 +28,20 @@ const showActions = ref(false);
 const isEditingDuration = ref(false);
 const showHomeworkModal = ref(false);
 const showMeetingLinkModal = ref(false);
+const showWhiteboardsModal = ref(false);
 const durationMinutes = ref(
   Math.round((new Date(props.booking.end_at).getTime() - new Date(props.booking.start_at).getTime()) / 60000),
 );
 const isBusy = ref(false);
 
 const isManualBlock = computed(() => props.role === "tutor" && props.booking.is_manual_block);
+
+const boards = computed(() => props.whiteboards ?? []);
+// Доски заводит репетитор и только для занятия с учеником: у блока времени второй
+// стороны нет, доске там не с кем быть общей.
+const canManageBoards = computed(
+  () => props.role === "tutor" && !!props.booking.student_id && !props.booking.is_manual_block,
+);
 
 const FORMAT_LABELS: Record<string, string> = { individual: "Индивидуальное", group: "Групповое" };
 const formatLabel = computed(() => (props.booking.lesson_type_format ? FORMAT_LABELS[props.booking.lesson_type_format] : null));
@@ -139,6 +157,12 @@ async function saveDuration(): Promise<void> {
         >
           Указать ссылку
         </button>
+        <WhiteboardLinks
+          v-if="boards.length > 0 || canManageBoards"
+          :boards="boards"
+          :can-manage="canManageBoards"
+          @manage="showWhiteboardsModal = true"
+        />
         <button
           v-if="role === 'tutor' && booking.student_id"
           type="button"
@@ -242,6 +266,15 @@ async function saveDuration(): Promise<void> {
       :student-name="booking.student_display_name ?? '—'"
       @close="showHomeworkModal = false"
       @changed="onHomeworkChanged"
+    />
+
+    <WhiteboardsModal
+      v-if="showWhiteboardsModal && booking.student_id"
+      :boards="boards"
+      :student-id="booking.student_id"
+      :owner-name="booking.student_display_name ?? undefined"
+      @changed="emit('boards-changed')"
+      @close="showWhiteboardsModal = false"
     />
 
     <MeetingLinkModal

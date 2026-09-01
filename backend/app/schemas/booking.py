@@ -26,6 +26,12 @@ class ManualBookingCreate(BaseModel):
     meeting_link: str | None = None
     notes: str | None = None
     repeat_weekly: bool = False
+    # Пересечение с уже занятым временем по умолчанию запрещено, но репетитор может
+    # настоять: бывает, что два занятия действительно идут внахлёст (подменил коллегу,
+    # разговорный клуб поверх индивидуального). Флаг ставится вторым запросом, после
+    # того как интерфейс показал, с чем именно пересекается - см.
+    # booking_service.create_manual_booking.
+    allow_overlap: bool = False
 
 
 class BookingTutorUpdate(BaseModel):

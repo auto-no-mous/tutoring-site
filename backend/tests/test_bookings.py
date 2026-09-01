@@ -739,3 +739,110 @@ async def test_tutor_reschedule_grid_shows_every_day_and_marks_busy_slots(client
     assert busy, "занятое другим занятием время должно быть помечено"
     busy_msk = {dt.datetime.fromisoformat(s["start_at"]).astimezone(MSK).hour for s in busy}
     assert 12 in busy_msk
+
+
+async def test_manual_booking_overlap_needs_confirmation(client: AsyncClient) -> None:
+    """Пересечение по времени - вопрос, а не запрет: репетитор может настоять."""
+    tutor = await _setup_tutor(client, "overlap-tutor1@example.com")
+    student = await _register(client, "overlap-student1@example.com", "student")
+    other = await _register(client, "overlap-student2@example.com", "student")
+
+    start_at = _next_weekday_datetime(0, 10)
+    first = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "student_id": student["user"]["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+            "end_at": (start_at + dt.timedelta(minutes=60)).isoformat(),
+        },
+    )
+    assert first.status_code == 201, first.text
+
+    overlapping = {
+        "student_id": other["user"]["id"],
+        "lesson_type_id": tutor["lesson_type_id"],
+        "start_at": (start_at + dt.timedelta(minutes=30)).isoformat(),
+        "end_at": (start_at + dt.timedelta(minutes=90)).isoformat(),
+    }
+
+    # Без подтверждения - отказ, но с перечислением того, с чем пересекается: без
+    # этого репетитору нечего решать.
+    resp = await client.post("/api/v1/bookings/manual", headers=tutor["headers"], json=overlapping)
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "Время пересекается с" in detail
+    # display_name собирается как "Фамилия Имя", а помощник регистрации кладёт в
+    # фамилию роль - отсюда "student Test".
+    assert "student Test" in detail
+
+    # С подтверждением - создаётся, оба занятия остаются в расписании.
+    resp = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={**overlapping, "allow_overlap": True},
+    )
+    assert resp.status_code == 201, resp.text
+
+    bookings = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    assert len(bookings) == 2
+
+
+async def test_manual_booking_conflict_lists_group_and_blocks(client: AsyncClient) -> None:
+    """В перечислении должны быть и блоки времени, и групповые занятия - они тоже
+    занимают время репетитора."""
+    tutor = await _setup_tutor(client, "overlap-tutor2@example.com")
+    start_at = _next_weekday_datetime(0, 10)
+
+    block = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "start_at": start_at.isoformat(),
+            "end_at": (start_at + dt.timedelta(minutes=60)).isoformat(),
+        },
+    )
+    assert block.status_code == 201, block.text
+
+    resp = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": (start_at + dt.timedelta(minutes=15)).isoformat(),
+            "end_at": (start_at + dt.timedelta(minutes=75)).isoformat(),
+        },
+    )
+    assert resp.status_code == 409
+    assert "блок времени" in resp.json()["detail"]
+
+
+async def test_student_booking_still_refuses_busy_time(client: AsyncClient) -> None:
+    """Послабление касается только репетитора: ученик занятое время выбрать не может."""
+    tutor = await _setup_tutor(client, "overlap-tutor3@example.com")
+    student = await _register(client, "overlap-student3@example.com", "student")
+    other = await _register(client, "overlap-student4@example.com", "student")
+
+    start_at = _next_weekday_datetime(0, 10)
+    first = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+        },
+    )
+    assert first.status_code == 201, first.text
+
+    resp = await client.post(
+        "/api/v1/bookings",
+        headers=other["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+        },
+    )
+    assert resp.status_code == 409

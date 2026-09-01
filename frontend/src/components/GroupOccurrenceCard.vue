@@ -2,11 +2,13 @@
 import { computed, ref } from "vue";
 
 import { markOwnNoShow } from "@/api/groups";
+import type { Whiteboard } from "@/api/whiteboards";
+import WhiteboardLinks from "@/components/WhiteboardLinks.vue";
 import { useToastStore } from "@/stores/toast";
 import type { StudentGroupOccurrence } from "@/types/group";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
-const props = defineProps<{ occurrence: StudentGroupOccurrence }>();
+const props = defineProps<{ occurrence: StudentGroupOccurrence; whiteboards?: Whiteboard[] }>();
 const emit = defineEmits<{ changed: [] }>();
 
 const toast = useToastStore();
@@ -50,14 +52,18 @@ async function markNoShow(): Promise<void> {
         </div>
         <div class="text-xs text-slate-400">Групповое · {{ durationMinutes }} мин</div>
       </div>
-      <a
-        v-if="occurrence.meeting_link"
-        :href="occurrence.meeting_link"
-        target="_blank"
-        class="rounded-md bg-brand-500 px-2 py-1 text-xs text-white"
-      >
-        Перейти на занятие
-      </a>
+      <div class="flex items-center gap-2">
+        <a
+          v-if="occurrence.meeting_link"
+          :href="occurrence.meeting_link"
+          target="_blank"
+          class="rounded-md bg-brand-500 px-2 py-1 text-xs text-white"
+        >
+          Перейти на занятие
+        </a>
+        <!-- Доска у группы общая: её ведёт репетитор в карточке группы. -->
+        <WhiteboardLinks v-if="(whiteboards ?? []).length > 0" :boards="whiteboards ?? []" />
+      </div>
     </div>
 
     <p v-if="hasDeclaredNoShow" class="mt-2 text-xs text-amber-600 dark:text-amber-400">

@@ -6,7 +6,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.booking import Booking, RecurringSeries
-from app.models.enums import BookedBy, BookingStatus, NotificationEvent, SystemNotificationEvent, UserRole
+from app.models.enums import (
+    BookedBy,
+    BookingStatus,
+    GroupOccurrenceStatus,
+    NotificationEvent,
+    SystemNotificationEvent,
+    UserRole,
+)
+from app.models.group import Group, GroupOccurrence
 from app.models.lesson_type import LessonType
 from app.models.subject import TutorSubject, TutorSubjectDirection
 from app.models.tutor import TutorProfile
@@ -364,6 +372,64 @@ async def create_student_booking(
     return booking
 
 
+async def describe_conflicts(
+    db: AsyncSession, tutor: TutorProfile, start_at: dt.datetime, end_at: dt.datetime
+) -> list[str]:
+    """Человеческое описание того, с чем пересекается предполагаемое время.
+
+    Нужно, чтобы отказ был не «время занято», а «занято вот этим»: репетитор решает,
+    ставить ли занятие внахлёст, и для этого должен видеть, поверх чего оно ляжет.
+    Окно расширено на перерыв между занятиями - в него упирается та же проверка, что
+    и в create_manual_booking, и «пересечение» может означать just нарушенный перерыв.
+    """
+    gap = dt.timedelta(minutes=tutor.break_between_lessons_minutes)
+    window_start = start_at - gap
+    window_end = end_at + gap
+
+    bookings = await db.execute(
+        select(Booking).where(
+            Booking.tutor_id == tutor.id,
+            Booking.status == BookingStatus.SCHEDULED.value,
+            Booking.start_at < window_end,
+            Booking.end_at > window_start,
+        )
+    )
+    rows = list(bookings.scalars().all())
+    student_names = await get_student_names(db, [b.student_id for b in rows if b.student_id])
+
+    described: list[tuple[dt.datetime, str]] = []
+    for booking in rows:
+        who = student_names.get(booking.student_id, "занятие") if booking.student_id else "блок времени"
+        described.append((ensure_aware(booking.start_at), _format_conflict(booking.start_at, booking.end_at, who)))
+
+    occurrences = await db.execute(
+        select(GroupOccurrence, Group.name)
+        .join(Group, Group.id == GroupOccurrence.group_id)
+        .where(
+            Group.tutor_id == tutor.id,
+            GroupOccurrence.status == GroupOccurrenceStatus.SCHEDULED.value,
+            GroupOccurrence.start_at < window_end,
+            GroupOccurrence.end_at > window_start,
+        )
+    )
+    for occurrence, group_name in occurrences.all():
+        described.append(
+            (
+                ensure_aware(occurrence.start_at),
+                _format_conflict(occurrence.start_at, occurrence.end_at, f"группа «{group_name}»"),
+            )
+        )
+
+    described.sort(key=lambda item: item[0])
+    return [text for _, text in described]
+
+
+def _format_conflict(start_at: dt.datetime, end_at: dt.datetime, who: str) -> str:
+    start_msk = ensure_aware(start_at).astimezone(MSK)
+    end_msk = ensure_aware(end_at).astimezone(MSK)
+    return f"{start_msk:%d.%m %H:%M}-{end_msk:%H:%M} ({who})"
+
+
 async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: ManualBookingCreate) -> Booking:
     student = None
     is_first_with_tutor = False
@@ -395,8 +461,13 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
     )
     if schedule_service.slot_conflicts(
         payload.start_at, payload.end_at, tutor.break_between_lessons_minutes, reserved_zones
-    ):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Время пересекается с существующей записью")
+    ) and not payload.allow_overlap:
+        # Не запрет, а вопрос: интерфейс показывает, с чем пересекается, и повторяет
+        # запрос с allow_overlap, если репетитор всё же настаивает. Сознательный
+        # нахлёст - его право: он один знает, что в это время действительно возможно.
+        conflicts = await describe_conflicts(db, tutor, payload.start_at, payload.end_at)
+        listed = "; ".join(conflicts) if conflicts else "существующей записью"
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Время пересекается с: {listed}")
 
     booking = Booking(
         tutor_id=tutor.id,

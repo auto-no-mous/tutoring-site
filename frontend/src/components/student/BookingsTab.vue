@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 
 import { listMyBookings } from "@/api/bookings";
 import { myOccurrences } from "@/api/groups";
+import { listMyWhiteboards, type Whiteboard } from "@/api/whiteboards";
 import BookingCard from "@/components/BookingCard.vue";
 import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
 import GroupOccurrenceCard from "@/components/GroupOccurrenceCard.vue";
@@ -17,6 +18,9 @@ const toast = useToastStore();
 
 const bookings = ref<Booking[]>([]);
 const occurrences = ref<StudentGroupOccurrence[]>([]);
+// Доски привязаны к паре с репетитором или к группе, поэтому грузятся один раз на
+// вкладку, а карточки разбирают список сами.
+const whiteboards = ref<Whiteboard[]>([]);
 const reschedulingBooking = ref<Booking | null>(null);
 
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -45,7 +49,21 @@ const past = computed(() =>
 const weeks = computed(() => groupByWeekAndDay(upcoming.value, (item) => item.start_at, localTimeZone));
 
 async function load(): Promise<void> {
-  [bookings.value, occurrences.value] = await Promise.all([listMyBookings(), myOccurrences()]);
+  [bookings.value, occurrences.value, whiteboards.value] = await Promise.all([
+    listMyBookings(),
+    myOccurrences(),
+    listMyWhiteboards(),
+  ]);
+}
+
+// У ученика карточка индивидуального занятия отбирает доски по репетитору: доска
+// общая для всей их пары, а не для конкретной записи.
+function boardsForTutor(tutorId: string): Whiteboard[] {
+  return whiteboards.value.filter((board) => board.tutor_id === tutorId && board.student_id);
+}
+
+function boardsForGroup(groupId: string): Whiteboard[] {
+  return whiteboards.value.filter((board) => board.group_id === groupId);
 }
 
 function openReschedule(booking: Booking): void {
@@ -70,10 +88,16 @@ onMounted(load);
             v-if="item.kind === 'booking'"
             :booking="item"
             role="student"
+            :whiteboards="boardsForTutor(item.tutor_id)"
             @changed="load"
             @reschedule-requested="openReschedule"
           />
-          <GroupOccurrenceCard v-else :occurrence="item" @changed="load" />
+          <GroupOccurrenceCard
+            v-else
+            :occurrence="item"
+            :whiteboards="boardsForGroup(item.group_id)"
+            @changed="load"
+          />
         </template>
       </BookingScheduleGroups>
     </section>

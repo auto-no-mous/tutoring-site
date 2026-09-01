@@ -71,6 +71,9 @@ export async function createManualBooking(payload: {
   meeting_link?: string | null;
   notes?: string | null;
   repeat_weekly?: boolean;
+  // Ставится вторым запросом, после того как сервер перечислил пересечения, а
+  // репетитор подтвердил, что занятие всё равно нужно поставить.
+  allow_overlap?: boolean;
 }) {
   const { data } = await apiClient.post<Booking>("/bookings/manual", payload);
   return data;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
 
 import { createManualBooking, listTutorBookings, setBookingOutcome } from "@/api/bookings";
@@ -11,6 +12,7 @@ import {
   getMyLessonTypes,
   getMyStudents,
 } from "@/api/tutors";
+import { listMyWhiteboards, type Whiteboard } from "@/api/whiteboards";
 import BookingCard from "@/components/BookingCard.vue";
 import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
 import RescheduleModal from "@/components/RescheduleModal.vue";
@@ -25,6 +27,18 @@ import { groupByWeekAndDay, isBeforeToday } from "@/utils/scheduleGrouping";
 const toast = useToastStore();
 
 const bookings = ref<Booking[]>([]);
+// Один запрос на всю вкладку: доски привязаны к паре репетитор-ученик, и у десятка
+// занятий с одним учеником они одни и те же.
+const whiteboards = ref<Whiteboard[]>([]);
+
+function boardsForStudent(studentId: string | null): Whiteboard[] {
+  if (!studentId) return [];
+  return whiteboards.value.filter((board) => board.student_id === studentId);
+}
+
+async function loadWhiteboards(): Promise<void> {
+  whiteboards.value = await listMyWhiteboards();
+}
 const homeworkStatusByStudent = ref<Record<string, string>>({});
 const showForm = ref(false);
 const error = ref("");
@@ -313,8 +327,19 @@ function resetForm(): void {
   durationSelection.value = standardDurations.value.length > 0 ? String(standardDurations.value[0]) : CUSTOM_DURATION;
 }
 
-async function createBlock(): Promise<void> {
+// Сервер отвечает 409 на пересечение с уже занятым временем и перечисляет, с чем
+// именно. Это не тупик: репетитор один знает, возможно ли занятие внахлёст на самом
+// деле (подменил коллегу, разговорный клуб поверх индивидуального), поэтому здесь
+// показывается предупреждение с выбором - настоять или вернуться к параметрам.
+const overlapWarning = ref("");
+
+async function createBlock(allowOverlap = false): Promise<void> {
+  // Сравнение с true, а не приведение к булеву: если обработчик once again позовут
+  // из шаблона без скобок, сюда придёт объект события, и он не должен превратиться
+  // в согласие на пересечение (и тем более уехать в тело запроса).
+  const confirmedOverlap = allowOverlap === true;
   error.value = "";
+  if (!confirmedOverlap) overlapWarning.value = "";
   if (selectedKey.value === NEW_STUDENT_KEY) {
     // Иначе запись ушла бы пустым блоком времени: созданного ученика ещё нет.
     error.value = "Сначала создайте ученика или выберите другого в списке";
@@ -332,6 +357,7 @@ async function createBlock(): Promise<void> {
     } else {
       await createManualBooking({
         student_id: selectedEntry.value?.kind === "student" ? selectedEntry.value.id : null,
+        allow_overlap: confirmedOverlap,
         start_at: start.toISOString(),
         end_at: end.toISOString(),
         meeting_link: meetingLink.value || null,
@@ -339,12 +365,26 @@ async function createBlock(): Promise<void> {
       });
     }
     resetForm();
+    overlapWarning.value = "";
     showForm.value = false;
     await load();
-  } catch {
-    error.value = "Не удалось создать запись — время может пересекаться с существующей.";
+  } catch (err) {
+    // 409 у этой ручки бывает единственного рода - пересечение по времени, и сервер
+    // перечисляет в тексте, с чем именно. Показываем это как вопрос с выбором,
+    // остальные ошибки - как ошибки.
+    if (axios.isAxiosError(err) && err.response?.status === 409) {
+      overlapWarning.value = apiErrorMessage(err, "Время пересекается с существующей записью");
+      return;
+    }
+    error.value = apiErrorMessage(err, "Не удалось создать запись");
   }
 }
+
+// Параметры поменяли - прежнее предупреждение больше не про них, и подтверждать по
+// нему нечего.
+watch([selectedKey, selectedStartAtIso, effectiveDuration], () => {
+  overlapWarning.value = "";
+});
 
 function openReschedule(booking: Booking): void {
   reschedulingBooking.value = booking;
@@ -371,7 +411,7 @@ onMounted(load);
       <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700" @click="showForm = !showForm">
         {{ showForm ? "Отмена" : "+ Резерв / запись вручную" }}
       </button>
-      <form v-if="showForm" class="mt-3 flex flex-col gap-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800" @submit.prevent="createBlock">
+      <form v-if="showForm" class="mt-3 flex flex-col gap-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800" @submit.prevent="createBlock()">
         <div class="flex flex-wrap items-end gap-2">
           <label class="flex flex-col gap-1 text-sm">
             Ученик / группа
@@ -523,7 +563,38 @@ onMounted(load);
           </label>
         </div>
 
-        <button type="submit" class="self-start rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white">
+        <div
+          v-if="overlapWarning"
+          class="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          <span>{{ overlapWarning }}</span>
+          <span class="text-xs">
+            Занятие можно поставить и так — например, если вы ведёте его вместе с коллегой или знаете,
+            что участники не пересекутся. Проверьте параметры, если это не то, чего вы хотели.
+          </span>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white"
+              @click="createBlock(true)"
+            >
+              Всё равно создать
+            </button>
+            <button
+              type="button"
+              class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+              @click="overlapWarning = ''"
+            >
+              Изменить параметры
+            </button>
+          </div>
+        </div>
+
+        <button
+          v-if="!overlapWarning"
+          type="submit"
+          class="self-start rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white"
+        >
           Создать
         </button>
       </form>
@@ -537,7 +608,9 @@ onMounted(load);
             :booking="booking"
             role="tutor"
             :homework-status="homeworkStatusFor(booking)"
+            :whiteboards="boardsForStudent(booking.student_id)"
             @changed="load"
+            @boards-changed="loadWhiteboards"
             @reschedule-requested="openReschedule"
           />
         </template>
