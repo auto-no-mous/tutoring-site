@@ -296,13 +296,19 @@ function homeworkStatusFor(booking: Booking): "none" | "pending" | "done" {
 }
 
 async function load(): Promise<void> {
-  const [bookingsData, homeworkStatusData, studentsData, groupsData, lessonTypesData] = await Promise.all([
-    listTutorBookings(),
-    getMyStudentsHomeworkStatus(),
-    getMyStudents(),
-    listMyGroups(),
-    getMyLessonTypes(),
-  ]);
+  const [bookingsData, homeworkStatusData, studentsData, groupsData, lessonTypesData, boardsData] =
+    await Promise.all([
+      listTutorBookings(),
+      getMyStudentsHomeworkStatus(),
+      getMyStudents(),
+      listMyGroups(),
+      getMyLessonTypes(),
+      // Доски грузятся здесь же, а не только после их правки: иначе после
+      // перезагрузки страницы карточки оставались бы без ссылок до первого
+      // редактирования.
+      listMyWhiteboards(),
+    ]);
+  whiteboards.value = boardsData;
   bookings.value = bookingsData;
   homeworkStatusByStudent.value = homeworkStatusData;
   students.value = studentsData;
