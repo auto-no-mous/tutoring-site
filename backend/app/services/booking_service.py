@@ -257,6 +257,9 @@ async def generate_recurring_occurrences(
         return []
 
     created: list[Booking] = []
+    # Занятия, которые уже были у этого ученика в это же время и теперь стали частью
+    # серии: их не создаём заново, но сохранить изменение всё равно нужно.
+    adopted: list[Booking] = []
     for i in range(start_offset, start_offset + weeks_ahead):
         candidate_date = anchor_date + dt.timedelta(weeks=i)
         candidate_start_msk = dt.datetime.combine(candidate_date, series.start_time, tzinfo=MSK)
@@ -269,6 +272,15 @@ async def generate_recurring_occurrences(
             )
         )
         if existing.scalar_one_or_none() is not None:
+            continue
+
+        # Ученик мог записаться на несколько занятий вперёд сам - тогда эти недели
+        # заняты его же записями. Забираем их в серию вместо того, чтобы пропускать
+        # неделю как занятую: занятие в этот час всё равно состоится.
+        same_lesson = await find_same_lesson(db, series.tutor_id, series.student_id, candidate_start_utc)
+        if same_lesson is not None:
+            same_lesson.recurring_series_id = series.id
+            adopted.append(same_lesson)
             continue
 
         # Серию, назначенную репетитором, недельная сетка не ограничивает: он ставит
@@ -294,7 +306,7 @@ async def generate_recurring_occurrences(
         db.add(booking)
         created.append(booking)
 
-    if created:
+    if created or adopted:
         await db.commit()
         for booking in created:
             await db.refresh(booking)
@@ -430,6 +442,69 @@ def _format_conflict(start_at: dt.datetime, end_at: dt.datetime, who: str) -> st
     return f"{start_msk:%d.%m %H:%M}-{end_msk:%H:%M} ({who})"
 
 
+async def _start_series_from(
+    db: AsyncSession, tutor: TutorProfile, booking: Booking, payload: ManualBookingCreate
+) -> Booking:
+    """Делает уже существующее занятие первым в еженедельной серии.
+
+    Само занятие не трогаем: его создал ученик, и менять ему тип или длительность
+    задним числом нельзя. Тип занятия для будущих недель берём из запроса репетитора,
+    а если он его не указал - из этого же занятия.
+    """
+    lesson_type_id = payload.lesson_type_id or booking.lesson_type_id
+    if lesson_type_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Для еженедельных занятий нужен тип занятия",
+        )
+
+    start_msk = ensure_aware(booking.start_at).astimezone(MSK)
+    series = RecurringSeries(
+        tutor_id=tutor.id,
+        student_id=booking.student_id,
+        lesson_type_id=lesson_type_id,
+        weekday=start_msk.weekday(),
+        start_time=start_msk.time(),
+    )
+    db.add(series)
+    await db.commit()
+    await db.refresh(series)
+
+    booking.recurring_series_id = series.id
+    await db.commit()
+    await db.refresh(booking)
+
+    await generate_recurring_occurrences(
+        db,
+        series,
+        initiated_by=BookedBy.TUTOR.value,
+        anchor_date=start_msk.date(),
+        enforce_schedule=False,
+    )
+    return booking
+
+
+async def find_same_lesson(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID, start_at: dt.datetime
+) -> Booking | None:
+    """Уже назначенное занятие с тем же учеником в то же время, ещё не входящее в серию.
+
+    Нужна, чтобы включение еженедельных занятий поверх записи, которую ученик сделал
+    сам, не упиралось в «время занято» и не плодило дубль: это ровно то же занятие,
+    его надо забрать в серию, а не создавать рядом второе.
+    """
+    result = await db.execute(
+        select(Booking).where(
+            Booking.tutor_id == tutor_id,
+            Booking.student_id == student_id,
+            Booking.start_at == start_at,
+            Booking.status == BookingStatus.SCHEDULED.value,
+            Booking.recurring_series_id.is_(None),
+        )
+    )
+    return result.scalars().first()
+
+
 async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: ManualBookingCreate) -> Booking:
     student = None
     is_first_with_tutor = False
@@ -451,6 +526,16 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
 
     if payload.end_at <= payload.start_at:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Время окончания должно быть позже начала")
+
+    # Частый случай: ученик записался сам, а потом попросил сделать занятие
+    # еженедельным. Своя же запись выглядела бы как пересечение, и репетитору
+    # пришлось бы сначала удалять её руками. Вместо этого забираем её в серию как
+    # первое занятие - время и ученик те же, создавать рядом второе занятие незачем.
+    existing = None
+    if payload.student_id is not None and payload.repeat_weekly:
+        existing = await find_same_lesson(db, tutor.id, payload.student_id, payload.start_at)
+    if existing is not None:
+        return await _start_series_from(db, tutor, existing, payload)
 
     reserved_zones = await schedule_service.get_reserved_zones(
         db,

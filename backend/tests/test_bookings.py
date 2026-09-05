@@ -846,3 +846,124 @@ async def test_student_booking_still_refuses_busy_time(client: AsyncClient) -> N
         },
     )
     assert resp.status_code == 409
+
+
+async def test_weekly_series_adopts_the_students_own_booking(client: AsyncClient) -> None:
+    """Ученик записался сам и попросил сделать занятие еженедельным.
+
+    Его же запись выглядела бы для сайта как пересечение по времени, и репетитору
+    пришлось бы удалять её руками. Она должна становиться первым занятием серии.
+    """
+    tutor = await _setup_tutor(client, "adopt-tutor1@example.com")
+    student = await _register(client, "adopt-student1@example.com", "student")
+    start_at = _next_weekday_datetime(0, 10)
+
+    own = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+        },
+    )
+    assert own.status_code == 201, own.text
+    own_id = own.json()["id"]
+
+    weekly = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "student_id": student["user"]["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+            "end_at": (start_at + dt.timedelta(minutes=60)).isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+    assert weekly.status_code == 201, weekly.text
+    # Это та же самая запись, а не вторая поверх неё.
+    assert weekly.json()["id"] == own_id
+    assert weekly.json()["recurring_series_id"] is not None
+
+    bookings = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    at_that_time = [b for b in bookings if b["start_at"] == own.json()["start_at"]]
+    assert len(at_that_time) == 1, "дубля быть не должно"
+    assert len(bookings) > 1, "остальные недели серии должны появиться"
+
+    series = (await client.get("/api/v1/bookings/series/tutor", headers=tutor["headers"])).json()
+    assert len(series) == 1
+    assert series[0]["student_id"] == student["user"]["id"]
+
+
+async def test_weekly_series_adopts_several_of_the_students_bookings(client: AsyncClient) -> None:
+    """Ученик мог записаться на несколько недель вперёд - все они уходят в серию."""
+    tutor = await _setup_tutor(client, "adopt-tutor2@example.com")
+    student = await _register(client, "adopt-student2@example.com", "student")
+    first = _next_weekday_datetime(0, 10)
+    second = first + dt.timedelta(weeks=1)
+
+    for moment in (first, second):
+        resp = await client.post(
+            "/api/v1/bookings",
+            headers=student["headers"],
+            json={
+                "tutor_id": tutor["id"],
+                "lesson_type_id": tutor["lesson_type_id"],
+                "start_at": moment.isoformat(),
+            },
+        )
+        assert resp.status_code == 201, resp.text
+
+    weekly = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "student_id": student["user"]["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": first.isoformat(),
+            "end_at": (first + dt.timedelta(minutes=60)).isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+    assert weekly.status_code == 201, weekly.text
+
+    bookings = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    starts = [b["start_at"] for b in bookings]
+    assert len(starts) == len(set(starts)), "ни одной недели не должно задвоиться"
+    # Обе прежние записи теперь в серии.
+    in_series = [b for b in bookings if b["recurring_series_id"] is not None]
+    assert len(in_series) == len(bookings)
+
+
+async def test_weekly_series_still_refuses_someone_elses_time(client: AsyncClient) -> None:
+    """Послабление касается только записи того же ученика в то же время."""
+    tutor = await _setup_tutor(client, "adopt-tutor3@example.com")
+    student = await _register(client, "adopt-student3@example.com", "student")
+    other = await _register(client, "adopt-student4@example.com", "student")
+    start_at = _next_weekday_datetime(0, 10)
+
+    resp = await client.post(
+        "/api/v1/bookings",
+        headers=other["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    weekly = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "student_id": student["user"]["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+            "end_at": (start_at + dt.timedelta(minutes=60)).isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+    assert weekly.status_code == 409
+    assert "Время пересекается с" in weekly.json()["detail"]
