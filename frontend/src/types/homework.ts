@@ -30,7 +30,8 @@ export interface StudentHomework {
   assignment_id: string;
   tutor_id: string;
   group_id: string | null;
-  title: string;
+  // Может быть пустым: задание бывает одной ссылкой, без названия.
+  title: string | null;
   content_type: string;
   content_url: string | null;
   content_file_path: string | null;

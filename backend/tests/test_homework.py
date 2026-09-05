@@ -360,6 +360,12 @@ async def test_title_is_optional(client: AsyncClient) -> None:
     assert resp.status_code == 201, resp.text
     assert resp.json()[0]["title"] is None
 
+    # Регрессия: список у ученика падал с 500 - в схеме ответа заголовок оставался
+    # обязательным, и задание без названия было невозможно показать.
+    mine = await client.get("/api/v1/homework/me", headers=student["headers"])
+    assert mine.status_code == 200, mine.text
+    assert mine.json()[0]["title"] is None
+
 
 async def test_create_sends_same_homework_to_multiple_students_and_a_group(client: AsyncClient) -> None:
     """Like addressing an email to several recipients at once - one submit creates

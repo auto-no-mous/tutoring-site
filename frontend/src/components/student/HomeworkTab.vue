@@ -38,7 +38,7 @@ onMounted(load);
     <p v-if="items.length === 0" class="text-sm text-slate-400">Домашних заданий пока нет.</p>
     <div v-for="item in items" :key="item.submission_id" class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
       <div class="flex items-center justify-between">
-        <div class="font-medium">{{ item.title }}</div>
+        <div class="font-medium">{{ item.title || "Без названия" }}</div>
         <span class="text-xs text-slate-500">{{ statusLabels[item.status] ?? item.status }}</span>
       </div>
       <div class="mt-1 flex gap-3 text-xs text-slate-500">

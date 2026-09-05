@@ -47,7 +47,10 @@ class StudentHomeworkOut(BaseModel):
     assignment_id: uuid.UUID
     tutor_id: uuid.UUID
     group_id: uuid.UUID | None
-    title: str
+    # Название необязательно с миграции afc6a11a104d: репетитор может задать домашку
+    # одной ссылкой. Здесь оно оставалось обязательным, и список домашних заданий у
+    # такого ученика падал с 500 вместо того, чтобы показать задание без заголовка.
+    title: str | None
     content_type: str
     content_url: str | None
     content_file_path: str | None
