@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter, type LocationQuery } from "vue-router";
 
 import { myMemberships } from "@/api/groups";
 import ChatPanel from "@/components/ChatPanel.vue";
@@ -21,6 +21,7 @@ import { useNotificationsStore } from "@/stores/notifications";
 const auth = useAuthStore();
 const notifications = useNotificationsStore();
 const route = useRoute();
+const router = useRouter();
 
 const tutorTabs = [
   { key: "bookings", label: "Занятия" },
@@ -67,6 +68,20 @@ watch(
     }
   },
 );
+
+// Обратная сторона: выбранная вкладка должна попадать в адрес. Пока её держало
+// только состояние компонента, обновление страницы возвращало на ту вкладку, с
+// которой в кабинет вошли по ссылке из меню (?tab=chat), а не на текущую.
+// replace, а не push: переключение вкладок - это не переход по страницам, и кнопка
+// "назад" должна возвращать туда, откуда пришли в кабинет, а не перебирать вкладки.
+watch(activeTab, (tab) => {
+  if (route.query.tab === tab) return;
+  const query: LocationQuery = { ...route.query, tab };
+  // Ссылка на конкретный диалог имеет смысл только вместе с чатом: на другой
+  // вкладке она ни на что не влияет, а при возврате в чат открыла бы старый тред.
+  if (tab !== "chat") delete query.thread;
+  router.replace({ query });
+});
 
 // Section-specific short name format: students show Фамилия + Имя (no patronymic),
 // tutors show Имя + Отчество (no surname, matches the catalog card format).
