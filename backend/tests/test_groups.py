@@ -1,4 +1,5 @@
 import datetime as dt
+from zoneinfo import ZoneInfo
 import uuid
 
 from httpx import AsyncClient
@@ -8,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.group import Group
 from app.models.notification import NotificationLog
 from app.models.system_notification import SystemNotification
+
+
+MSK = ZoneInfo("Europe/Moscow")
 
 
 async def _register(client: AsyncClient, email: str, role: str) -> dict:
@@ -583,3 +587,104 @@ async def test_public_groups_report_student_state(client: AsyncClient) -> None:
     # Репетитору эти поля не адресованы - он не может состоять в собственной группе.
     tutor_view = (await client.get(url, headers=tutor["headers"])).json()[0]
     assert tutor_view["is_member"] is False
+
+
+async def _occurrences(client: AsyncClient, group_id: str) -> list[dict]:
+    resp = await client.get(f"/api/v1/groups/{group_id}/occurrences")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def test_removed_schedule_slot_frees_the_time(client: AsyncClient) -> None:
+    """Снятый из расписания день не должен продолжать занимать время репетитора.
+
+    Раньше занятия, сгенерированные по этому дню, оставались в базе со статусом
+    scheduled, и запись на освободившееся время отбивалась сообщением
+    «пересекается с группой», хотя группы в это время уже не было.
+    """
+    tutor = await _setup_tutor_with_group(client, "stale-slot-tutor@example.com")
+    group_id = tutor["group"]["id"]
+
+    before = await _occurrences(client, group_id)
+    tuesday_slots = [o for o in before if o["start_at"]]
+    assert len(tuesday_slots) > 0
+    freed_start = before[0]["start_at"]
+
+    # Переносим группу на другой день недели - прежний день снимается.
+    resp = await client.put(
+        f"/api/v1/groups/{group_id}/schedule",
+        headers=tutor["headers"],
+        json=[{"weekday": 4, "start_time": "16:00:00"}],
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = await _occurrences(client, group_id)
+    assert all(o["start_at"] != freed_start for o in after)
+
+    start = dt.datetime.fromisoformat(freed_start.replace("Z", "+00:00"))
+    booking = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start.isoformat(),
+            "end_at": (start + dt.timedelta(minutes=90)).isoformat(),
+        },
+    )
+    assert booking.status_code == 201, booking.text
+
+
+async def test_schedule_edit_keeps_touched_and_remaining_occurrences(client: AsyncClient) -> None:
+    """Чистка касается только осиротевших занятий: перенесённое руками, занятие по
+    оставшемуся дню и добавленное вручную остаются на месте."""
+    tutor = await _setup_tutor_with_group(client, "stale-slot-tutor2@example.com")
+    group_id = tutor["group"]["id"]
+    # Группа создана на вторник и четверг (см. _setup_tutor_with_group).
+
+    occurrences = await _occurrences(client, group_id)
+    tuesday = [
+        o
+        for o in occurrences
+        if dt.datetime.fromisoformat(o["start_at"].replace("Z", "+00:00")).astimezone(MSK).weekday() == 1
+    ]
+    assert len(tuesday) >= 2
+
+    # Одно занятие понедельника репетитор переносит вручную.
+    moved_to = dt.datetime.fromisoformat(tuesday[0]["start_at"].replace("Z", "+00:00")) + dt.timedelta(hours=3)
+    resp = await client.patch(
+        f"/api/v1/groups/{group_id}/occurrences/{tuesday[0]['id']}",
+        headers=tutor["headers"],
+        json={"start_at": moved_to.isoformat(), "end_at": (moved_to + dt.timedelta(minutes=90)).isoformat()},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # И добавляет разовое занятие в субботу, которого в расписании нет вовсе.
+    extra_start = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=20)
+    extra = await client.post(
+        f"/api/v1/groups/{group_id}/occurrences",
+        headers=tutor["headers"],
+        json={
+            "start_at": extra_start.isoformat(),
+            "end_at": (extra_start + dt.timedelta(minutes=90)).isoformat(),
+        },
+    )
+    assert extra.status_code == 201, extra.text
+
+    # Снимаем вторник, четверг оставляем.
+    resp = await client.put(
+        f"/api/v1/groups/{group_id}/schedule",
+        headers=tutor["headers"],
+        json=[{"weekday": 3, "start_time": "18:00:00"}],
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = await _occurrences(client, group_id)
+    ids = {o["id"] for o in after}
+    assert tuesday[0]["id"] in ids, "перенесённое вручную занятие удалять нельзя"
+    assert extra.json()["id"] in ids, "разовое занятие вне расписания удалять нельзя"
+    assert any(
+        dt.datetime.fromisoformat(o["start_at"].replace("Z", "+00:00")).astimezone(MSK).weekday() == 3
+        for o in after
+    ), "занятия по оставшемуся дню должны остаться"
+    # А нетронутые занятия снятого вторника - ушли.
+    assert tuesday[1]["id"] not in ids

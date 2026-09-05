@@ -233,13 +233,80 @@ async def delete_group(db: AsyncSession, group: Group) -> None:
     await db.commit()
 
 
+async def _drop_occurrences_of_removed_slots(
+    db: AsyncSession, group: Group, removed_slots: set[tuple[int, dt.time]]
+) -> int:
+    """Убирает будущие занятия, оставшиеся от снятых дней расписания.
+
+    Занятия группы - производная от её недельного расписания, но живут отдельными
+    строками. Пока их не чистили, снятый из расписания день продолжал занимать время
+    репетитора: группы в этот день уже нет, а запись на это время отбивалась
+    сообщением «пересекается с группой».
+
+    Трогаем только то, что заведомо породило расписание и чего никто не касался:
+    будущее, ещё не отменённое, не перенесённое вручную (original_start_at) и без
+    отметок посещаемости. Занятия по оставшимся дням, прошедшие и правленые руками
+    остаются на месте.
+    """
+    if not removed_slots:
+        return 0
+
+    result = await db.execute(
+        select(GroupOccurrence).where(
+            GroupOccurrence.group_id == group.id,
+            GroupOccurrence.start_at >= utcnow(),
+            GroupOccurrence.status == GroupOccurrenceStatus.SCHEDULED.value,
+            GroupOccurrence.original_start_at.is_(None),
+        )
+    )
+    candidates = [
+        occurrence
+        for occurrence in result.scalars().all()
+        if (
+            ensure_aware(occurrence.start_at).astimezone(MSK).weekday(),
+            ensure_aware(occurrence.start_at).astimezone(MSK).time(),
+        )
+        in removed_slots
+    ]
+    if not candidates:
+        return 0
+
+    # Посещаемость на будущем занятии - редкость, но если она есть, значит его уже
+    # вели руками: такое не удаляем.
+    marked = await db.execute(
+        select(GroupAttendance.occurrence_id).where(
+            GroupAttendance.occurrence_id.in_([occurrence.id for occurrence in candidates])
+        )
+    )
+    marked_ids = set(marked.scalars().all())
+
+    removed = 0
+    for occurrence in candidates:
+        if occurrence.id in marked_ids:
+            continue
+        await db.delete(occurrence)
+        removed += 1
+    if removed:
+        await db.flush()
+    return removed
+
+
 async def replace_schedule(db: AsyncSession, group: Group, slots: list[GroupScheduleSlotIn]) -> Group:
+    # Слоты сравниваем до удаления: только так видно, какие дни репетитор снял, а
+    # значит и какие уже созданные занятия осиротели.
+    removed_slots = {(s.weekday, s.start_time) for s in group.schedule_slots} - {
+        (s.weekday, s.start_time) for s in slots
+    }
+
     for existing in list(group.schedule_slots):
         await db.delete(existing)
     await db.flush()
 
     for slot in slots:
         db.add(GroupSchedule(group_id=group.id, weekday=slot.weekday, start_time=slot.start_time))
+    await db.flush()
+
+    await _drop_occurrences_of_removed_slots(db, group, removed_slots)
     await db.commit()
 
     # populate_existing is required here: the session's identity map still holds
