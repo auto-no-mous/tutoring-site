@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.booking import Booking
 from app.models.enums import BookingOutcome, BookingStatus, HomeworkSubmissionStatus, UserRole
 from app.models.homework import HomeworkAssignment, HomeworkSubmission
-from app.models.student_note import TutorStudentNote
+from app.models.student_settings import TutorStudentSettings
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.schemas.student import ManagedStudentCreate, ManagedStudentUpdate
@@ -103,39 +103,88 @@ async def delete_managed_student(db: AsyncSession, tutor: TutorProfile, student_
     await db.commit()
 
 
+async def get_settings(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID
+) -> TutorStudentSettings | None:
+    result = await db.execute(
+        select(TutorStudentSettings).where(
+            TutorStudentSettings.tutor_id == tutor_id,
+            TutorStudentSettings.student_id == student_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_or_create_settings(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID
+) -> TutorStudentSettings:
+    settings = await get_settings(db, tutor_id, student_id)
+    if settings is None:
+        settings = TutorStudentSettings(tutor_id=tutor_id, student_id=student_id)
+        db.add(settings)
+        await db.flush()
+    return settings
+
+
+async def _drop_if_empty(db: AsyncSession, settings: TutorStudentSettings) -> None:
+    """Строка настроек нужна, только пока в ней что-то есть."""
+    if not settings.note and not settings.meeting_link:
+        await db.delete(settings)
+
+
 async def set_note(
     db: AsyncSession, tutor: TutorProfile, student_id: uuid.UUID, text: str | None
 ) -> None:
     """Заводит, меняет или (пустым текстом) убирает примечание об ученике."""
-    result = await db.execute(
-        select(TutorStudentNote).where(
-            TutorStudentNote.tutor_id == tutor.id, TutorStudentNote.student_id == student_id
-        )
-    )
-    note = result.scalar_one_or_none()
     cleaned = (text or "").strip()
+    settings = await get_settings(db, tutor.id, student_id)
 
-    if not cleaned:
-        if note is not None:
-            await db.delete(note)
-            await db.commit()
+    if settings is None:
+        if not cleaned:
+            return
+        db.add(TutorStudentSettings(tutor_id=tutor.id, student_id=student_id, note=cleaned))
+        await db.commit()
         return
 
-    if note is None:
-        db.add(TutorStudentNote(tutor_id=tutor.id, student_id=student_id, text=cleaned))
-    else:
-        note.text = cleaned
-        note.updated_at = utcnow()
+    settings.note = cleaned or None
+    settings.updated_at = utcnow()
+    await _drop_if_empty(db, settings)
     await db.commit()
+
+
+async def set_meeting_link(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID, link: str | None
+) -> None:
+    """Постоянная ссылка на занятие с этим учеником.
+
+    Хранится у пары, а не только в самих занятиях: занятия появляются и позже
+    (новая еженедельная серия, следующие недели, самостоятельная запись ученика), и
+    каждое из них должно получить ту же ссылку - см. booking_service.
+    """
+    cleaned = (link or "").strip() or None
+    settings = await get_or_create_settings(db, tutor_id, student_id)
+    settings.meeting_link = cleaned
+    settings.updated_at = utcnow()
+    await _drop_if_empty(db, settings)
+    await db.commit()
+
+
+async def get_meeting_link(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID | None
+) -> str | None:
+    if student_id is None:
+        return None
+    settings = await get_settings(db, tutor_id, student_id)
+    return settings.meeting_link if settings is not None else None
 
 
 async def _notes_map(db: AsyncSession, tutor_id: uuid.UUID) -> dict[uuid.UUID, str]:
     result = await db.execute(
-        select(TutorStudentNote.student_id, TutorStudentNote.text).where(
-            TutorStudentNote.tutor_id == tutor_id
+        select(TutorStudentSettings.student_id, TutorStudentSettings.note).where(
+            TutorStudentSettings.tutor_id == tutor_id, TutorStudentSettings.note.isnot(None)
         )
     )
-    return {student_id: text for student_id, text in result.all()}
+    return {student_id: note for student_id, note in result.all()}
 
 
 async def list_students_with_stats(db: AsyncSession, tutor: TutorProfile) -> list[dict]:

@@ -967,3 +967,132 @@ async def test_weekly_series_still_refuses_someone_elses_time(client: AsyncClien
     )
     assert weekly.status_code == 409
     assert "Время пересекается с" in weekly.json()["detail"]
+
+
+async def _set_permanent_link(client: AsyncClient, tutor: dict, booking_id: str, link: str) -> None:
+    resp = await client.patch(
+        f"/api/v1/bookings/{booking_id}",
+        headers=tutor["headers"],
+        json={"meeting_link": link, "apply_link_to_student": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_permanent_link_covers_lessons_created_later(client: AsyncClient) -> None:
+    """«Постоянная» ссылка должна оставаться постоянной.
+
+    Раньше она лишь раскладывалась по уже существующим занятиям: вторая еженедельная
+    серия (ученик занимается по средам и пятницам), следующие недели и записи, которые
+    ученик делает сам, появлялись без ссылки, и репетитор вводил её заново.
+    """
+    tutor = await _setup_tutor(client, "link-tutor1@example.com")
+    student = await _register(client, "link-student1@example.com", "student")
+    await client.put(
+        "/api/v1/tutors/me/availability",
+        headers=tutor["headers"],
+        json={"intervals": [
+            {"weekday": 0, "start_time": "09:00:00", "end_time": "20:00:00"},
+            {"weekday": 2, "start_time": "09:00:00", "end_time": "20:00:00"},
+        ]},
+    )
+
+    # Понедельничная серия и постоянная ссылка на ней.
+    monday = _next_weekday_datetime(0, 10)
+    first = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": monday.isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+    assert first.status_code == 201, first.text
+    await _set_permanent_link(client, tutor, first.json()["id"], "https://meet.example.com/room")
+
+    # Вторая серия - по средам, заведена уже после включения опции.
+    wednesday = _next_weekday_datetime(2, 10)
+    second = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "student_id": student["user"]["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": wednesday.isoformat(),
+            "end_at": (wednesday + dt.timedelta(minutes=60)).isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+    assert second.status_code == 201, second.text
+
+    bookings = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    with_student = [b for b in bookings if b["student_id"] == student["user"]["id"]]
+    assert len(with_student) > 2, "должны быть занятия обеих серий"
+    assert all(b["meeting_link"] == "https://meet.example.com/room" for b in with_student), (
+        "ссылка должна быть одинаковой у всех занятий с этим учеником"
+    )
+
+
+async def test_permanent_link_applies_to_students_new_booking(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "link-tutor2@example.com")
+    student = await _register(client, "link-student2@example.com", "student")
+
+    first_at = _next_weekday_datetime(0, 10)
+    first = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": first_at.isoformat(),
+        },
+    )
+    await _set_permanent_link(client, tutor, first.json()["id"], "https://meet.example.com/room")
+
+    # Ученик записывается сам уже после того, как ссылку сделали постоянной.
+    later = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": (first_at + dt.timedelta(weeks=2)).isoformat(),
+        },
+    )
+    assert later.status_code == 201, later.text
+    assert later.json()["meeting_link"] == "https://meet.example.com/room"
+
+
+async def test_link_without_the_checkbox_stays_on_one_lesson(client: AsyncClient) -> None:
+    """Без галочки ссылка разовая - и на будущие занятия не распространяется."""
+    tutor = await _setup_tutor(client, "link-tutor3@example.com")
+    student = await _register(client, "link-student3@example.com", "student")
+
+    first_at = _next_weekday_datetime(0, 10)
+    first = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": first_at.isoformat(),
+        },
+    )
+    resp = await client.patch(
+        f"/api/v1/bookings/{first.json()['id']}",
+        headers=tutor["headers"],
+        json={"meeting_link": "https://meet.example.com/once"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    later = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": (first_at + dt.timedelta(weeks=2)).isoformat(),
+        },
+    )
+    assert later.json()["meeting_link"] is None

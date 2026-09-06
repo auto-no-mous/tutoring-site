@@ -265,12 +265,42 @@ const upcoming = computed(() =>
     .filter((b) => b.status === "scheduled" && !isBeforeToday(b.start_at, MSK))
     .sort((a, b) => a.start_at.localeCompare(b.start_at)),
 );
-const past = computed(() =>
+// Расписание и история - два разных взгляда на одни и те же данные, и держать их на
+// одной странице значило заставлять пролистывать месяцы вперёд ради вчерашнего
+// занятия. Кнопка вверху переключает вид.
+const viewMode = ref<"schedule" | "history">("schedule");
+
+// По умолчанию показываем только состоявшиеся: за этим в историю и приходят -
+// проставить, что ученик не явился. Отменённые никуда не делись, они за фильтром.
+const HISTORY_FILTERS = [
+  { value: "conducted", label: "Состоявшиеся" },
+  { value: "cancelled", label: "Отменённые и перенесённые" },
+  { value: "all", label: "Все" },
+] as const;
+type HistoryFilter = (typeof HISTORY_FILTERS)[number]["value"];
+
+const historyFilter = ref<HistoryFilter>("conducted");
+const historyVisibleCount = ref(30);
+
+function isPast(booking: Booking): boolean {
+  return new Date(booking.end_at) < new Date();
+}
+
+const historyAll = computed(() =>
   bookings.value
-    .filter((b) => b.status !== "scheduled" || isBeforeToday(b.start_at, MSK))
-    .sort((a, b) => b.start_at.localeCompare(a.start_at))
-    .slice(0, 20),
+    // Блоки времени без ученика - не занятия, в истории им делать нечего.
+    .filter((b) => isPast(b) && !!b.student_id && !b.is_manual_block)
+    .filter((b) => {
+      if (historyFilter.value === "all") return true;
+      const held = b.status === "scheduled" || b.status === "completed";
+      return historyFilter.value === "conducted" ? held : !held;
+    })
+    // Сортировка по дате самого занятия, а не по статусу и не по дате действия:
+    // сверху то, что было вчера, а не отмена занятия, которое было бы через месяц.
+    .sort((a, b) => b.start_at.localeCompare(a.start_at)),
 );
+const history = computed(() => historyAll.value.slice(0, historyVisibleCount.value));
+const hasMoreHistory = computed(() => historyVisibleCount.value < historyAll.value.length);
 
 const weeks = computed(() => groupByWeekAndDay(upcoming.value, (b) => b.start_at, MSK));
 
@@ -414,9 +444,23 @@ onMounted(load);
 <template>
   <div class="flex max-w-2xl flex-col gap-6">
     <div>
-      <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700" @click="showForm = !showForm">
-        {{ showForm ? "Отмена" : "+ Резерв / запись вручную" }}
-      </button>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-if="viewMode === 'schedule'"
+          type="button"
+          class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+          @click="showForm = !showForm"
+        >
+          {{ showForm ? "Отмена" : "+ Резерв / запись вручную" }}
+        </button>
+        <button
+          type="button"
+          class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+          @click="viewMode = viewMode === 'history' ? 'schedule' : 'history'"
+        >
+          {{ viewMode === "history" ? "← К расписанию" : "История занятий" }}
+        </button>
+      </div>
       <form v-if="showForm" class="mt-3 flex flex-col gap-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800" @submit.prevent="createBlock()">
         <div class="flex flex-wrap items-end gap-2">
           <label class="flex flex-col gap-1 text-sm">
@@ -607,7 +651,7 @@ onMounted(load);
       <p v-if="error" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
     </div>
 
-    <section>
+    <section v-if="viewMode === 'schedule'">
       <BookingScheduleGroups :weeks="weeks">
         <template #default="{ item: booking }">
           <BookingCard
@@ -623,10 +667,43 @@ onMounted(load);
       </BookingScheduleGroups>
     </section>
 
-    <section>
-      <h2 class="text-lg font-medium">История</h2>
-      <div v-for="booking in past" :key="booking.id" class="mt-2 flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-500 dark:border-slate-800">
-        <div>{{ formatDateTimeWithMsk(booking.start_at) }} · {{ booking.student_display_name ?? "—" }}</div>
+    <section v-else>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-lg font-medium">История занятий</h2>
+        <div class="flex flex-wrap gap-1">
+          <button
+            v-for="option in HISTORY_FILTERS"
+            :key="option.value"
+            type="button"
+            class="rounded-md border px-2.5 py-1 text-xs transition-colors"
+            :class="
+              historyFilter === option.value
+                ? 'border-brand-500 bg-brand-50 font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'
+                : 'border-slate-300 text-slate-600 hover:border-brand-400 dark:border-slate-700 dark:text-slate-300'
+            "
+            @click="historyFilter = option.value"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+      </div>
+
+      <p v-if="history.length === 0" class="mt-3 text-sm text-slate-400">
+        Прошедших занятий нет.
+      </p>
+
+      <div
+        v-for="booking in history"
+        :key="booking.id"
+        class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800"
+      >
+        <div class="flex flex-col">
+          <span>{{ formatDateTimeWithMsk(booking.start_at) }}</span>
+          <span class="text-xs text-slate-500">
+            {{ booking.student_display_name ?? "—" }}
+            <template v-if="booking.lesson_type_name"> · {{ booking.lesson_type_name }}</template>
+          </span>
+        </div>
         <select
           v-if="isOutcomeEditable(booking)"
           :value="booking.outcome ?? 'conducted'"
@@ -635,8 +712,17 @@ onMounted(load);
         >
           <option v-for="opt in OUTCOME_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
         </select>
-        <div v-else>{{ pastStatusLabel(booking) }}</div>
+        <div v-else class="text-xs text-slate-500">{{ pastStatusLabel(booking) }}</div>
       </div>
+
+      <button
+        v-if="hasMoreHistory"
+        type="button"
+        class="mt-3 text-xs text-slate-500 underline"
+        @click="historyVisibleCount += 30"
+      >
+        Показать ещё
+      </button>
     </section>
 
     <RescheduleModal

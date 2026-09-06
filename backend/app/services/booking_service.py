@@ -20,7 +20,13 @@ from app.models.subject import TutorSubject, TutorSubjectDirection
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.schemas.booking import BookingTutorUpdate, ManualBookingCreate
-from app.services import notification_service, schedule_service, system_notification_service, tutor_service
+from app.services import (
+    notification_service,
+    schedule_service,
+    student_service,
+    system_notification_service,
+    tutor_service,
+)
 from app.services.schedule_service import MSK
 from app.utils.time import ensure_aware, utcnow
 
@@ -256,6 +262,10 @@ async def generate_recurring_occurrences(
     if tutor is None or lesson_type is None:
         return []
 
+    # Постоянная ссылка на занятие с этим учеником: спрашиваем один раз на всю
+    # серию, чтобы каждая новая неделя открывалась там же, где предыдущие.
+    pair_link = await student_service.get_meeting_link(db, series.tutor_id, series.student_id)
+
     created: list[Booking] = []
     # Занятия, которые уже были у этого ученика в это же время и теперь стали частью
     # серии: их не создаём заново, но сохранить изменение всё равно нужно.
@@ -302,6 +312,7 @@ async def generate_recurring_occurrences(
             status=BookingStatus.SCHEDULED.value,
             booked_by=initiated_by,
             recurring_series_id=series.id,
+            meeting_link=pair_link,
         )
         db.add(booking)
         created.append(booking)
@@ -336,6 +347,9 @@ async def create_student_booking(
         end_at=end_at,
         status=BookingStatus.SCHEDULED.value,
         booked_by=BookedBy.STUDENT.value,
+        # Репетитор мог однажды сделать ссылку постоянной - тогда она же и здесь,
+        # иначе ученик записался бы на занятие без ссылки.
+        meeting_link=await student_service.get_meeting_link(db, tutor_id, student.id),
     )
     db.add(booking)
     await db.commit()
@@ -563,7 +577,8 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
         status=BookingStatus.SCHEDULED.value,
         is_manual_block=payload.student_id is None,
         booked_by=BookedBy.TUTOR.value,
-        meeting_link=payload.meeting_link,
+        meeting_link=payload.meeting_link
+        or await student_service.get_meeting_link(db, tutor.id, payload.student_id),
         notes=payload.notes,
     )
     db.add(booking)
@@ -621,6 +636,12 @@ async def update_booking_by_tutor(db: AsyncSession, booking: Booking, payload: B
     await db.refresh(booking)
 
     if payload.apply_link_to_student and booking.student_id is not None and "meeting_link" in data:
+        # Запоминаем выбор у пары, а не только раскладываем по существующим занятиям:
+        # новая еженедельная серия, следующие недели и записи, которые ученик сделает
+        # сам, тоже должны открываться по этой ссылке.
+        await student_service.set_meeting_link(
+            db, booking.tutor_id, booking.student_id, booking.meeting_link
+        )
         result = await db.execute(
             select(Booking).where(
                 Booking.tutor_id == booking.tutor_id,

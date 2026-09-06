@@ -2,18 +2,23 @@
 import { onMounted, ref } from "vue";
 
 import { markDone, myHomework, uploadSubmission } from "@/api/homework";
+import FileDropZone from "@/components/FileDropZone.vue";
 import type { StudentHomework } from "@/types/homework";
+import { apiErrorMessage } from "@/utils/apiError";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
 const items = ref<StudentHomework[]>([]);
 const files = ref<Record<string, File | null>>({});
+const errors = ref<Record<string, string>>({});
+const busyId = ref<string | null>(null);
 
 async function load(): Promise<void> {
   items.value = await myHomework();
 }
 
-function onFileChange(submissionId: string, event: Event): void {
-  files.value[submissionId] = (event.target as HTMLInputElement).files?.[0] ?? null;
+function setFile(submissionId: string, file: File | null): void {
+  files.value = { ...files.value, [submissionId]: file };
+  errors.value = { ...errors.value, [submissionId]: "" };
 }
 
 async function complete(item: StudentHomework): Promise<void> {
@@ -24,8 +29,22 @@ async function complete(item: StudentHomework): Promise<void> {
 async function upload(item: StudentHomework): Promise<void> {
   const file = files.value[item.submission_id];
   if (!file) return;
-  await uploadSubmission(item.submission_id, file);
-  await load();
+  busyId.value = item.submission_id;
+  errors.value = { ...errors.value, [item.submission_id]: "" };
+  try {
+    await uploadSubmission(item.submission_id, file);
+    setFile(item.submission_id, null);
+    await load();
+  } catch (err) {
+    // Причину знает сервер: слишком большой файл или неподходящий тип. Раньше
+    // ошибка молча терялась, и ученик не понимал, отправилось ли что-нибудь.
+    errors.value = {
+      ...errors.value,
+      [item.submission_id]: apiErrorMessage(err, "Не удалось отправить файл"),
+    };
+  } finally {
+    busyId.value = null;
+  }
 }
 
 const statusLabels: Record<string, string> = { pending: "не выполнено", submitted: "отправлено", done: "выполнено" };
@@ -56,15 +75,25 @@ onMounted(load);
         >
           Отметить выполненным
         </button>
-        <div v-else class="flex items-center gap-2">
-          <input
-            type="file"
-            class="text-xs file:mr-2 file:rounded-md file:border-0 file:bg-brand-500 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
-            @change="onFileChange(item.submission_id, $event)"
+        <div v-else class="flex flex-col gap-2">
+          <FileDropZone
+            :model-value="files[item.submission_id] ?? null"
+            :disabled="busyId === item.submission_id"
+            @update:model-value="setFile(item.submission_id, $event)"
           />
-          <button type="button" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs text-white" @click="upload(item)">
-            Отправить
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              :disabled="!files[item.submission_id] || busyId === item.submission_id"
+              class="rounded-md bg-brand-500 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+              @click="upload(item)"
+            >
+              {{ busyId === item.submission_id ? "Отправляем…" : "Отправить" }}
+            </button>
+            <span v-if="errors[item.submission_id]" class="text-xs text-red-600 dark:text-red-400">
+              {{ errors[item.submission_id] }}
+            </span>
+          </div>
         </div>
       </div>
       <a v-else-if="item.file_path" :href="item.file_path" target="_blank" class="mt-2 block text-xs underline">Ваш файл</a>
