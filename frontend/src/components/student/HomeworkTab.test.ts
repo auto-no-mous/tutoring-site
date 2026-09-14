@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import HomeworkTab from "@/components/student/HomeworkTab.vue";
 
 const myHomework = vi.fn();
-const deleteSubmissionFile = vi.fn(async () => ({}));
-const uploadSubmission = vi.fn(async () => ({}));
+const deleteSubmissionFile = vi.fn(async (_submissionId: string, _fileId: string) => ({}));
+const uploadSubmission = vi.fn(async (_submissionId: string, _file: File) => ({}));
 
 vi.mock("@/api/homework", () => ({
   myHomework: () => myHomework(),

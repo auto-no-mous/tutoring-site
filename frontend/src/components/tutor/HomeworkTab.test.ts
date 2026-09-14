@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import HomeworkTab from "@/components/tutor/HomeworkTab.vue";
 
 const listMyAssignments = vi.fn();
-const setSubmissionStatus = vi.fn(async () => ({}));
-const deleteAssignment = vi.fn(async () => undefined);
+const setSubmissionStatus = vi.fn(async (_submissionId: string, _status: string) => ({}));
+const deleteAssignment = vi.fn(async (_assignmentId: string) => undefined);
 
 vi.mock("@/api/homework", () => ({
   listMyAssignments: () => listMyAssignments(),
