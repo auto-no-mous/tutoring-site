@@ -6,9 +6,10 @@ from httpx import AsyncClient
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.group import Group
+from app.models.group import Group, GroupOccurrence
 from app.models.notification import NotificationLog
 from app.models.system_notification import SystemNotification
+from app.services import group_service
 
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -688,3 +689,30 @@ async def test_schedule_edit_keeps_touched_and_remaining_occurrences(client: Asy
     ), "занятия по оставшемуся дню должны остаться"
     # А нетронутые занятия снятого вторника - ушли.
     assert tuesday[1]["id"] not in ids
+
+
+async def test_top_up_extends_group_occurrences(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Занятия группы тоже раскладывались один раз - и горизонт таял неделя за
+    неделей, пока впереди не оставалось пусто."""
+    tutor = await _setup_tutor_with_group(client, "group-topup@example.com")
+    group_id = uuid.UUID(tutor["group"]["id"])
+
+    result = await db_session.execute(
+        select(GroupOccurrence)
+        .where(GroupOccurrence.group_id == group_id)
+        .order_by(GroupOccurrence.start_at)
+    )
+    occurrences = list(result.scalars().all())
+    for occurrence in occurrences[2:]:
+        await db_session.delete(occurrence)
+    await db_session.commit()
+
+    stats = await group_service.top_up_occurrences(db_session)
+    assert stats["created"] > 0
+
+    restored = (
+        await db_session.execute(select(GroupOccurrence).where(GroupOccurrence.group_id == group_id))
+    ).scalars().all()
+    assert len(restored) == len(occurrences), "окно должно вернуться к прежней глубине"
+    starts = [o.start_at for o in restored]
+    assert len(starts) == len(set(starts))

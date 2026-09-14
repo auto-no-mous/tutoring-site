@@ -425,6 +425,28 @@ async def generate_occurrences(db: AsyncSession, group: Group, weeks_ahead: int 
     return created
 
 
+async def top_up_occurrences(db: AsyncSession) -> dict[str, int]:
+    """Держит у каждой активной группы OCCURRENCE_WEEKS_AHEAD недель занятий впереди.
+
+    Занятия группы, как и еженедельные занятия с учеником, рассчитывались один раз -
+    при создании группы или правке её расписания, - и горизонт с каждой неделей
+    сокращался. Запускается по расписанию (app.scripts.extend_schedules).
+    """
+    result = await db.execute(
+        # Слоты расписания читает generate_occurrences - в асинхронной сессии их
+        # надо загрузить сразу, ленивая подгрузка падает (MissingGreenlet).
+        select(Group).options(selectinload(Group.schedule_slots)).where(Group.is_active.is_(True))
+    )
+    groups = list(result.scalars().all())
+
+    stats = {"groups": len(groups), "created": 0}
+    for group in groups:
+        # generate_occurrences считает от сегодня и пропускает уже существующие
+        # недели, так что повторный запуск просто достраивает недостающий хвост.
+        stats["created"] += len(await generate_occurrences(db, group))
+    return stats
+
+
 async def list_occurrences(db: AsyncSession, group_id: uuid.UUID) -> list[GroupOccurrence]:
     result = await db.execute(
         select(GroupOccurrence).where(GroupOccurrence.group_id == group_id).order_by(GroupOccurrence.start_at)

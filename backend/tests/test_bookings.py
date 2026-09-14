@@ -6,8 +6,9 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.booking import RecurringSeries
+from app.models.booking import Booking, RecurringSeries
 from app.services import booking_service
+from app.utils.time import ensure_aware, utcnow
 
 MSK = ZoneInfo("Europe/Moscow")
 
@@ -1096,3 +1097,85 @@ async def test_link_without_the_checkbox_stays_on_one_lesson(client: AsyncClient
         },
     )
     assert later.json()["meeting_link"] is None
+
+
+async def _series_bookings(db_session: AsyncSession, series_id: uuid.UUID) -> list[Booking]:
+    result = await db_session.execute(
+        select(Booking).where(Booking.recurring_series_id == series_id).order_by(Booking.start_at)
+    )
+    return list(result.scalars().all())
+
+
+async def _create_weekly_series(client: AsyncClient, suffix: str) -> tuple[dict, dict, uuid.UUID]:
+    tutor = await _setup_tutor(client, f"topup-tutor{suffix}@example.com")
+    student = await _register(client, f"topup-student{suffix}@example.com", "student")
+    resp = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": _next_weekday_datetime(0, 10).isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return tutor, student, uuid.UUID(resp.json()["recurring_series_id"])
+
+
+async def test_top_up_restores_the_eight_week_horizon(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Занятия серии создавались один раз, и горизонт таял с каждой неделей: через два
+    месяца у ученика впереди не оставалось ничего, хотя серия активна."""
+    _, _, series_id = await _create_weekly_series(client, "1")
+
+    # Имитируем прожитые недели: оставляем только первые два занятия серии.
+    bookings = await _series_bookings(db_session, series_id)
+    for booking in bookings[2:]:
+        await db_session.delete(booking)
+    await db_session.commit()
+    horizon_before = ensure_aware((await _series_bookings(db_session, series_id))[-1].start_at)
+
+    stats = await booking_service.top_up_active_series(db_session)
+    assert stats["created"] > 0
+
+    after = await _series_bookings(db_session, series_id)
+    horizon_after = ensure_aware(after[-1].start_at)
+    assert horizon_after > horizon_before
+    expected = utcnow() + dt.timedelta(weeks=booking_service.RECURRING_WEEKS_AHEAD - 1)
+    assert horizon_after >= expected
+    # Ни одной сдвоенной недели и ни одного занятия не в свой день недели.
+    starts = [b.start_at for b in after]
+    assert len(starts) == len(set(starts))
+    assert {ensure_aware(s).astimezone(MSK).weekday() for s in starts} == {0}
+
+    # Повторный запуск ничего не добавляет - окно уже полное.
+    assert (await booking_service.top_up_active_series(db_session))["created"] == 0
+
+
+async def test_top_up_never_creates_lessons_in_the_past(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Серия могла простаивать месяцами: отсчёт идёт от ближайшей будущей недели, а не
+    от последнего занятия, иначе догоняющие записи появились бы задним числом."""
+    _, _, series_id = await _create_weekly_series(client, "2")
+
+    for booking in await _series_bookings(db_session, series_id):
+        booking.start_at = booking.start_at - dt.timedelta(weeks=12)
+        booking.end_at = booking.end_at - dt.timedelta(weeks=12)
+    await db_session.commit()
+
+    await booking_service.top_up_active_series(db_session)
+
+    now = utcnow()
+    created = [b for b in await _series_bookings(db_session, series_id) if ensure_aware(b.start_at) > now]
+    assert created, "серия должна продлиться вперёд"
+    assert {ensure_aware(b.start_at).astimezone(MSK).weekday() for b in created} == {0}
+
+
+async def test_top_up_leaves_stopped_series_alone(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, student, series_id = await _create_weekly_series(client, "3")
+    await client.post(f"/api/v1/bookings/series/{series_id}/stop", headers=student["headers"])
+
+    before = len(await _series_bookings(db_session, series_id))
+    stats = await booking_service.top_up_active_series(db_session)
+
+    assert stats["created"] == 0
+    assert len(await _series_bookings(db_session, series_id)) == before

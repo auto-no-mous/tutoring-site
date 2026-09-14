@@ -1,0 +1,11 @@
+[Unit]
+Description=Send my-tutor.ru lesson reminders every 10 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+# Persistent здесь не нужен: пропущенное напоминание догонять поздно, а окно
+# отправки в send_upcoming_reminders рассчитано ровно на этот интервал (+-10 минут).
+
+[Install]
+WantedBy=timers.target

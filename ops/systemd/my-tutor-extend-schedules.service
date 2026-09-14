@@ -1,0 +1,11 @@
+[Unit]
+Description=my-tutor.ru: extend weekly lessons and group sessions
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/my-tutor
+# exec, а не run: используем уже поднятый backend вместо нового контейнера на
+# каждый запуск - образ и окружение те же, что у работающего сайта.
+ExecStart=/usr/bin/docker compose exec -T backend python -m app.scripts.extend_schedules

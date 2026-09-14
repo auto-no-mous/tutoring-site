@@ -1,0 +1,9 @@
+[Unit]
+Description=my-tutor.ru: send upcoming-lesson reminders
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/my-tutor
+ExecStart=/usr/bin/docker compose exec -T backend python -m app.scripts.send_reminders

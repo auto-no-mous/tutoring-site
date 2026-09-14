@@ -252,8 +252,8 @@ async def generate_recurring_occurrences(
     longer available are silently skipped - the series has a gap rather than the whole
     generation failing.
 
-    A future periodic top-up job should anchor from the series' latest existing
-    occurrence instead of a fixed anchor_date, to keep extending the rolling window."""
+    Окно не держится само: продлевает его top_up_active_series ниже, запускаемая
+    по расписанию, - она и передаёт сюда anchor_date последнего занятия серии."""
     if not series.is_active:
         return []
 
@@ -322,6 +322,66 @@ async def generate_recurring_occurrences(
         for booking in created:
             await db.refresh(booking)
     return created
+
+
+async def top_up_active_series(db: AsyncSession) -> dict[str, int]:
+    """Продлевает каждую активную серию так, чтобы впереди снова было
+    RECURRING_WEEKS_AHEAD недель.
+
+    Зачем: занятия серии создаются один раз, в момент включения еженедельности, и
+    горизонт с каждой прошедшей неделей сокращался - через два месяца у ученика
+    впереди не оставалось ни одного занятия, хотя серия активна. Эта функция
+    запускается по расписанию (app.scripts.extend_schedules) и достраивает окно от
+    последнего существующего занятия серии, а не от даты её создания: иначе
+    пропущенные и перенесённые недели пересоздавались бы заново.
+
+    Прошедшие недели не создаются никогда: если серия простаивала (репетитор
+    вернулся к ней через месяц), отсчёт начинается с ближайшей будущей недели.
+    """
+    result = await db.execute(select(RecurringSeries).where(RecurringSeries.is_active.is_(True)))
+    series_list = list(result.scalars().all())
+
+    today_msk = utcnow().astimezone(MSK).date()
+    horizon = today_msk + dt.timedelta(weeks=RECURRING_WEEKS_AHEAD)
+    stats = {"series": len(series_list), "created": 0}
+
+    for series in series_list:
+        bookings = await db.execute(
+            select(Booking.start_at, Booking.booked_by)
+            .where(Booking.recurring_series_id == series.id)
+            .order_by(Booking.start_at)
+        )
+        rows = bookings.all()
+        if not rows:
+            # Серия без единого занятия - продлевать нечего, точки отсчёта нет.
+            continue
+
+        # Кем серия заведена, тем и продлевается: занятие репетитора не обязано
+        # попадать в его публичную сетку, а самостоятельная запись ученика - обязана.
+        initiated_by = rows[0].booked_by or BookedBy.TUTOR.value
+        anchor_date = ensure_aware(rows[-1].start_at).astimezone(MSK).date()
+
+        # Первая неделя, которая ещё не наступила: (today - anchor) может быть и
+        # отрицательной (занятия уже созданы вперёд), тогда смещение остаётся 1.
+        weeks_behind = (today_msk - anchor_date).days // 7
+        start_offset = max(1, weeks_behind + 1)
+        first_candidate = anchor_date + dt.timedelta(weeks=start_offset)
+        if first_candidate > horizon:
+            continue
+        weeks_ahead = (horizon - first_candidate).days // 7 + 1
+
+        created = await generate_recurring_occurrences(
+            db,
+            series,
+            initiated_by=initiated_by,
+            anchor_date=anchor_date,
+            weeks_ahead=weeks_ahead,
+            start_offset=start_offset,
+            enforce_schedule=initiated_by == BookedBy.STUDENT.value,
+        )
+        stats["created"] += len(created)
+
+    return stats
 
 
 async def create_student_booking(

@@ -1,0 +1,11 @@
+[Unit]
+Description=Extend my-tutor.ru weekly schedules daily
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+# Если сервер был выключен в назначенный час, запустить сразу после старта: окно
+# занятий не должно зависеть от аптайма.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
