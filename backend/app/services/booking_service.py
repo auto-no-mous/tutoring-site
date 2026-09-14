@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.booking import Booking, RecurringSeries
 from app.models.enums import (
     BookedBy,
@@ -31,6 +32,17 @@ from app.services.schedule_service import MSK
 from app.utils.time import ensure_aware, utcnow
 
 RECURRING_WEEKS_AHEAD = 8
+
+# Для текста уведомлений: в письме "вторник, 18:30" читается, а weekday=1 - нет.
+WEEKDAY_NAMES_MSK = (
+    "понедельник",
+    "вторник",
+    "среда",
+    "четверг",
+    "пятница",
+    "суббота",
+    "воскресенье",
+)
 
 
 def _fmt_date_time(moment: dt.datetime) -> tuple[str, str]:
@@ -343,7 +355,7 @@ async def top_up_active_series(db: AsyncSession) -> dict[str, int]:
 
     today_msk = utcnow().astimezone(MSK).date()
     horizon = today_msk + dt.timedelta(weeks=RECURRING_WEEKS_AHEAD)
-    stats = {"series": len(series_list), "created": 0}
+    stats = {"series": len(series_list), "created": 0, "stalled": 0}
 
     for series in series_list:
         bookings = await db.execute(
@@ -367,6 +379,10 @@ async def top_up_active_series(db: AsyncSession) -> dict[str, int]:
         start_offset = max(1, weeks_behind + 1)
         first_candidate = anchor_date + dt.timedelta(weeks=start_offset)
         if first_candidate > horizon:
+            # Окно и так полное - если серия раньше стояла, она уже расстоялась.
+            if series.stall_notified_at is not None:
+                series.stall_notified_at = None
+                await db.commit()
             continue
         weeks_ahead = (horizon - first_candidate).days // 7 + 1
 
@@ -381,7 +397,54 @@ async def top_up_active_series(db: AsyncSession) -> dict[str, int]:
         )
         stats["created"] += len(created)
 
+        # Сдвинулся ли горизонт - вопрос не только к созданным занятиям: неделю могла
+        # закрыть и запись ученика, которую серия забрала себе (см. adopted внутри
+        # generate_recurring_occurrences).
+        new_last = await db.scalar(
+            select(func.max(Booking.start_at)).where(Booking.recurring_series_id == series.id)
+        )
+        advanced = new_last is not None and ensure_aware(new_last).astimezone(MSK).date() > anchor_date
+
+        if advanced:
+            # Серия ожила - о следующей остановке нужно предупредить заново.
+            series.stall_notified_at = None
+        elif series.stall_notified_at is None:
+            await _warn_series_stalled(db, series)
+            series.stall_notified_at = utcnow()
+            stats["stalled"] += 1
+        await db.commit()
+
     return stats
+
+
+async def _warn_series_stalled(db: AsyncSession, series: RecurringSeries) -> None:
+    """Сообщает репетитору, что еженедельные занятия перестали продлеваться.
+
+    Без этого серия умирала тихо: время заняли другой записью, новые недели каждый
+    раз пропускались, и узнать об этом можно было, только заметив пустоту в
+    расписании через месяц.
+    """
+    tutor = await db.get(TutorProfile, series.tutor_id)
+    student = await db.get(User, series.student_id)
+    if tutor is None or student is None:
+        return
+
+    weekday = WEEKDAY_NAMES_MSK[series.weekday]
+    time_str = series.start_time.strftime("%H:%M")
+    body = (
+        f"Не удалось продлить еженедельные занятия с {student.display_name} "
+        f"({weekday}, {time_str}): это время уже занято другими записями. Перенесите "
+        f"занятия на свободное время или остановите повтор во вкладке «Занятия»."
+    )
+    await notification_service.notify_tutor(
+        db, series.tutor_id, NotificationEvent.RECURRING_SERIES_STALLED,
+        "Еженедельные занятия не продлеваются", body,
+    )
+    await system_notification_service.notify(
+        db, tutor.user_id, SystemNotificationEvent.RECURRING_SERIES_STALLED,
+        student_name=student.display_name, weekday=weekday, time=time_str,
+        bookings_url=f"{settings.frontend_base_url.rstrip('/')}/cabinet?tab=bookings",
+    )
 
 
 async def create_student_booking(

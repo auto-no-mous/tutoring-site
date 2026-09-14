@@ -3,10 +3,12 @@ import uuid
 from zoneinfo import ZoneInfo
 
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.booking import Booking, RecurringSeries
+from app.models.enums import SystemNotificationEvent
+from app.models.system_notification import SystemNotification
 from app.services import booking_service
 from app.utils.time import ensure_aware, utcnow
 
@@ -1179,3 +1181,70 @@ async def test_top_up_leaves_stopped_series_alone(client: AsyncClient, db_sessio
 
     assert stats["created"] == 0
     assert len(await _series_bookings(db_session, series_id)) == before
+
+
+async def test_top_up_warns_the_tutor_once_when_a_series_cannot_extend(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Серия, которой некуда расти, умирала тихо: недели пропускались каждый день, и
+    заметить это можно было, только увидев пустое расписание через месяц."""
+    tutor, _, series_id = await _create_weekly_series(client, "4")
+
+    bookings = await _series_bookings(db_session, series_id)
+    for booking in bookings[1:]:
+        await db_session.delete(booking)
+    await db_session.commit()
+
+    # Репетитор убрал этот день из расписания - самостоятельная запись ученика в него
+    # больше не попадает, и продлевать серию некуда.
+    await client.put(
+        "/api/v1/tutors/me/availability",
+        headers=tutor["headers"],
+        json={"intervals": [{"weekday": 2, "start_time": "09:00:00", "end_time": "20:00:00"}]},
+    )
+
+    stats = await booking_service.top_up_active_series(db_session)
+    assert stats["created"] == 0
+    assert stats["stalled"] == 1
+
+    tutor_user_id = uuid.UUID(tutor["user"]["id"])
+    notifications = (
+        await db_session.execute(
+            select(SystemNotification).where(
+                SystemNotification.user_id == tutor_user_id,
+                SystemNotification.event_type == SystemNotificationEvent.RECURRING_SERIES_STALLED.value,
+            )
+        )
+    ).scalars().all()
+    assert len(notifications) == 1
+    # Серия заведена на понедельник - день и время должны быть в тексте.
+    assert "понедельник" in notifications[0].body
+    assert "10:00" in notifications[0].body
+
+    # Следующий прогон (задача ежедневная) не повторяет то же самое уведомление.
+    await booking_service.top_up_active_series(db_session)
+    repeated = await db_session.execute(
+        select(func.count())
+        .select_from(SystemNotification)
+        .where(
+            SystemNotification.user_id == tutor_user_id,
+            SystemNotification.event_type == SystemNotificationEvent.RECURRING_SERIES_STALLED.value,
+        )
+    )
+    assert repeated.scalar_one() == 1
+
+    # Время вернули в расписание - серия продолжается, и предупредить о следующей
+    # остановке можно снова.
+    await client.put(
+        "/api/v1/tutors/me/availability",
+        headers=tutor["headers"],
+        json={"intervals": [{"weekday": 0, "start_time": "09:00:00", "end_time": "20:00:00"}]},
+    )
+    stats = await booking_service.top_up_active_series(db_session)
+    assert stats["created"] > 0
+
+    series = (
+        await db_session.execute(select(RecurringSeries).where(RecurringSeries.id == series_id))
+    ).scalar_one()
+    await db_session.refresh(series)
+    assert series.stall_notified_at is None

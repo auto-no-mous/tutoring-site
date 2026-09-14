@@ -120,6 +120,12 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
         "Скоро занятие",
         "Через {lead_minutes} мин ({time}) у вас занятие с репетитором {tutor_name}.",
     ),
+    (SystemNotificationEvent.RECURRING_SERIES_STALLED, UserRole.TUTOR): (
+        "Еженедельные занятия не продлеваются",
+        "Не удалось продлить еженедельные занятия с {student_name} ({weekday}, {time}): "
+        "это время уже занято другими записями. Перенесите занятия на свободное время "
+        "или остановите повтор во вкладке «Занятия»: {bookings_url}",
+    ),
     (SystemNotificationEvent.PASSWORD_CHANGED_BY_ADMIN, UserRole.TUTOR): (
         "Пароль изменён администратором",
         "Здравствуйте, {name}! Администратор сайта задал новый пароль для вашего аккаунта, "

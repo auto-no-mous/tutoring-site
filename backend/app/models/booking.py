@@ -29,6 +29,10 @@ class RecurringSeries(UUIDPKMixin, TimestampMixin, Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Когда репетитору сообщили, что серия перестала продлеваться (время занято).
+    # Хранится, чтобы ежедневное продление не слало одно и то же письмо каждый день;
+    # сбрасывается, как только серия снова смогла создать занятие.
+    stall_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     bookings: Mapped[list["Booking"]] = relationship(back_populates="recurring_series")
 

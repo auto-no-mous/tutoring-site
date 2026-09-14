@@ -104,6 +104,7 @@ class NotificationEvent(StrEnum):
     SCHEDULE_CHANGE = "schedule_change"
     GROUP_APPLICATION = "group_application"
     GROUP_WITHDRAWAL = "group_withdrawal"
+    RECURRING_SERIES_STALLED = "recurring_series_stalled"
     NEW_MESSAGE = "new_message"
     OTHER = "other"
 
@@ -152,6 +153,9 @@ class SystemNotificationEvent(StrEnum):
     GROUP_APPLICATION_REJECTED = "group_application_rejected"
     HOMEWORK_ASSIGNED = "homework_assigned"
     UPCOMING_LESSON_REMINDER = "upcoming_lesson_reminder"
+    # Еженедельные занятия перестали продлеваться: время занято или выпало из
+    # расписания. Иначе серия умирала молча - см. booking_service.top_up_active_series.
+    RECURRING_SERIES_STALLED = "recurring_series_stalled"
     PASSWORD_CHANGED_BY_ADMIN = "password_changed_by_admin"
 
 
