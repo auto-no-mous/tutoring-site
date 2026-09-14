@@ -24,6 +24,7 @@ from app.schemas.student import (
     ClaimLinkOut,
     ManagedStudentCreate,
     ManagedStudentUpdate,
+    StudentMeetingLinkUpdate,
     StudentNoteUpdate,
     TutorStudentStatsOut,
 )
@@ -63,6 +64,7 @@ def _to_student_stats(student: User, note: str | None = None) -> TutorStudentSta
         is_managed=student.is_managed,
         has_login=bool(student.auth_providers),
         note=note,
+        meeting_link=None,
         lessons_held=0,
         no_shows=0,
         last_lesson_at=None,
@@ -272,6 +274,20 @@ async def set_student_note(
     _require_tutor(current_user)
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     await student_service.set_note(db, profile, student_id, payload.text)
+
+
+@router.put("/me/students/{student_id}/meeting-link", status_code=status.HTTP_204_NO_CONTENT)
+async def set_student_meeting_link(
+    student_id: uuid.UUID,
+    payload: StudentMeetingLinkUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> None:
+    """Задать или снять постоянную ссылку на занятие с этим учеником - то же самое,
+    что галочка в карточке занятия, но из списка учеников."""
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    await booking_service.apply_meeting_link_to_student(db, profile.id, student_id, payload.url)
 
 
 @router.post("/me/students/{student_id}/claim-link", response_model=ClaimLinkOut)

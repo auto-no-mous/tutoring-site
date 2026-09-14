@@ -58,11 +58,6 @@ export async function listMyAssignments() {
   return data;
 }
 
-export async function listSubmissions(assignmentId: string) {
-  const { data } = await apiClient.get<HomeworkSubmission[]>(`/homework/${assignmentId}/submissions`);
-  return data;
-}
-
 export async function deleteAssignment(assignmentId: string) {
   await apiClient.delete(`/homework/${assignmentId}`);
 }
@@ -82,6 +77,13 @@ export async function uploadSubmission(submissionId: string, file: File, comment
   form.append("file", file);
   if (comment) form.append("comment", comment);
   const { data } = await apiClient.post<HomeworkSubmission>(`/homework/submissions/${submissionId}/upload`, form);
+  return data;
+}
+
+export async function deleteSubmissionFile(submissionId: string, fileId: string) {
+  const { data } = await apiClient.delete<HomeworkSubmission>(
+    `/homework/submissions/${submissionId}/files/${fileId}`,
+  );
   return data;
 }
 

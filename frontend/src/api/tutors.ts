@@ -185,6 +185,8 @@ export interface TutorStudentStats {
   is_managed: boolean;
   has_login: boolean;
   note: string | null;
+  // Постоянная ссылка на занятие с этим учеником, если репетитор её задавал.
+  meeting_link: string | null;
   lessons_held: number;
   no_shows: number;
   last_lesson_at: string | null;
@@ -221,6 +223,12 @@ export async function updateManagedStudent(studentId: string, payload: ManagedSt
 
 export async function deleteManagedStudent(studentId: string) {
   await apiClient.delete(`/tutors/me/students/${studentId}`);
+}
+
+/** Постоянная ссылка на занятие с учеником: сохраняется у пары и раскладывается по
+ * всем его запланированным занятиям. Пустая строка снимает ссылку. */
+export async function setStudentMeetingLink(studentId: string, url: string | null) {
+  await apiClient.put(`/tutors/me/students/${studentId}/meeting-link`, { url: url || null });
 }
 
 export async function setStudentNote(studentId: string, text: string) {

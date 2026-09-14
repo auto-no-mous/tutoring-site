@@ -178,13 +178,18 @@ async def get_meeting_link(
     return settings.meeting_link if settings is not None else None
 
 
-async def _notes_map(db: AsyncSession, tutor_id: uuid.UUID) -> dict[uuid.UUID, str]:
+async def _settings_map(
+    db: AsyncSession, tutor_id: uuid.UUID
+) -> dict[uuid.UUID, tuple[str | None, str | None]]:
+    """(заметка, постоянная ссылка на занятие) по каждому ученику этого репетитора."""
     result = await db.execute(
-        select(TutorStudentSettings.student_id, TutorStudentSettings.note).where(
-            TutorStudentSettings.tutor_id == tutor_id, TutorStudentSettings.note.isnot(None)
-        )
+        select(
+            TutorStudentSettings.student_id,
+            TutorStudentSettings.note,
+            TutorStudentSettings.meeting_link,
+        ).where(TutorStudentSettings.tutor_id == tutor_id)
     )
-    return {student_id: note for student_id, note in result.all()}
+    return {student_id: (note, link) for student_id, note, link in result.all()}
 
 
 async def list_students_with_stats(db: AsyncSession, tutor: TutorProfile) -> list[dict]:
@@ -243,7 +248,7 @@ async def list_students_with_stats(db: AsyncSession, tutor: TutorProfile) -> lis
     no_show_map = {row.student_id: row.no_shows for row in (await db.execute(no_shows)).all()}
     next_map = {row.student_id: row.next_at for row in (await db.execute(upcoming)).all()}
     homework_map = {row.student_id: (row.done, row.pending) for row in (await db.execute(homework)).all()}
-    notes = await _notes_map(db, tutor.id)
+    settings = await _settings_map(db, tutor.id)
 
     student_ids = set(held_map) | set(no_show_map) | set(next_map) | set(homework_map)
     result = await db.execute(
@@ -271,7 +276,10 @@ async def list_students_with_stats(db: AsyncSession, tutor: TutorProfile) -> lis
                 # Ученик, заведённый вручную, но уже забравший аккаунт, выглядит как
                 # обычный - показываем только сам факт наличия входа.
                 "has_login": bool(student.auth_providers),
-                "note": notes.get(student.id),
+                "note": settings.get(student.id, (None, None))[0],
+                # Постоянная ссылка на занятие с этим учеником - та же, что стоит в
+                # карточках его занятий (см. booking_service).
+                "meeting_link": settings.get(student.id, (None, None))[1],
                 "lessons_held": held,
                 "no_shows": no_show_map.get(student.id, 0),
                 "last_lesson_at": last_at,

@@ -440,3 +440,59 @@ async def test_tutor_can_stop_series_of_managed_student(client: AsyncClient) -> 
     assert resp.status_code == 200, resp.text
     assert resp.json()["is_active"] is False
     assert (await client.get("/api/v1/bookings/series/tutor", headers=tutor["headers"])).json() == []
+
+
+async def test_tutor_sets_permanent_link_from_the_students_list(client: AsyncClient) -> None:
+    """Ту же постоянную ссылку можно задать из списка учеников, а не только галочкой
+    в карточке занятия."""
+    tutor = await _register(client, "link-list-tutor@example.com", "tutor")
+    student = await _create_student(client, tutor)
+
+    start = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=1)
+    booking = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "student_id": student["id"],
+            "start_at": start.isoformat(),
+            "end_at": (start + dt.timedelta(minutes=60)).isoformat(),
+        },
+    )
+    assert booking.status_code == 201, booking.text
+
+    resp = await client.put(
+        f"/api/v1/tutors/me/students/{student['id']}/meeting-link",
+        headers=tutor["headers"],
+        json={"url": "https://meet.example.com/room"},
+    )
+    assert resp.status_code == 204, resp.text
+
+    # Ссылка видна в списке учеников и доехала до уже назначенного занятия.
+    rows = (await client.get("/api/v1/tutors/me/students/stats", headers=tutor["headers"])).json()
+    assert rows[0]["meeting_link"] == "https://meet.example.com/room"
+    bookings = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    assert bookings[0]["meeting_link"] == "https://meet.example.com/room"
+
+    # Пустое значение снимает её отовсюду.
+    resp = await client.put(
+        f"/api/v1/tutors/me/students/{student['id']}/meeting-link",
+        headers=tutor["headers"],
+        json={"url": None},
+    )
+    assert resp.status_code == 204, resp.text
+    rows = (await client.get("/api/v1/tutors/me/students/stats", headers=tutor["headers"])).json()
+    assert rows[0]["meeting_link"] is None
+    bookings = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    assert bookings[0]["meeting_link"] is None
+
+
+async def test_permanent_link_endpoint_rejects_unsafe_url(client: AsyncClient) -> None:
+    tutor = await _register(client, "link-list-tutor2@example.com", "tutor")
+    student = await _create_student(client, tutor)
+
+    resp = await client.put(
+        f"/api/v1/tutors/me/students/{student['id']}/meeting-link",
+        headers=tutor["headers"],
+        json={"url": "javascript:alert(1)"},
+    )
+    assert resp.status_code == 422

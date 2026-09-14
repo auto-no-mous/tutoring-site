@@ -22,7 +22,7 @@ describe("useNotificationsStore", () => {
   });
 
   it("aggregates chat and system unread counts from the summary endpoint", async () => {
-    mockedGetUnreadSummary.mockResolvedValue({ chat_unread: 2, system_unread: 3, total: 5 });
+    mockedGetUnreadSummary.mockResolvedValue({ chat_unread: 2, system_unread: 3, total: 5, homework_pending: 4 });
     const store = useNotificationsStore();
 
     await store.refresh();
@@ -30,10 +30,13 @@ describe("useNotificationsStore", () => {
     expect(store.chatUnread).toBe(2);
     expect(store.systemUnread).toBe(3);
     expect(store.total).toBe(5);
+    // Невыполненные ДЗ живут отдельным бейджем у вкладки «ДЗ» и в общий счётчик
+    // на аватаре не входят.
+    expect(store.homeworkPending).toBe(4);
   });
 
   it("leaves existing counts untouched if the request fails (e.g. logged out)", async () => {
-    mockedGetUnreadSummary.mockResolvedValueOnce({ chat_unread: 1, system_unread: 1, total: 2 });
+    mockedGetUnreadSummary.mockResolvedValueOnce({ chat_unread: 1, system_unread: 1, total: 2, homework_pending: 0 });
     const store = useNotificationsStore();
     await store.refresh();
     expect(store.total).toBe(2);
@@ -44,7 +47,7 @@ describe("useNotificationsStore", () => {
   });
 
   it("polls on an interval while started, and stops (resetting counts) when stopped", async () => {
-    mockedGetUnreadSummary.mockResolvedValue({ chat_unread: 1, system_unread: 0, total: 1 });
+    mockedGetUnreadSummary.mockResolvedValue({ chat_unread: 1, system_unread: 0, total: 1, homework_pending: 0 });
     const store = useNotificationsStore();
 
     store.startPolling();

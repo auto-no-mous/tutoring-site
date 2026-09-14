@@ -8,14 +8,22 @@ import {
   deleteAssignment,
   duplicateHomework,
   listMyAssignments,
-  listSubmissions,
+  setSubmissionStatus,
   updateHomework,
 } from "@/api/homework";
 import { getMyStudents } from "@/api/tutors";
+import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
 import HomeworkRecipientPicker from "@/components/tutor/HomeworkRecipientPicker.vue";
+import { useNotificationsStore } from "@/stores/notifications";
 import type { Group } from "@/types/group";
 import type { HomeworkAssignment, HomeworkSubmission } from "@/types/homework";
 import type { TutorStudent } from "@/types/tutor";
+import {
+  HOMEWORK_STATUS_OPTIONS,
+  homeworkCardClass,
+  homeworkStatusLabel,
+  homeworkStatusTextClass,
+} from "@/utils/homework";
 import { formatDate, formatDateTimeWithMsk } from "@/utils/time";
 
 const SUBMISSION_MODES: { value: "mark_done" | "file_upload"; label: string }[] = [
@@ -23,10 +31,11 @@ const SUBMISSION_MODES: { value: "mark_done" | "file_upload"; label: string }[] 
   { value: "file_upload", label: "Загрузить файл" },
 ];
 
+const notifications = useNotificationsStore();
+
 const assignments = ref<HomeworkAssignment[]>([]);
 const groups = ref<Group[]>([]);
 const students = ref<TutorStudent[]>([]);
-const submissionsByAssignment = ref<Record<string, HomeworkSubmission[]>>({});
 
 async function load(): Promise<void> {
   const [assignmentsData, groupsData, studentsData] = await Promise.all([
@@ -199,7 +208,7 @@ async function submitDuplicate(): Promise<void> {
 
 const showFilters = ref(false);
 const filterStudentId = ref("");
-const filterStatus = ref<"all" | "pending" | "done">("all");
+const filterStatus = ref<"all" | "pending" | "submitted" | "done">("all");
 const filterDateFrom = ref("");
 const filterDateTo = ref("");
 
@@ -225,12 +234,11 @@ const filteredAssignments = computed(() => {
   });
 });
 
-async function toggleSubmissions(assignmentId: string): Promise<void> {
-  if (submissionsByAssignment.value[assignmentId]) {
-    delete submissionsByAssignment.value[assignmentId];
-    return;
-  }
-  submissionsByAssignment.value[assignmentId] = await listSubmissions(assignmentId);
+async function changeStatus(submission: HomeworkSubmission, event: Event): Promise<void> {
+  await setSubmissionStatus(submission.id, (event.target as HTMLSelectElement).value);
+  await load();
+  // Бейдж у вкладки «ДЗ» считает непроверенные работы - гасим его сразу.
+  notifications.refresh();
 }
 
 async function remove(assignmentId: string): Promise<void> {
@@ -333,8 +341,7 @@ onMounted(load);
           Статус
           <select v-model="filterStatus" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700">
             <option value="all">Все</option>
-            <option value="done">Выполнено</option>
-            <option value="pending">Не выполнено</option>
+            <option v-for="opt in HOMEWORK_STATUS_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
           </select>
         </label>
         <label class="flex flex-col gap-1">
@@ -352,22 +359,24 @@ onMounted(load);
     <div class="flex flex-col gap-2">
       <p v-if="assignments.length === 0" class="text-sm text-slate-400">Заданий пока нет.</p>
       <p v-else-if="filteredAssignments.length === 0" class="text-sm text-slate-400">Ничего не найдено по выбранным фильтрам.</p>
-      <div v-for="assignment in filteredAssignments" :key="assignment.id" class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
+      <!-- Карточка та же, что в окне «ДЗ · ученик»: материал, срок, сдачи учеников с
+           их файлами и переключателем статуса - плюс дата выдачи и правка задания. -->
+      <div
+        v-for="assignment in filteredAssignments"
+        :key="assignment.id"
+        :data-status="assignment.status"
+        class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800"
+        :class="homeworkCardClass(assignment.status)"
+      >
         <div class="flex items-start justify-between gap-2">
           <div>
             <div class="font-medium">{{ assignment.title || "Без названия" }}</div>
-            <div class="text-slate-500">
+            <div class="text-xs text-slate-500">
               {{ recipientLabel(assignment) }} · {{ submissionModeLabel(assignment.submission_mode) }} ·
-              <span :class="assignment.status === 'done' ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'">
-                {{ assignment.status === "done" ? "выполнено" : "не выполнено" }}
-              </span>
+              <span :class="homeworkStatusTextClass(assignment.status)">{{ homeworkStatusLabel(assignment.status) }}</span>
             </div>
-            <div class="text-xs text-slate-400">Выдано {{ formatDate(assignment.created_at) }}</div>
           </div>
           <div class="flex shrink-0 gap-1.5">
-            <button type="button" title="Сдачи" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="toggleSubmissions(assignment.id)">
-              Сдачи
-            </button>
             <button type="button" title="Изменить" class="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700" @click="openEdit(assignment)">
               ✏️
             </button>
@@ -379,13 +388,33 @@ onMounted(load);
             </button>
           </div>
         </div>
-        <div v-if="submissionsByAssignment[assignment.id]" class="mt-2 flex flex-col gap-1 border-t border-slate-200 pt-2 dark:border-slate-800">
-          <div v-for="submission in submissionsByAssignment[assignment.id]" :key="submission.id" class="flex items-center justify-between text-xs">
-            <span>{{ submission.student_id }}</span>
-            <span>
-              {{ submission.status }}
-              <template v-if="submission.submitted_at"> · {{ formatDateTimeWithMsk(submission.submitted_at) }}</template>
-            </span>
+
+        <div class="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
+          <a v-if="assignment.content_url" :href="assignment.content_url" target="_blank" class="underline">Материал (ссылка)</a>
+          <a v-if="assignment.content_file_path" :href="assignment.content_file_path" target="_blank" class="underline">Материал (файл)</a>
+          <span>Выдано {{ formatDate(assignment.created_at) }}</span>
+          <span v-if="assignment.due_at">Срок: {{ formatDateTimeWithMsk(assignment.due_at) }}</span>
+        </div>
+
+        <div
+          v-if="assignment.submissions.length > 0"
+          class="mt-2 flex flex-col gap-2 border-t border-slate-200 pt-2 dark:border-slate-800"
+        >
+          <div v-for="submission in assignment.submissions" :key="submission.id" class="flex flex-col gap-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs">{{ submission.student_display_name || "Ученик" }}</span>
+              <select
+                :value="submission.status"
+                class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
+                @change="changeStatus(submission, $event)"
+              >
+                <option v-for="opt in HOMEWORK_STATUS_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+            <HomeworkFiles v-if="submission.files.length > 0" :files="submission.files" />
+            <div v-else-if="submission.status !== 'pending'" class="text-xs text-slate-400">
+              Статус изменён вручную{{ submission.submitted_at ? ` · ${formatDateTimeWithMsk(submission.submitted_at)}` : "" }}
+            </div>
           </div>
         </div>
       </div>

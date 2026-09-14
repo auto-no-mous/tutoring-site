@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.api.deps import CurrentUser, DbSession
 from app.schemas.notification import SystemNotificationOut, UnreadSummaryOut
-from app.services import chat_service, system_notification_service
+from app.services import chat_service, homework_service, system_notification_service
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -23,4 +23,12 @@ async def mark_system_notifications_read(current_user: CurrentUser, db: DbSessio
 async def unread_summary(current_user: CurrentUser, db: DbSession) -> UnreadSummaryOut:
     chat_unread = await chat_service.get_total_unread_for_user(db, current_user)
     system_unread = await system_notification_service.unread_count(db, current_user.id)
-    return UnreadSummaryOut(chat_unread=chat_unread, system_unread=system_unread, total=chat_unread + system_unread)
+    # Домашка считается здесь же: бейдж рядом с «ДЗ» обновляется тем же опросом, что
+    # и счётчик чата, лишний запрос каждые 15 секунд ради него не нужен.
+    homework_pending = await homework_service.pending_count_for_user(db, current_user)
+    return UnreadSummaryOut(
+        chat_unread=chat_unread,
+        system_unread=system_unread,
+        homework_pending=homework_pending,
+        total=chat_unread + system_unread,
+    )

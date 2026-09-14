@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
 from app.models.enums import HomeworkContentType, HomeworkSubmissionMode, HomeworkSubmissionStatus
+from app.utils.time import utcnow
 
 
 class HomeworkAssignment(UUIDPKMixin, TimestampMixin, Base):
@@ -40,7 +41,11 @@ class HomeworkAssignment(UUIDPKMixin, TimestampMixin, Base):
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     submissions: Mapped[list["HomeworkSubmission"]] = relationship(
-        back_populates="assignment", cascade="all, delete-orphan"
+        back_populates="assignment",
+        cascade="all, delete-orphan",
+        # Сдачи читаются вместе с заданием (карточка во вкладке «ДЗ» показывает их
+        # сразу), а ленивая подгрузка в async-сессии падает (MissingGreenlet).
+        lazy="selectin",
     )
 
 
@@ -56,8 +61,35 @@ class HomeworkSubmission(UUIDPKMixin, TimestampMixin, Base):
     )
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     status: Mapped[str] = mapped_column(String(16), default=HomeworkSubmissionStatus.PENDING.value)
-    file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     assignment: Mapped["HomeworkAssignment"] = relationship(back_populates="submissions")
+    files: Mapped[list["HomeworkSubmissionFile"]] = relationship(
+        back_populates="submission",
+        cascade="all, delete-orphan",
+        order_by="HomeworkSubmissionFile.uploaded_at",
+        # Файлы читаются вместе со сдачей везде, где её показывают, а ленивая
+        # подгрузка в async-сессии падает (MissingGreenlet).
+        lazy="selectin",
+    )
+
+
+class HomeworkSubmissionFile(UUIDPKMixin, Base):
+    """Файл, приложенный учеником к сдаче.
+
+    Отдельная таблица, а не одна колонка: ученик прикладывает скриншот, замечает, что
+    приложил не тот, и должен иметь возможность добавить ещё один или убрать лишний.
+    Пока файл был единственным полем, ошибочный скриншот оставался единственным
+    свидетельством выполнения.
+    """
+
+    __tablename__ = "homework_submission_files"
+
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("homework_submissions.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    file_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    submission: Mapped["HomeworkSubmission"] = relationship(back_populates="files")

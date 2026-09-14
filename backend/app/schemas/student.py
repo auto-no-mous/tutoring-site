@@ -3,7 +3,7 @@ import uuid
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.schemas.auth import TokenPair
-from app.schemas.common import UTCDateTime
+from app.schemas.common import ProfileUrl, UTCDateTime
 from app.schemas.user import UserOut
 
 
@@ -25,6 +25,13 @@ class ManagedStudentUpdate(BaseModel):
     grade: int | None = Field(default=None, ge=1, le=11)
 
 
+class StudentMeetingLinkUpdate(BaseModel):
+    """Постоянная ссылка на занятие с учеником. Пустое значение снимает её."""
+
+    # ProfileUrl, как и остальные ссылки, которые рендерятся как <a href>.
+    url: ProfileUrl | None = None
+
+
 class StudentNoteUpdate(BaseModel):
     # Пустая строка убирает примечание - отдельной ручки удаления не нужно.
     text: str = Field(default="", max_length=2000)
@@ -44,6 +51,8 @@ class TutorStudentStatsOut(BaseModel):
     is_managed: bool
     has_login: bool
     note: str | None
+    # Постоянная ссылка на занятие с этим учеником, если репетитор её задавал.
+    meeting_link: str | None = None
     lessons_held: int
     no_shows: int
     last_lesson_at: UTCDateTime | None

@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
+from app.models.homework import HomeworkSubmission
 from app.models.enums import HomeworkSubmissionMode, HomeworkSubmissionStatus, UserRole
 from app.schemas.homework import (
     HomeworkAssignmentOut,
@@ -39,18 +40,35 @@ async def _enrich(db: DbSession, assignments: list) -> list[HomeworkAssignmentOu
         return []
     tutor_id = assignments[0].tutor_id
     status_map = await homework_service.get_assignment_status_map(db, tutor_id)
-    student_names = await booking_service.get_student_names(db, [a.student_id for a in assignments])
+    submissions = await homework_service.list_submissions_for_assignments(db, [a.id for a in assignments])
     group_names = await group_service.get_group_names(db, [a.group_id for a in assignments])
+    # Имена нужны и адресату задания, и каждому ученику в списке сдач (у группового
+    # задания это разные люди).
+    student_names = await booking_service.get_student_names(
+        db,
+        [a.student_id for a in assignments]
+        + [s.student_id for rows in submissions.values() for s in rows],
+    )
     return [
         HomeworkAssignmentOut.model_validate(a, from_attributes=True).model_copy(
             update={
                 "status": status_map.get(a.id, "done"),
                 "student_display_name": student_names.get(a.student_id) if a.student_id else None,
                 "group_name": group_names.get(a.group_id) if a.group_id else None,
+                "submissions": [
+                    _submission_out(s, student_names.get(s.student_id))
+                    for s in submissions.get(a.id, [])
+                ],
             }
         )
         for a in assignments
     ]
+
+
+def _submission_out(submission: HomeworkSubmission, student_name: str | None) -> HomeworkSubmissionOut:
+    out = HomeworkSubmissionOut.model_validate(submission, from_attributes=True)
+    out.student_display_name = student_name
+    return out
 
 
 @router.post("", response_model=list[HomeworkAssignmentOut], status_code=status.HTTP_201_CREATED)
@@ -211,7 +229,8 @@ async def list_submissions(assignment_id: uuid.UUID, current_user: CurrentUser, 
     if assignment.tutor_id != profile.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше задание")
     rows = await homework_service.list_submissions_for_assignment(db, assignment_id)
-    return [HomeworkSubmissionOut.model_validate(r, from_attributes=True) for r in rows]
+    names = await booking_service.get_student_names(db, [r.student_id for r in rows])
+    return [_submission_out(row, names.get(row.student_id)) for row in rows]
 
 
 @router.delete("/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -249,6 +268,19 @@ async def set_submission_status(
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     submission = await homework_service.get_submission_or_404(db, submission_id)
     submission = await homework_service.set_submission_status(db, profile, submission, payload.status)
+    return HomeworkSubmissionOut.model_validate(submission, from_attributes=True)
+
+
+@router.delete("/submissions/{submission_id}/files/{file_id}", response_model=HomeworkSubmissionOut)
+async def delete_submission_file(
+    submission_id: uuid.UUID, file_id: uuid.UUID, current_user: CurrentUser, db: DbSession
+) -> HomeworkSubmissionOut:
+    """Убрать ошибочно приложенный файл - пока задание не проверено."""
+    _require_student(current_user)
+    submission = await homework_service.get_submission_or_404(db, submission_id)
+    submission = await homework_service.remove_submission_file(
+        db, submission, current_user, file_id
+    )
     return HomeworkSubmissionOut.model_validate(submission, from_attributes=True)
 
 

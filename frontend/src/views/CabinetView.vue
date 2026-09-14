@@ -15,6 +15,7 @@ import HomeworkTabTutor from "@/components/tutor/HomeworkTab.vue";
 import ProfileTab from "@/components/tutor/ProfileTab.vue";
 import ScheduleTab from "@/components/tutor/ScheduleTab.vue";
 import StatsTabTutor from "@/components/tutor/StatsTab.vue";
+import StudentsBlock from "@/components/tutor/StudentsBlock.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useNotificationsStore } from "@/stores/notifications";
 
@@ -27,7 +28,8 @@ const tutorTabs = [
   { key: "bookings", label: "Занятия" },
   { key: "schedule", label: "Расписание" },
   { key: "groups", label: "Группы" },
-  { key: "homework", label: "Домашние задания" },
+  { key: "homework", label: "ДЗ" },
+  { key: "students", label: "Ученики" },
   { key: "chat", label: "Чат" },
   { key: "profile", label: "Профиль" },
   { key: "stats", label: "Статистика" },
@@ -41,7 +43,7 @@ const hasGroupHistory = ref(false);
 const studentTabs = computed(() => [
   { key: "bookings", label: "Занятия" },
   ...(hasGroupHistory.value ? [{ key: "groups", label: "Группы" }] : []),
-  { key: "homework", label: "Домашние задания" },
+  { key: "homework", label: "ДЗ" },
   { key: "chat", label: "Чат" },
   { key: "stats", label: "Статистика" },
   { key: "settings", label: "Настройки" },
@@ -139,6 +141,14 @@ onMounted(loadGroupHistory);
         >
           {{ notifications.total > 9 ? "9+" : notifications.total }}
         </span>
+        <!-- У ученика это несданные задания, у репетитора - присланные и ещё не
+             проверенные: и то, и другое требует действия именно здесь. -->
+        <span
+          v-if="tab.key === 'homework' && notifications.homeworkPending > 0"
+          class="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-medium text-white"
+        >
+          {{ notifications.homeworkPending > 9 ? "9+" : notifications.homeworkPending }}
+        </span>
       </button>
     </nav>
 
@@ -150,6 +160,7 @@ onMounted(loadGroupHistory);
           <BookingsTabTutor v-else-if="activeTab === 'bookings'" />
           <GroupsTabTutor v-else-if="activeTab === 'groups'" />
           <HomeworkTabTutor v-else-if="activeTab === 'homework'" />
+          <StudentsBlock v-else-if="activeTab === 'students'" />
           <ChatPanel v-else-if="activeTab === 'chat'" :initial-thread-id="chatThreadId" />
           <StatsTabTutor v-else-if="activeTab === 'stats'" />
           <SettingsTab v-else-if="activeTab === 'settings'" />

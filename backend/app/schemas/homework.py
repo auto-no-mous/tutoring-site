@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.common import UTCDateTime
 
@@ -24,6 +24,17 @@ class HomeworkAssignmentOut(BaseModel):
     status: str = "pending"
     student_display_name: str | None = None
     group_name: str | None = None
+    # Сдачи учеников прямо в карточке: репетитору нужно видеть, кто что прислал, не
+    # раскрывая каждое задание отдельно.
+    submissions: list["HomeworkSubmissionOut"] = Field(default_factory=list)
+
+
+class HomeworkSubmissionFileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    file_path: str
+    uploaded_at: UTCDateTime
 
 
 class HomeworkSubmissionOut(BaseModel):
@@ -33,9 +44,16 @@ class HomeworkSubmissionOut(BaseModel):
     assignment_id: uuid.UUID
     student_id: uuid.UUID
     status: str
-    file_path: str | None
+    # Файлов может быть несколько: ученик прикладывает скриншот, при необходимости
+    # добавляет ещё один, а ошибочный убирает.
+    files: list[HomeworkSubmissionFileOut] = Field(default_factory=list)
     comment: str | None
     submitted_at: UTCDateTime | None
+    # Проставляется списком сдач: репетитору нужно имя, а не идентификатор.
+    student_display_name: str | None = None
+
+
+HomeworkAssignmentOut.model_rebuild()
 
 
 class HomeworkSubmissionStatusUpdate(BaseModel):
@@ -57,6 +75,6 @@ class StudentHomeworkOut(BaseModel):
     submission_mode: str
     due_at: UTCDateTime | None
     status: str
-    file_path: str | None
+    files: list[HomeworkSubmissionFileOut] = Field(default_factory=list)
     comment: str | None
     submitted_at: UTCDateTime | None

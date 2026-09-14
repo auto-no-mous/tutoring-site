@@ -13,6 +13,8 @@ export const useNotificationsStore = defineStore("notifications", () => {
   const total = ref(0);
   const chatUnread = ref(0);
   const systemUnread = ref(0);
+  // Отдельно от total: свой бейдж у вкладки «ДЗ», а не в общем счётчике на аватаре.
+  const homeworkPending = ref(0);
   let pollId: ReturnType<typeof setInterval> | null = null;
 
   async function refresh(): Promise<void> {
@@ -21,6 +23,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
       chatUnread.value = summary.chat_unread;
       systemUnread.value = summary.system_unread;
       total.value = summary.total;
+      homeworkPending.value = summary.homework_pending ?? 0;
     } catch {
       // Not authenticated, or a role (admin) with nothing to summarize - leave
       // counts as they were rather than surfacing an error badge.
@@ -41,7 +44,8 @@ export const useNotificationsStore = defineStore("notifications", () => {
     total.value = 0;
     chatUnread.value = 0;
     systemUnread.value = 0;
+    homeworkPending.value = 0;
   }
 
-  return { total, chatUnread, systemUnread, refresh, startPolling, stopPolling };
+  return { total, chatUnread, systemUnread, homeworkPending, refresh, startPolling, stopPolling };
 });

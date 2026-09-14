@@ -4,7 +4,9 @@ import { DialogClose, DialogContent, DialogOverlay, DialogPortal, DialogRoot, Di
 import { onMounted, ref } from "vue";
 
 import { createHomework, getStudentHomeworkForTutor, setSubmissionStatus } from "@/api/homework";
+import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
 import type { StudentHomework } from "@/types/homework";
+import { HOMEWORK_STATUS_OPTIONS, homeworkCardClass } from "@/utils/homework";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
 const props = defineProps<{ studentId: string; studentName: string }>();
@@ -19,12 +21,6 @@ const submissionMode = ref<"mark_done" | "file_upload">("mark_done");
 const contentUrl = ref("");
 const file = ref<File | null>(null);
 const error = ref("");
-
-const STATUS_OPTIONS = [
-  { value: "pending", label: "Не выполнено" },
-  { value: "submitted", label: "Отправлено" },
-  { value: "done", label: "Выполнено" },
-];
 
 async function load(): Promise<void> {
   isLoading.value = true;
@@ -95,7 +91,12 @@ onMounted(load);
         <p v-if="isLoading" class="mt-4 text-sm text-slate-400">Загрузка…</p>
         <div v-else class="mt-3 flex flex-1 flex-col gap-3 overflow-y-auto">
           <p v-if="items.length === 0" class="text-sm text-slate-400">Заданий пока нет.</p>
-          <div v-for="item in items" :key="item.submission_id" class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
+          <div
+            v-for="item in items"
+            :key="item.submission_id"
+            class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800"
+            :class="homeworkCardClass(item.status)"
+          >
             <div class="flex items-center justify-between">
               <div class="font-medium">{{ item.title }}</div>
               <select
@@ -103,7 +104,7 @@ onMounted(load);
                 class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
                 @change="onStatusChange(item, $event)"
               >
-                <option v-for="opt in STATUS_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                <option v-for="opt in HOMEWORK_STATUS_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
               </select>
             </div>
             <div class="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
@@ -111,9 +112,10 @@ onMounted(load);
               <a v-if="item.content_file_path" :href="item.content_file_path" target="_blank" class="underline">Материал (файл)</a>
               <span v-if="item.due_at">Срок: {{ formatDateTimeWithMsk(item.due_at) }}</span>
             </div>
-            <a v-if="item.file_path" :href="item.file_path" target="_blank" class="mt-1 block text-xs underline">
-              Файл ученика {{ item.submitted_at ? `(${formatDateTimeWithMsk(item.submitted_at)})` : "" }}
-            </a>
+            <div v-if="item.files.length > 0" class="mt-1">
+              <div class="text-xs text-slate-500">Файлы ученика</div>
+              <HomeworkFiles :files="item.files" />
+            </div>
             <div v-else-if="item.status !== 'pending'" class="mt-1 text-xs text-slate-400">
               Статус изменён вручную{{ item.submitted_at ? ` · ${formatDateTimeWithMsk(item.submitted_at)}` : "" }}
             </div>

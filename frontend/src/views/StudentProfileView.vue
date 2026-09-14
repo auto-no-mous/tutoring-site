@@ -6,6 +6,7 @@ import { listTutorBookings } from "@/api/bookings";
 import { openThreadWithStudent } from "@/api/chat";
 import { getMyStudentDetail } from "@/api/tutors";
 import StudentHomeworkModal from "@/components/StudentHomeworkModal.vue";
+import UserAvatar from "@/components/UserAvatar.vue";
 import type { Booking } from "@/types/booking";
 import type { TutorStudentDetail } from "@/types/tutor";
 import { formatDateTimeWithMsk } from "@/utils/time";
@@ -81,12 +82,7 @@ onMounted(load);
     <template v-else-if="student">
       <div class="mt-2 flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <img
-            v-if="student.photo_url"
-            :src="student.photo_url"
-            alt=""
-            class="h-14 w-14 shrink-0 rounded-full object-cover"
-          />
+          <UserAvatar :photo-url="student.photo_url" :name="student.first_name" size="lg" />
           <div>
             <h1 class="text-2xl font-semibold">{{ fullName }}</h1>
             <p class="mt-1 text-sm text-slate-500">

@@ -1,11 +1,19 @@
 import uuid
+from collections.abc import Sequence
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import HomeworkContentType, HomeworkSubmissionMode, HomeworkSubmissionStatus, SystemNotificationEvent
-from app.models.homework import HomeworkAssignment, HomeworkSubmission
+from app.core.config import settings
+from app.models.enums import (
+    HomeworkContentType,
+    HomeworkSubmissionMode,
+    HomeworkSubmissionStatus,
+    SystemNotificationEvent,
+    UserRole,
+)
+from app.models.homework import HomeworkAssignment, HomeworkSubmission, HomeworkSubmissionFile
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.services import group_service, system_notification_service
@@ -45,7 +53,11 @@ async def create_assignment_for_student(
     await db.refresh(assignment)
 
     await system_notification_service.notify(
-        db, student_id, SystemNotificationEvent.HOMEWORK_ASSIGNED, homework_title=title or "Без названия"
+        db,
+        student_id,
+        SystemNotificationEvent.HOMEWORK_ASSIGNED,
+        homework_title=title or "Без названия",
+        homework_url=_homework_tab_url(),
     )
     return assignment
 
@@ -89,7 +101,11 @@ async def create_assignment_for_group(
 
     for member in members:
         await system_notification_service.notify(
-            db, member.student_id, SystemNotificationEvent.HOMEWORK_ASSIGNED, homework_title=title or "Без названия"
+            db,
+            member.student_id,
+            SystemNotificationEvent.HOMEWORK_ASSIGNED,
+            homework_title=title or "Без названия",
+            homework_url=_homework_tab_url(),
         )
     return assignment
 
@@ -117,6 +133,27 @@ async def list_submissions_for_assignment(db: AsyncSession, assignment_id: uuid.
     return list(result.scalars().all())
 
 
+async def list_submissions_for_assignments(
+    db: AsyncSession, assignment_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[HomeworkSubmission]]:
+    """Сдачи сразу по всем заданиям репетитора.
+
+    Карточка задания во вкладке «ДЗ» показывает сдачи учеников без раскрытия, так что
+    запрос на каждое задание превратился бы в десятки запросов на один список.
+    """
+    if not assignment_ids:
+        return {}
+    result = await db.execute(
+        select(HomeworkSubmission)
+        .where(HomeworkSubmission.assignment_id.in_(assignment_ids))
+        .order_by(HomeworkSubmission.created_at)
+    )
+    by_assignment: dict[uuid.UUID, list[HomeworkSubmission]] = {}
+    for submission in result.scalars().all():
+        by_assignment.setdefault(submission.assignment_id, []).append(submission)
+    return by_assignment
+
+
 async def delete_assignment(db: AsyncSession, assignment: HomeworkAssignment) -> None:
     await db.delete(assignment)
     await db.commit()
@@ -135,10 +172,49 @@ def _to_student_homework_dict(submission: HomeworkSubmission, assignment: Homewo
         "submission_mode": assignment.submission_mode,
         "due_at": assignment.due_at,
         "status": submission.status,
-        "file_path": submission.file_path,
+        "files": [
+            {"id": f.id, "file_path": f.file_path, "uploaded_at": f.uploaded_at}
+            for f in submission.files
+        ],
         "comment": submission.comment,
         "submitted_at": submission.submitted_at,
     }
+
+
+async def pending_count_for_user(db: AsyncSession, user: User) -> int:
+    """Сколько домашних заданий ждёт действия именно этого человека.
+
+    У ученика это невыполненные задания, у репетитора - сданные, но ещё не
+    проверенные: именно их он и ищет, открывая вкладку. Число показывается бейджем
+    рядом с «ДЗ», как непрочитанные в чате.
+    """
+    if user.role == UserRole.TUTOR.value:
+        profile = await db.execute(select(TutorProfile).where(TutorProfile.user_id == user.id))
+        tutor = profile.scalar_one_or_none()
+        if tutor is None:
+            return 0
+        query = (
+            select(func.count())
+            .select_from(HomeworkSubmission)
+            .join(HomeworkAssignment, HomeworkAssignment.id == HomeworkSubmission.assignment_id)
+            .where(
+                HomeworkAssignment.tutor_id == tutor.id,
+                HomeworkSubmission.status == HomeworkSubmissionStatus.SUBMITTED.value,
+            )
+        )
+    elif user.role == UserRole.STUDENT.value:
+        query = (
+            select(func.count())
+            .select_from(HomeworkSubmission)
+            .where(
+                HomeworkSubmission.student_id == user.id,
+                HomeworkSubmission.status == HomeworkSubmissionStatus.PENDING.value,
+            )
+        )
+    else:
+        return 0
+
+    return (await db.scalar(query)) or 0
 
 
 async def list_homework_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[dict]:
@@ -186,10 +262,13 @@ async def get_student_status_map(db: AsyncSession, tutor_id: uuid.UUID) -> dict[
 
 
 async def get_assignment_status_map(db: AsyncSession, tutor_id: uuid.UUID) -> dict[uuid.UUID, str]:
-    """Per-assignment aggregate status, same binary as get_student_status_map above -
-    "pending" if any submission (relevant for group assignments, which have one
-    submission per member) is still outstanding, else "done". Powers the status
-    filter on the tutor's assignment list (tutor/HomeworkTab.vue)."""
+    """Статус задания целиком: "pending", если хоть кто-то ещё не сдал, иначе
+    "submitted", если что-то прислано и ждёт проверки, иначе "done".
+
+    Раньше присланное считалось выполненным, и работа, которую репетитор ещё не
+    смотрел, ничем не отличалась от проверенной - а именно её и надо заметить первой.
+    Красит и фильтрует карточки во вкладке «ДЗ» (tutor/HomeworkTab.vue).
+    """
     result = await db.execute(
         select(HomeworkSubmission.assignment_id, HomeworkSubmission.status)
         .join(HomeworkAssignment, HomeworkAssignment.id == HomeworkSubmission.assignment_id)
@@ -199,9 +278,15 @@ async def get_assignment_status_map(db: AsyncSession, tutor_id: uuid.UUID) -> di
     for assignment_id, submission_status in result.all():
         by_assignment.setdefault(assignment_id, []).append(submission_status)
 
+    def aggregate(statuses: list[str]) -> str:
+        if HomeworkSubmissionStatus.PENDING.value in statuses:
+            return HomeworkSubmissionStatus.PENDING.value
+        if HomeworkSubmissionStatus.SUBMITTED.value in statuses:
+            return HomeworkSubmissionStatus.SUBMITTED.value
+        return HomeworkSubmissionStatus.DONE.value
+
     return {
-        assignment_id: "pending" if HomeworkSubmissionStatus.PENDING.value in statuses else "done"
-        for assignment_id, statuses in by_assignment.items()
+        assignment_id: aggregate(statuses) for assignment_id, statuses in by_assignment.items()
     }
 
 
@@ -250,19 +335,72 @@ async def mark_submission_done(db: AsyncSession, submission: HomeworkSubmission,
     return submission
 
 
+# Больше одного-двух скриншотов к заданию не прикладывают; предел нужен, чтобы
+# случайный цикл загрузки не превратил сдачу в файлопомойку.
+MAX_SUBMISSION_FILES = 10
+
+
+def _homework_tab_url() -> str:
+    """Адрес вкладки с домашними заданиями. Собирается здесь, а не зашит в шаблон:
+    он отличается между локальной разработкой и продом."""
+    return f"{settings.frontend_base_url.rstrip('/')}/cabinet?tab=homework"
+
+
 async def submit_file(
     db: AsyncSession, submission: HomeworkSubmission, student: User, file_path: str, comment: str | None
 ) -> HomeworkSubmission:
+    """Добавляет файл к сдаче. Файлы копятся: ученик может приложить второй скриншот,
+    а ошибочный убрать отдельно (remove_submission_file) - раньше файл был один, и
+    приложенный по ошибке оставался единственным свидетельством выполнения."""
     if submission.student_id != student.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше домашнее задание")
     assignment = await get_assignment_or_404(db, submission.assignment_id)
     if assignment.submission_mode != HomeworkSubmissionMode.FILE_UPLOAD.value:
         raise HTTPException(status.HTTP_409_CONFLICT, "Для этого задания достаточно отметки «выполнено»")
+    if len(submission.files) >= MAX_SUBMISSION_FILES:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"К одному заданию можно приложить не больше {MAX_SUBMISSION_FILES} файлов",
+        )
 
+    db.add(HomeworkSubmissionFile(submission_id=submission.id, file_path=file_path))
     submission.status = HomeworkSubmissionStatus.SUBMITTED.value
-    submission.file_path = file_path
-    submission.comment = comment
+    if comment:
+        submission.comment = comment
     submission.submitted_at = utcnow()
+    await db.commit()
+    await db.refresh(submission)
+    return submission
+
+
+async def remove_submission_file(
+    db: AsyncSession, submission: HomeworkSubmission, student: User, file_id: uuid.UUID
+) -> HomeworkSubmission:
+    """Убирает ошибочно приложенный файл.
+
+    Пока задание не проверено, ученик распоряжается своими вложениями сам. Проверенное
+    (done) не трогаем: репетитор уже смотрел именно эти файлы.
+    """
+    if submission.student_id != student.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше домашнее задание")
+    if submission.status == HomeworkSubmissionStatus.DONE.value:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Задание уже проверено - файлы менять нельзя"
+        )
+
+    target = next((f for f in submission.files if f.id == file_id), None)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден")
+
+    await db.delete(target)
+    await db.flush()
+    await db.refresh(submission)
+
+    # Убрали последний файл - задание снова не выполнено: показывать «отправлено»
+    # без единого вложения было бы неправдой.
+    if not submission.files:
+        submission.status = HomeworkSubmissionStatus.PENDING.value
+        submission.submitted_at = None
     await db.commit()
     await db.refresh(submission)
     return submission

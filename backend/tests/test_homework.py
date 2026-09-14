@@ -114,7 +114,8 @@ async def test_group_homework_assigned_to_all_active_members(client: AsyncClient
     )
     assert upload_resp.status_code == 200, upload_resp.text
     assert upload_resp.json()["status"] == "submitted"
-    assert upload_resp.json()["file_path"].startswith("/files/homework-submissions/")
+    # Файлов у сдачи теперь может быть несколько - проверяем первый приложенный.
+    assert upload_resp.json()["files"][0]["file_path"].startswith("/files/homework-submissions/")
 
     assert assignment["status"] == "pending"
     submissions = (
@@ -518,3 +519,173 @@ async def test_duplicate_assignment_reuses_content_for_new_recipients(client: As
     student2_hw = (await client.get("/api/v1/homework/me", headers=student2["headers"])).json()
     assert len(student1_hw) == 1
     assert len(student2_hw) == 1
+
+
+async def test_pending_counter_and_notification_link(client: AsyncClient) -> None:
+    """Бейдж рядом с «ДЗ» и ссылка в уведомлении - чтобы ученик находил задание, а
+    репетитор видел, что ему прислали на проверку."""
+    tutor = await _register(client, "hw-count-tutor@example.com", "tutor")
+    student = await _register(client, "hw-count-student@example.com", "student")
+
+    create_resp = await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={
+            "title": "Скриншот решения",
+            "submission_mode": "file_upload",
+            "student_ids": [student["user"]["id"]],
+            "content_url": "https://example.com/task",
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+
+    # У ученика задание невыполнено, у репетитора проверять пока нечего.
+    summary = (await client.get("/api/v1/notifications/unread-summary", headers=student["headers"])).json()
+    assert summary["homework_pending"] == 1
+    summary = (await client.get("/api/v1/notifications/unread-summary", headers=tutor["headers"])).json()
+    assert summary["homework_pending"] == 0
+
+    # В уведомлении есть ссылка на вкладку.
+    notifications = (await client.get("/api/v1/notifications/system", headers=student["headers"])).json()
+    homework_notice = next(n for n in notifications if n["event_type"] == "homework_assigned")
+    assert "/cabinet?tab=homework" in homework_notice["body"]
+
+    submission_id = (await client.get("/api/v1/homework/me", headers=student["headers"])).json()[0][
+        "submission_id"
+    ]
+    upload = await client.post(
+        f"/api/v1/homework/submissions/{submission_id}/upload",
+        headers=student["headers"],
+        files={"file": ("shot.png", b"png-bytes", "image/png")},
+    )
+    assert upload.status_code == 200, upload.text
+
+    # Задание ушло на проверку: у ученика счётчик обнулился, у репетитора появился.
+    summary = (await client.get("/api/v1/notifications/unread-summary", headers=student["headers"])).json()
+    assert summary["homework_pending"] == 0
+    summary = (await client.get("/api/v1/notifications/unread-summary", headers=tutor["headers"])).json()
+    assert summary["homework_pending"] == 1
+
+
+async def test_student_adds_and_removes_submission_files(client: AsyncClient) -> None:
+    """Ошибочно приложенный скриншот должен убираться, а не оставаться навсегда."""
+    tutor = await _register(client, "hw-files-tutor@example.com", "tutor")
+    student = await _register(client, "hw-files-student@example.com", "student")
+    await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={
+            "title": "Скриншоты",
+            "submission_mode": "file_upload",
+            "student_ids": [student["user"]["id"]],
+            "content_url": "https://example.com/task",
+        },
+    )
+    submission_id = (await client.get("/api/v1/homework/me", headers=student["headers"])).json()[0][
+        "submission_id"
+    ]
+
+    for name in ("first.png", "second.png"):
+        resp = await client.post(
+            f"/api/v1/homework/submissions/{submission_id}/upload",
+            headers=student["headers"],
+            files={"file": (name, b"png-bytes", "image/png")},
+        )
+        assert resp.status_code == 200, resp.text
+
+    submission = resp.json()
+    assert len(submission["files"]) == 2, "второй файл добавляется, а не заменяет первый"
+
+    wrong_file_id = submission["files"][0]["id"]
+    resp = await client.delete(
+        f"/api/v1/homework/submissions/{submission_id}/files/{wrong_file_id}",
+        headers=student["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["files"]) == 1
+    assert resp.json()["status"] == "submitted"
+
+    # Убрали последний файл - задание снова не выполнено.
+    last_file_id = resp.json()["files"][0]["id"]
+    resp = await client.delete(
+        f"/api/v1/homework/submissions/{submission_id}/files/{last_file_id}",
+        headers=student["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["files"] == []
+    assert resp.json()["status"] == "pending"
+
+
+async def test_checked_submission_files_are_frozen(client: AsyncClient) -> None:
+    tutor = await _register(client, "hw-frozen-tutor@example.com", "tutor")
+    student = await _register(client, "hw-frozen-student@example.com", "student")
+    await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={
+            "title": "Задание",
+            "submission_mode": "file_upload",
+            "student_ids": [student["user"]["id"]],
+            "content_url": "https://example.com/task",
+        },
+    )
+    submission_id = (await client.get("/api/v1/homework/me", headers=student["headers"])).json()[0][
+        "submission_id"
+    ]
+    upload = await client.post(
+        f"/api/v1/homework/submissions/{submission_id}/upload",
+        headers=student["headers"],
+        files={"file": ("shot.png", b"png-bytes", "image/png")},
+    )
+    file_id = upload.json()["files"][0]["id"]
+
+    done = await client.patch(
+        f"/api/v1/homework/submissions/{submission_id}/status",
+        headers=tutor["headers"],
+        json={"status": "done"},
+    )
+    assert done.status_code == 200, done.text
+
+    # Проверенное задание ученик уже не переписывает: репетитор смотрел именно эти файлы.
+    resp = await client.delete(
+        f"/api/v1/homework/submissions/{submission_id}/files/{file_id}",
+        headers=student["headers"],
+    )
+    assert resp.status_code == 409
+
+
+async def test_tutor_assignment_list_carries_submissions(client: AsyncClient) -> None:
+    """Карточка задания у репетитора показывает сдачу целиком - имя ученика, статус и
+    присланные файлы, - иначе её приходилось бы раскрывать ради каждой мелочи."""
+    tutor = await _register(client, "hw-cards-tutor@example.com", "tutor")
+    student = await _register(client, "hw-cards-student@example.com", "student")
+    await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={
+            "title": "Карточка",
+            "submission_mode": "file_upload",
+            "student_ids": [student["user"]["id"]],
+            "content_url": "https://example.com/task",
+        },
+    )
+    submission_id = (await client.get("/api/v1/homework/me", headers=student["headers"])).json()[0][
+        "submission_id"
+    ]
+    await client.post(
+        f"/api/v1/homework/submissions/{submission_id}/upload",
+        headers=student["headers"],
+        files={"file": ("shot.png", b"png-bytes", "image/png")},
+    )
+
+    resp = await client.get("/api/v1/homework/tutor/me", headers=tutor["headers"])
+    assert resp.status_code == 200, resp.text
+    assignment = resp.json()[0]
+    # Присланное и не проверенное - отдельный статус: иначе оно выглядело бы как
+    # проверенное, и репетитор проходил бы мимо.
+    assert assignment["status"] == "submitted"
+    assert len(assignment["submissions"]) == 1
+    submission = assignment["submissions"][0]
+    assert submission["student_display_name"]
+    assert submission["status"] == "submitted"
+    assert len(submission["files"]) == 1

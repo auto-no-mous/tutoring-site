@@ -18,8 +18,10 @@ vi.mock("@/api/groups", () => ({
   myMemberships: vi.fn(async () => []),
 }));
 
+const notificationsState = { total: 0, unreadChat: 0, unreadSystem: 0, homeworkPending: 0 };
+
 vi.mock("@/stores/notifications", () => ({
-  useNotificationsStore: () => ({ total: 0, unreadChat: 0, unreadSystem: 0 }),
+  useNotificationsStore: () => notificationsState,
 }));
 
 function mountCabinet(role: "tutor" | "student" = "tutor") {
@@ -38,6 +40,19 @@ describe("CabinetView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     route.query = {};
+    notificationsState.total = 0;
+    notificationsState.homeworkPending = 0;
+  });
+
+  it("показывает бейдж с числом невыполненных ДЗ у вкладки «ДЗ»", async () => {
+    // Домашку было не видно, пока не откроешь вкладку: счётчик работает так же, как
+    // у непрочитанных сообщений в чате.
+    notificationsState.homeworkPending = 3;
+    const wrapper = mountCabinet();
+    await flushPromises();
+
+    const tab = wrapper.findAll("button").find((b) => b.text().startsWith("ДЗ"))!;
+    expect(tab.text()).toBe("ДЗ 3");
   });
 
   it("записывает выбранную вкладку в адрес", async () => {

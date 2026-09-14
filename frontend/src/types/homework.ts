@@ -13,6 +13,14 @@ export interface HomeworkAssignment {
   status: string;
   student_display_name: string | null;
   group_name: string | null;
+  // Сдачи учеников приходят вместе с заданием - карточка репетитора показывает их сразу.
+  submissions: HomeworkSubmission[];
+}
+
+export interface HomeworkSubmissionFile {
+  id: string;
+  file_path: string;
+  uploaded_at: string;
 }
 
 export interface HomeworkSubmission {
@@ -20,9 +28,11 @@ export interface HomeworkSubmission {
   assignment_id: string;
   student_id: string;
   status: string;
-  file_path: string | null;
+  // Файлов может быть несколько: ученик добавляет ещё один скриншот или убирает лишний.
+  files: HomeworkSubmissionFile[];
   comment: string | null;
   submitted_at: string | null;
+  student_display_name: string | null;
 }
 
 export interface StudentHomework {
@@ -38,7 +48,7 @@ export interface StudentHomework {
   submission_mode: string;
   due_at: string | null;
   status: string;
-  file_path: string | null;
+  files: HomeworkSubmissionFile[];
   comment: string | null;
   submitted_at: string | null;
 }

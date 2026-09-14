@@ -33,5 +33,9 @@ class NotificationTemplateUpdate(BaseModel):
 
 class UnreadSummaryOut(BaseModel):
     chat_unread: int
+    # Задания, ждущие действия: у ученика невыполненные, у репетитора сданные, но
+    # ещё не проверенные. В total не входит - это отдельный бейдж у своей вкладки,
+    # а не «непрочитанное».
+    homework_pending: int = 0
     system_unread: int
     total: int

@@ -109,8 +109,8 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
     ),
     (SystemNotificationEvent.HOMEWORK_ASSIGNED, UserRole.STUDENT): (
         "Новое домашнее задание",
-        "Репетитор задал новое домашнее задание: «{homework_title}». Посмотреть его можно "
-        "во вкладке «Домашние задания».",
+        "Репетитор задал новое домашнее задание: «{homework_title}». Открыть и сдать "
+        "его можно во вкладке «ДЗ»: {homework_url}",
     ),
     (SystemNotificationEvent.UPCOMING_LESSON_REMINDER, UserRole.TUTOR): (
         "Скоро занятие",

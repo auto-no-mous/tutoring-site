@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 import {
   createManualBooking,
@@ -12,11 +12,16 @@ import {
   createManagedStudent,
   deleteManagedStudent,
   getMyStudentsWithStats,
+  setStudentMeetingLink,
   setStudentNote,
   updateManagedStudent,
   type TutorStudentStats,
 } from "@/api/tutors";
 import { getMyLessonTypes } from "@/api/tutors";
+import { listMyWhiteboards, type Whiteboard } from "@/api/whiteboards";
+import UserAvatar from "@/components/UserAvatar.vue";
+import WhiteboardLinks from "@/components/WhiteboardLinks.vue";
+import WhiteboardsModal from "@/components/WhiteboardsModal.vue";
 import type { LessonType } from "@/types/tutor";
 import { apiErrorMessage } from "@/utils/apiError";
 import { formatDateTimeWithMsk, mskDateTimeToUtcIso, nextMskDateForWeekday } from "@/utils/time";
@@ -26,6 +31,76 @@ const emit = defineEmits<{ created: [student: TutorStudentStats] }>();
 const students = ref<TutorStudentStats[]>([]);
 const isLoading = ref(true);
 const error = ref("");
+
+// Доски привязаны к паре репетитор-ученик, поэтому грузятся списком на всю страницу
+// и раскладываются по карточкам здесь же.
+const whiteboards = ref<Whiteboard[]>([]);
+const boardsModalStudentId = ref<string | null>(null);
+
+function boardsFor(studentId: string): Whiteboard[] {
+  return whiteboards.value.filter((board) => board.student_id === studentId);
+}
+
+async function loadWhiteboards(): Promise<void> {
+  whiteboards.value = await listMyWhiteboards();
+}
+
+// --- Постоянная ссылка на занятие ---------------------------------------------------
+
+// Правится прямо в строке ученика: репетитор смотрит на список, видит, что ссылка
+// устарела, и меняет её здесь же, а не через карточку какого-нибудь занятия.
+const editingLinkId = ref<string | null>(null);
+const linkDraft = ref("");
+
+function startEditLink(student: TutorStudentStats): void {
+  editingLinkId.value = student.id;
+  linkDraft.value = student.meeting_link ?? "";
+  error.value = "";
+}
+
+async function saveLink(student: TutorStudentStats): Promise<void> {
+  error.value = "";
+  try {
+    await setStudentMeetingLink(student.id, linkDraft.value.trim() || null);
+    editingLinkId.value = null;
+    await load();
+  } catch (err) {
+    error.value = apiErrorMessage(err, "Не удалось сохранить ссылку");
+  }
+}
+
+// --- Сортировка --------------------------------------------------------------------
+
+const SORTS = [
+  { value: "activity", label: "По занятиям (ближайшие сверху)" },
+  { value: "name", label: "По ФИО" },
+  { value: "lessons", label: "По числу занятий" },
+  { value: "last", label: "По последнему занятию" },
+] as const;
+type SortKey = (typeof SORTS)[number]["value"];
+
+const sortKey = ref<SortKey>("activity");
+
+function time(value: string | null): number {
+  return value ? new Date(value).getTime() : 0;
+}
+
+const sortedStudents = computed(() => {
+  const rows = [...students.value];
+  switch (sortKey.value) {
+    case "name":
+      return rows.sort((a, b) => fullName(a).localeCompare(fullName(b), "ru"));
+    case "lessons":
+      return rows.sort((a, b) => b.lessons_held - a.lessons_held || fullName(a).localeCompare(fullName(b), "ru"));
+    case "last":
+      // Те, с кем занимались недавно, сверху; никогда не занимавшиеся - в конце.
+      return rows.sort((a, b) => time(b.last_lesson_at) - time(a.last_lesson_at));
+    default:
+      // Порядок с сервера: сначала с ближайшим занятием, потом по последнему
+      // прошедшему, в конце заведённые вручную без записей.
+      return rows;
+  }
+});
 
 // Форма заведения ученика вручную. Почты и пароля здесь нет намеренно: их задаёт сам
 // ученик, если однажды заберёт профиль по ссылке-приглашению.
@@ -122,9 +197,10 @@ async function stopOneSeries(row: TutorRecurringSeries): Promise<void> {
 async function load(): Promise<void> {
   isLoading.value = true;
   try {
-    [students.value, series.value] = await Promise.all([
+    [students.value, series.value, whiteboards.value] = await Promise.all([
       getMyStudentsWithStats(),
       listTutorRecurringSeries(),
+      listMyWhiteboards(),
     ]);
   } finally {
     isLoading.value = false;
@@ -238,15 +314,28 @@ onMounted(load);
 
 <template>
   <section>
-    <div class="flex items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 class="text-lg font-medium">Ученики</h2>
-      <button
-        type="button"
-        class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
-        @click="showForm ? (showForm = false) : startCreate()"
-      >
-        {{ showForm ? "Отмена" : "+ Новый ученик" }}
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <label class="flex items-center gap-1 text-xs text-slate-500">
+          Сортировка
+          <select
+            v-model="sortKey"
+            class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
+          >
+            <option v-for="option in SORTS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <button
+          type="button"
+          class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+          @click="showForm ? (showForm = false) : startCreate()"
+        >
+          {{ showForm ? "Отмена" : "+ Новый ученик" }}
+        </button>
+      </div>
     </div>
 
     <form
@@ -295,13 +384,13 @@ onMounted(load);
 
     <div v-else class="mt-3 flex flex-col gap-2">
       <div
-        v-for="student in students"
+        v-for="student in sortedStudents"
         :key="student.id"
         class="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800"
       >
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="flex items-center gap-3">
-            <img v-if="student.photo_url" :src="student.photo_url" alt="" class="h-10 w-10 rounded-full object-cover" />
+            <UserAvatar :photo-url="student.photo_url" :name="student.first_name" />
             <div>
               <RouterLink :to="`/students/${student.id}`" class="font-medium hover:underline">
                 {{ fullName(student) }}
@@ -323,6 +412,9 @@ onMounted(load);
             <button type="button" class="text-slate-500 underline" @click="openSeriesForm(student)">
               {{ openSeriesStudentId === student.id ? "Отмена" : "+ Еженедельное занятие" }}
             </button>
+            <button type="button" class="text-slate-500 underline" @click="boardsModalStudentId = student.id">
+              Доски
+            </button>
             <template v-if="student.is_managed">
               <button type="button" class="text-slate-500 underline" @click="startEdit(student)">Изменить</button>
               <button type="button" class="text-slate-500 underline" @click="makeClaimLink(student)">
@@ -331,6 +423,51 @@ onMounted(load);
               <button type="button" class="text-red-600 underline dark:text-red-400" @click="remove(student)">Удалить</button>
             </template>
           </div>
+        </div>
+
+        <!-- Постоянная ссылка на занятие и доски - то, что репетитор открывает перед
+             занятием чаще всего; в карточке ученика им самое место. Ссылка показана
+             текстом, а не кнопкой: её надо видеть целиком и уметь скопировать. -->
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <template v-if="editingLinkId === student.id">
+            <span class="text-slate-500">Постоянная ссылка на занятие:</span>
+            <input
+              v-model="linkDraft"
+              type="url"
+              placeholder="https://…"
+              class="w-64 rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700"
+              @keydown.enter.prevent="saveLink(student)"
+            />
+            <button type="button" class="rounded-md bg-brand-500 px-2 py-1 text-white" @click="saveLink(student)">
+              Сохранить
+            </button>
+            <button type="button" class="text-slate-500 underline" @click="editingLinkId = null">
+              Отмена
+            </button>
+            <span class="w-full text-slate-400">
+              Ссылка проставится во все запланированные занятия с этим учеником и во все новые. Пустое поле уберёт её.
+            </span>
+          </template>
+          <template v-else>
+            <span class="text-slate-500">Постоянная ссылка на занятие:</span>
+            <a
+              v-if="student.meeting_link"
+              :href="student.meeting_link"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="max-w-full truncate text-brand-700 underline underline-offset-2 dark:text-brand-300"
+            >
+              {{ student.meeting_link }}
+            </a>
+            <span v-else class="text-slate-400">не задана</span>
+            <button type="button" class="text-slate-500 underline" @click="startEditLink(student)">
+              {{ student.meeting_link ? "изменить" : "указать" }}
+            </button>
+          </template>
+        </div>
+
+        <div v-if="boardsFor(student.id).length > 0" class="mt-2">
+          <WhiteboardLinks :boards="boardsFor(student.id)" />
         </div>
 
         <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
@@ -427,5 +564,14 @@ onMounted(load);
         </div>
       </div>
     </div>
+
+    <WhiteboardsModal
+      v-if="boardsModalStudentId"
+      :boards="boardsFor(boardsModalStudentId)"
+      :student-id="boardsModalStudentId"
+      :owner-name="students.find((s) => s.id === boardsModalStudentId) ? fullName(students.find((s) => s.id === boardsModalStudentId)!) : undefined"
+      @changed="loadWhiteboards"
+      @close="boardsModalStudentId = null"
+    />
   </section>
 </template>

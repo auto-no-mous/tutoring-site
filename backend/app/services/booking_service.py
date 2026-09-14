@@ -636,25 +636,36 @@ async def update_booking_by_tutor(db: AsyncSession, booking: Booking, payload: B
     await db.refresh(booking)
 
     if payload.apply_link_to_student and booking.student_id is not None and "meeting_link" in data:
-        # Запоминаем выбор у пары, а не только раскладываем по существующим занятиям:
-        # новая еженедельная серия, следующие недели и записи, которые ученик сделает
-        # сам, тоже должны открываться по этой ссылке.
-        await student_service.set_meeting_link(
+        await apply_meeting_link_to_student(
             db, booking.tutor_id, booking.student_id, booking.meeting_link
         )
-        result = await db.execute(
-            select(Booking).where(
-                Booking.tutor_id == booking.tutor_id,
-                Booking.student_id == booking.student_id,
-                Booking.status == BookingStatus.SCHEDULED.value,
-                Booking.id != booking.id,
-            )
-        )
-        for other in result.scalars().all():
-            other.meeting_link = booking.meeting_link
-        await db.commit()
 
     return booking
+
+
+async def apply_meeting_link_to_student(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID, link: str | None
+) -> None:
+    """Постоянная ссылка на занятие с учеником: запоминаем у пары и раскладываем по
+    всем его запланированным занятиям.
+
+    Запоминать обязательно: новая еженедельная серия, следующие недели и записи,
+    которые ученик сделает сам, создаются позже и берут ссылку уже отсюда (см.
+    create_student_booking и generate_recurring_occurrences). Раскладывать по
+    существующим - тоже: иначе смена ссылки не дошла бы до уже назначенных занятий.
+    """
+    await student_service.set_meeting_link(db, tutor_id, student_id, link)
+
+    result = await db.execute(
+        select(Booking).where(
+            Booking.tutor_id == tutor_id,
+            Booking.student_id == student_id,
+            Booking.status == BookingStatus.SCHEDULED.value,
+        )
+    )
+    for booking in result.scalars().all():
+        booking.meeting_link = link
+    await db.commit()
 
 
 async def delete_booking(db: AsyncSession, booking: Booking) -> None:
