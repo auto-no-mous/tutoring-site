@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 import {
   listOAuthProviders,
@@ -19,6 +19,7 @@ import {
 } from "@/api/users";
 import PhotoCropModal from "@/components/PhotoCropModal.vue";
 import { useAuthStore } from "@/stores/auth";
+import { detectTimezone, timezoneOptions } from "@/utils/timezones";
 import { apiErrorMessage } from "@/utils/apiError";
 import type { RecurringSeriesDetail } from "@/types/booking";
 import type { NotificationChannel } from "@/types/user";
@@ -41,7 +42,9 @@ const lastName = ref(auth.user?.last_name ?? "");
 const patronymic = ref(auth.user?.patronymic ?? "");
 const grade = ref<number | null>(auth.user?.grade ?? null);
 const email = ref(auth.user?.email ?? "");
-const timezone = ref(auth.user?.timezone ?? "Europe/Moscow");
+// Если пояс ещё не выбирали, предлагаем тот, что сообщает браузер.
+const timezone = ref(auth.user?.timezone || detectTimezone());
+const timezones = computed(() => timezoneOptions(auth.user?.timezone));
 const notificationChannel = ref<NotificationChannel>(auth.user?.notification_channel ?? "both");
 const reminderLeadMinutes = ref(auth.user?.reminder_lead_minutes ?? 60);
 const savedMessage = ref("");
@@ -322,7 +325,13 @@ onMounted(load);
 
       <label v-if="auth.user?.role === 'student'" class="flex flex-col gap-1 text-sm">
         Часовой пояс
-        <input v-model="timezone" placeholder="Europe/Moscow" class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" />
+        <select v-model="timezone" class="rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700">
+          <option v-for="tz in timezones" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+        </select>
+        <span class="text-xs text-slate-500">
+          Время занятий на сайте и в письмах — московское. Пояс нужен, чтобы подсказывать,
+          который час это у вас.
+        </span>
         <span class="text-xs text-slate-400">Определяется автоматически, можно скорректировать вручную.</span>
       </label>
 

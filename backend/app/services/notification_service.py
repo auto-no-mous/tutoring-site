@@ -1,6 +1,7 @@
 import datetime as dt
 import logging
 import uuid
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,7 +112,10 @@ async def notify_first_booking(
     cabinet_url = f"{settings.frontend_base_url.rstrip('/')}/cabinet?tab=bookings"
 
     student_title = "Вы записались на занятие"
-    student_body = f"Занятие с {tutor_user.display_name}{lesson_suffix} — {when}."
+    student_body = (
+        f"Занятие с {tutor_user.display_name}{lesson_suffix} — {when}"
+        f"{local_time_hint(student, start_at)}."
+    )
     student_text, student_html = render_email(
         heading=student_title,
         intro=f"{student_body} Это ваше первое занятие с этим репетитором — детали и ссылка на встречу будут в личном кабинете.",
@@ -149,9 +153,31 @@ async def notify_first_booking(
     )
 
 
-def _reminder_email(other_name: str, start_msk: dt.datetime, for_tutor: bool) -> tuple[str, str]:
+def local_time_hint(user: User, moment: dt.datetime) -> str:
+    """" - у вас это 16:00" для того, кто живёт не по Москве, иначе пустая строка.
+
+    Время на сайте и в письмах всегда московское (раздел 6 project_description.md):
+    один и тот же час у репетитора и у ученика - единственный способ не путаться при
+    переносах. Но ученику из другого пояса одного московского числа мало, а баннер в
+    письмо не вставишь - поэтому здесь короткая подсказка.
+    """
+    zone = (user.timezone or "").strip()
+    if not zone or zone == "Europe/Moscow":
+        return ""
+    try:
+        local = ensure_aware(moment).astimezone(ZoneInfo(zone))
+    except (ZoneInfoNotFoundError, ValueError):
+        # Пояс мог остаться мусорным (поле годами было свободным текстом) - тогда
+        # просто молчим, вместо того чтобы ронять уведомление.
+        return ""
+    return f" — у вас это {local:%H:%M}"
+
+
+def _reminder_email(
+    other_name: str, start_msk: dt.datetime, for_tutor: bool, local_hint: str = ""
+) -> tuple[str, str]:
     """Фирменное письмо-напоминание. Текст в мессенджер остаётся коротким."""
-    when = f"{start_msk:%d.%m.%Y} в {start_msk:%H:%M} (МСК)"
+    when = f"{start_msk:%d.%m.%Y} в {start_msk:%H:%M} (МСК){local_hint}"
     return render_email(
         heading="Скоро занятие",
         intro=(
@@ -277,11 +303,14 @@ async def send_upcoming_reminders(db: AsyncSession, tolerance_minutes: float = 1
                 tutor_profile2 = await db.get(TutorProfile, booking.tutor_id)
                 tutor_user2 = await db.get(User, tutor_profile2.user_id) if tutor_profile2 else None
                 tutor_name = tutor_user2.display_name if tutor_user2 else "репетитором"
-                reminder_text, reminder_html = _reminder_email(tutor_name, start_msk, for_tutor=False)
+                hint = local_time_hint(student_user, start_at)
+                reminder_text, reminder_html = _reminder_email(
+                    tutor_name, start_msk, for_tutor=False, local_hint=hint
+                )
                 await notify(
                     db, student_user.id, NotificationEvent.UPCOMING_REMINDER,
                     "Скоро занятие",
-                    f"Занятие с {tutor_name} начнётся {start_msk:%d.%m.%Y %H:%M} (МСК).",
+                    f"Занятие с {tutor_name} начнётся {start_msk:%d.%m.%Y %H:%M} (МСК){hint}.",
                     email_html=reminder_html, email_text=reminder_text,
                 )
                 await system_notification_service.notify(

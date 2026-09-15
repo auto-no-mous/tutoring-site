@@ -3,7 +3,7 @@ import uuid
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.enums import NotificationChannelPref
-from app.schemas.common import UTCDateTime
+from app.schemas.common import IANATimezone, UTCDateTime
 
 
 class UserOut(BaseModel):
@@ -38,9 +38,11 @@ class UserSettingsUpdate(BaseModel):
     grade: int | None = Field(default=None, ge=1, le=11)
     # Changing email re-requires verification - see auth_service.update_user_settings.
     email: EmailStr | None = None
-    # Student's local timezone override (section 6); meaningless for tutors, whose
-    # cabinet always shows MSK regardless.
-    timezone: str | None = None
+    # Часовой пояс ученика. Время на сайте и в письмах всегда московское, а пояс
+    # нужен, чтобы предупредить о разнице и подсказать, который час это у него.
+    # Проверяется по списку IANA: раньше поле было свободным текстом, и в базе
+    # оседали значения вроде "Chelyabinsk", от которых нельзя посчитать смещение.
+    timezone: IANATimezone | None = None
     telegram_chat_id: str | None = None
     # off / email / telegram / both - см. NotificationChannelPref.
     notification_channel: NotificationChannelPref | None = None

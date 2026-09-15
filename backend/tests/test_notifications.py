@@ -1,5 +1,6 @@
 import datetime as dt
 import uuid
+from zoneinfo import ZoneInfo
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -233,3 +234,75 @@ async def test_reminder_lead_minutes_bounds_validated(client: AsyncClient) -> No
 
     default_resp = await client.get("/api/v1/auth/me", headers=student["headers"])
     assert default_resp.json()["reminder_lead_minutes"] == 60
+
+
+async def test_reminder_tells_a_non_moscow_student_their_own_time(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Время везде московское - но ученику из другого пояса одного числа мало, а
+    баннер в письмо не вставишь."""
+    tutor = await _register(client, "notif-tz-tutor@example.com", "tutor")
+    student = await _register(client, "notif-tz-student@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+    lesson_type_id = (
+        await client.post(
+            "/api/v1/tutors/me/lesson-types",
+            headers=tutor["headers"],
+            json={"name": "Занятие", "format": "individual", "duration_minutes": 60, "price": 1000},
+        )
+    ).json()["id"]
+
+    resp = await client.patch(
+        "/api/v1/auth/me", headers=student["headers"], json={"timezone": "Asia/Yekaterinburg"}
+    )
+    assert resp.status_code == 200, resp.text
+
+    start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=60)
+    db_session.add(
+        Booking(
+            tutor_id=uuid.UUID(tutor_id),
+            student_id=uuid.UUID(student["user"]["id"]),
+            lesson_type_id=uuid.UUID(lesson_type_id),
+            start_at=start_at,
+            end_at=start_at + dt.timedelta(hours=1),
+            status=BookingStatus.SCHEDULED.value,
+        )
+    )
+    await db_session.commit()
+
+    await send_upcoming_reminders(db_session)
+
+    result = await db_session.execute(
+        select(NotificationLog).where(
+            NotificationLog.user_id == uuid.UUID(student["user"]["id"]),
+            NotificationLog.event_type == "upcoming_reminder",
+        )
+    )
+    student_log = result.scalars().first()
+    assert student_log is not None
+    local = start_at.astimezone(ZoneInfo("Asia/Yekaterinburg"))
+    assert f"у вас это {local:%H:%M}" in (student_log.payload or "")
+
+    # Репетитору такая приписка не нужна: его кабинет и так московский.
+    tutor_result = await db_session.execute(
+        select(NotificationLog).where(
+            NotificationLog.user_id == uuid.UUID(tutor["user"]["id"]),
+            NotificationLog.event_type == "upcoming_reminder",
+        )
+    )
+    assert "у вас это" not in (tutor_result.scalars().first().payload or "")
+
+
+async def test_timezone_must_be_a_real_zone(client: AsyncClient) -> None:
+    """Поле было свободным текстом, и в базе оседало «Chelyabinsk» - посчитать по нему
+    разницу с Москвой невозможно."""
+    student = await _register(client, "notif-tz-check@example.com", "student")
+
+    bad = await client.patch("/api/v1/auth/me", headers=student["headers"], json={"timezone": "Chelyabinsk"})
+    assert bad.status_code == 422
+
+    good = await client.patch(
+        "/api/v1/auth/me", headers=student["headers"], json={"timezone": "Asia/Yekaterinburg"}
+    )
+    assert good.status_code == 200
+    assert good.json()["timezone"] == "Asia/Yekaterinburg"

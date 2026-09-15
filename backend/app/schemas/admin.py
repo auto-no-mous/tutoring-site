@@ -2,7 +2,7 @@ import uuid
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.schemas.common import UTCDateTime
+from app.schemas.common import IANATimezone, UTCDateTime
 from app.schemas.tutor import TutorProfileUpdate
 
 
@@ -20,7 +20,7 @@ class AdminStudentUpdate(BaseModel):
     patronymic: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = None
     grade: int | None = Field(default=None, ge=1, le=11)
-    timezone: str | None = None
+    timezone: IANATimezone | None = None
     is_active: bool | None = None
 
 

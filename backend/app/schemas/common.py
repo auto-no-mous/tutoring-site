@@ -1,6 +1,7 @@
 import datetime as dt
 from typing import Annotated
 from urllib.parse import urlparse
+from zoneinfo import available_timezones
 
 from pydantic import AfterValidator
 
@@ -39,6 +40,20 @@ def _validate_profile_url(value: str) -> str:
 # Use for any client-supplied link meant to be rendered as an <a href> on a public
 # profile - see TutorProfileUpdate.telegram_url/vk_url/youtube_url and TutorExtraLink.
 ProfileUrl = Annotated[str, AfterValidator(_validate_profile_url)]
+
+
+def _validate_timezone(value: str) -> str:
+    """Имя часового пояса из базы IANA, например Asia/Yekaterinburg.
+
+    Поле было свободным текстом, и в базе оседали значения вроде "Chelyabinsk" -
+    от них нельзя посчитать разницу с Москвой, ради которой пояс и хранится.
+    """
+    if value not in available_timezones():
+        raise ValueError("Неизвестный часовой пояс")
+    return value
+
+
+IANATimezone = Annotated[str, AfterValidator(_validate_timezone)]
 
 
 def _validate_video_url(value: str) -> str:

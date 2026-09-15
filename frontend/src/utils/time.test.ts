@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { addDaysIso, formatDate, formatDateTimeWithMsk, formatDayLabel, formatThreadTimestamp, todayIso, nextMskDateForWeekday } from "@/utils/time";
+import {
+  addDaysIso,
+  formatDate,
+  formatDateTimeWithMsk,
+  formatDayLabel,
+  formatLocalHint,
+  formatThreadTimestamp,
+  formatTime,
+  mskOffsetHours,
+  todayIso,
+  nextMskDateForWeekday,
+} from "@/utils/time";
 
 describe("formatDate", () => {
   it("renders as DD.MM.YYYY", () => {
@@ -8,11 +19,45 @@ describe("formatDate", () => {
   });
 });
 
+describe("formatTime", () => {
+  // Время занятий на сайте всегда московское: пока ученику показывали его местное, а
+  // репетитору и письмам - московское, один урок назывался двумя числами, и переносы
+  // попадали не в тот час.
+  it("всегда показывает московское время, независимо от пояса читателя", () => {
+    expect(formatTime("2026-03-05T09:00:00Z")).toBe("12:00");
+    expect(formatTime("2026-03-05T21:30:00Z")).toBe("00:30");
+  });
+
+  it("дата тоже московская - поздний вечер по МСК не уезжает на сутки", () => {
+    expect(formatDate("2026-03-05T21:30:00Z")).toBe("06.03.2026");
+  });
+});
+
 describe("formatDateTimeWithMsk", () => {
-  it("includes both local and MSK time", () => {
-    const result = formatDateTimeWithMsk("2026-03-05T12:00:00Z");
-    expect(result).toContain("05.03.2026");
-    expect(result).toContain("МСК");
+  it("помечает время как московское", () => {
+    expect(formatDateTimeWithMsk("2026-03-05T09:00:00Z")).toBe("05.03.2026 12:00 (МСК)");
+  });
+});
+
+describe("mskOffsetHours", () => {
+  it("считает разницу с Москвой", () => {
+    expect(mskOffsetHours("Europe/Moscow")).toBe(0);
+    expect(mskOffsetHours("Asia/Yekaterinburg")).toBe(2);
+    expect(mskOffsetHours("Europe/Kaliningrad")).toBe(-1);
+  });
+
+  it("не падает на мусорном значении: поле годами было свободным текстом", () => {
+    expect(mskOffsetHours("Chelyabinsk")).toBe(0);
+  });
+});
+
+describe("formatLocalHint", () => {
+  it("подсказывает местное время тому, кто живёт не по Москве", () => {
+    expect(formatLocalHint("2026-03-05T09:00:00Z", "Asia/Yekaterinburg")).toBe("у вас 14:00");
+  });
+
+  it("москвичу подсказывать нечего", () => {
+    expect(formatLocalHint("2026-03-05T09:00:00Z", "Europe/Moscow")).toBe("");
   });
 });
 

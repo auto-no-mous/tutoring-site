@@ -10,6 +10,7 @@ import BookingCalendar from "@/components/BookingCalendar.vue";
 import { useAuthStore } from "@/stores/auth";
 import type { Booking } from "@/types/booking";
 import type { LessonType, Slot } from "@/types/tutor";
+import MskTimeNotice from "@/components/MskTimeNotice.vue";
 import { addDaysIso, formatDateTimeWithMsk, formatTime, todayIso } from "@/utils/time";
 
 const props = defineProps<{ booking: Booking }>();
@@ -145,6 +146,9 @@ watch(() => props.booking.id, loadDates, { immediate: true });
         <!-- Step 2: slot -->
         <div v-else-if="step === 2" class="mt-4">
           <button type="button" class="back-link mb-3" @click="step = 1"><ArrowLeft class="h-4 w-4" />Дата</button>
+          <!-- Именно здесь ошибались с часом: ученик переносил занятие "на 14:00",
+               имея в виду своё время, а попадал на 12:00 у репетитора. -->
+          <MskTimeNotice class="mb-3" />
           <p v-if="isLoading" class="text-sm text-slate-400">Загрузка времени…</p>
           <template v-else>
             <p v-if="isTutor" class="mb-2 text-xs text-slate-500">

@@ -1248,3 +1248,57 @@ async def test_top_up_warns_the_tutor_once_when_a_series_cannot_extend(
     ).scalar_one()
     await db_session.refresh(series)
     assert series.stall_notified_at is None
+
+
+async def test_weekly_repeat_warns_immediately_when_no_week_fits(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Слот свободен на выбранную дату, но занят на всех следующих неделях: галочка
+    «еженедельно» молча создавала одно занятие, ученик считал себя записанным надолго,
+    а репетитор узнавал об этом через месяц пустого расписания."""
+    tutor = await _setup_tutor(client, "weekly-warn-tutor@example.com")
+    first = await _register(client, "weekly-warn-first@example.com", "student")
+    second = await _register(client, "weekly-warn-second@example.com", "student")
+
+    # Серия первого ученика начинается через две недели и занимает это время дальше.
+    resp = await client.post(
+        "/api/v1/bookings",
+        headers=first["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": _next_weekday_datetime(0, 10, weeks_ahead=2).isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["recurring_created"] == booking_service.RECURRING_WEEKS_AHEAD
+
+    # Второй ученик записывается на неделю раньше - эта дата свободна, а все
+    # последующие заняты серией первого.
+    resp = await client.post(
+        "/api/v1/bookings",
+        headers=second["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": _next_weekday_datetime(0, 10, weeks_ahead=1).isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["recurring_created"] == 0, "повторов нет - ученику надо сказать сразу"
+
+    notifications = (
+        await db_session.execute(
+            select(SystemNotification).where(
+                SystemNotification.user_id == uuid.UUID(tutor["user"]["id"]),
+                SystemNotification.event_type == SystemNotificationEvent.RECURRING_SERIES_STALLED.value,
+            )
+        )
+    ).scalars().all()
+    assert len(notifications) == 1
+
+    # Ночная задача продления не повторяет то, что уже сказано при записи.
+    stats = await booking_service.top_up_active_series(db_session)
+    assert stats["stalled"] == 0

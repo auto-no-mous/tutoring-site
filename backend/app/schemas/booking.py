@@ -95,6 +95,10 @@ class BookingOut(BaseModel):
     # on the frontend, so only name/format need a round trip.
     lesson_type_name: str | None = None
     lesson_type_format: str | None = None
+    # Сколько будущих занятий удалось создать по галочке «повторять еженедельно».
+    # 0 означает, что повтор не получился (время занято на следующих неделях), и
+    # интерфейс должен сказать об этом сразу - см. booking_service._after_series_created.
+    recurring_created: int | None = None
     # "Имя Отчество" only (no surname), per the student cabinet's card format. Admin's
     # listing (api/v1/admin.py::list_bookings) instead populates this with the full
     # display_name, since it has no single "counterpart" to omit the surname for.

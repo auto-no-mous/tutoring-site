@@ -514,11 +514,30 @@ async def create_student_booking(
         await db.commit()
         await db.refresh(booking)
 
-        await generate_recurring_occurrences(
+        created = await generate_recurring_occurrences(
             db, series, initiated_by=BookedBy.STUDENT.value, anchor_date=start_msk.date()
         )
+        # Читает api/v1/bookings.py, чтобы ученик увидел предупреждение сразу в ответе.
+        booking.recurring_created = await _after_series_created(db, series, created)
 
     return booking
+
+
+async def _after_series_created(db: AsyncSession, series: RecurringSeries, created: list[Booking]) -> int:
+    """Сколько недель удалось создать; если ни одной - сразу предупреждает репетитора.
+
+    Раньше галочка «повторять еженедельно» в такой ситуации молча создавала ровно
+    одно занятие: слот свободен на выбранную дату, а на всех следующих неделях занят
+    чужой серией. Ученик считал, что записан надолго, репетитор ничего не знал, и
+    обнаруживалось это через месяц пустого расписания.
+    """
+    if created:
+        return len(created)
+    await _warn_series_stalled(db, series)
+    # Ночная задача продления не должна повторять то же самое завтра.
+    series.stall_notified_at = utcnow()
+    await db.commit()
+    return 0
 
 
 async def describe_conflicts(
@@ -611,13 +630,14 @@ async def _start_series_from(
     await db.commit()
     await db.refresh(booking)
 
-    await generate_recurring_occurrences(
+    created = await generate_recurring_occurrences(
         db,
         series,
         initiated_by=BookedBy.TUTOR.value,
         anchor_date=start_msk.date(),
         enforce_schedule=False,
     )
+    booking.recurring_created = await _after_series_created(db, series, created)
     return booking
 
 
@@ -738,13 +758,14 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
         await db.commit()
         await db.refresh(booking)
 
-        await generate_recurring_occurrences(
+        created = await generate_recurring_occurrences(
             db,
             series,
             initiated_by=BookedBy.TUTOR.value,
             anchor_date=start_msk.date(),
             enforce_schedule=False,
         )
+        booking.recurring_created = await _after_series_created(db, series, created)
 
     return booking
 

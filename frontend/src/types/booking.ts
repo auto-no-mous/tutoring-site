@@ -21,6 +21,9 @@ export interface Booking {
   lesson_type_name?: string | null;
   lesson_type_format?: string | null;
   tutor_display_name?: string | null;
+  // Сколько будущих занятий создала галочка «повторять еженедельно». 0 означает, что
+  // время занято на следующих неделях и повтора не вышло - см. BookingWizard.vue.
+  recurring_created?: number | null;
 }
 
 export interface RecurringSeriesDetail {

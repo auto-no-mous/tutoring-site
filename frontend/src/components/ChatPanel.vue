@@ -9,7 +9,7 @@ import type { ChatMessage, ChatThread } from "@/types/chat";
 import type { SystemNotification } from "@/types/notification";
 import type { TutorStudent } from "@/types/tutor";
 import { internalPath, linkifySegments } from "@/utils/linkify";
-import { formatDayLabel, formatThreadTimestamp, formatTime } from "@/utils/time";
+import { formatDayLabel, formatLocalClock, formatThreadTimestamp } from "@/utils/time";
 
 // Lets other tabs (e.g. tutor/GroupsTab.vue's "написать" / "чат группы" buttons) deep-
 // link straight into a specific thread instead of always landing on the first one -
@@ -413,7 +413,7 @@ defineExpose({ loadThreads });
                     <template v-else>{{ segment.value }}</template>
                   </template>
                 </p>
-                <div class="mt-1 text-[10px] opacity-70">{{ formatTime(item.created_at) }}</div>
+                <div class="mt-1 text-[10px] opacity-70">{{ formatLocalClock(item.created_at) }}</div>
               </div>
             </div>
           </template>
@@ -462,7 +462,7 @@ defineExpose({ loadThreads });
                 <a v-else-if="message.file_path" :href="message.file_path" target="_blank" class="mt-1 flex items-center gap-1 underline">
                   📎 Файл
                 </a>
-                <div class="mt-1 text-[10px] opacity-70">{{ formatTime(message.created_at) }}</div>
+                <div class="mt-1 text-[10px] opacity-70">{{ formatLocalClock(message.created_at) }}</div>
               </div>
             </div>
           </template>

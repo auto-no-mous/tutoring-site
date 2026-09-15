@@ -7,6 +7,7 @@ import BookingCalendar from "@/components/BookingCalendar.vue";
 import { getAvailableDates, getDaySlots } from "@/api/tutors";
 import { useAuthStore } from "@/stores/auth";
 import type { LessonType, Slot } from "@/types/tutor";
+import MskTimeNotice from "@/components/MskTimeNotice.vue";
 import { addDaysIso, formatDateTimeWithMsk, formatTime, todayIso } from "@/utils/time";
 
 const props = defineProps<{
@@ -60,17 +61,23 @@ function pickSlot(slot: Slot): void {
   step.value = 4;
 }
 
+const repeatFailed = ref(false);
+
 async function confirm(): Promise<void> {
   if (!auth.isAuthenticated) return;
   isLoading.value = true;
   error.value = null;
   try {
-    await createBooking({
+    const booking = await createBooking({
       tutor_id: props.tutorId,
       lesson_type_id: selectedType.value!.id,
       start_at: selectedSlot.value!.start_at,
       repeat_weekly: repeatWeekly.value,
     });
+    // Повтор мог не получиться: выбранная дата свободна, а то же время на следующих
+    // неделях занято. Раньше об этом никто не узнавал - ученик считал, что записан
+    // надолго, и обнаруживал пустое расписание через месяц.
+    repeatFailed.value = repeatWeekly.value && booking.recurring_created === 0;
     success.value = true;
   } catch {
     error.value = "Не удалось записаться. Возможно, время уже занято — попробуйте выбрать другое.";
@@ -85,6 +92,7 @@ function restart(): void {
   selectedDate.value = null;
   selectedSlot.value = null;
   repeatWeekly.value = false;
+  repeatFailed.value = false;
   success.value = false;
   error.value = null;
 }
@@ -125,6 +133,15 @@ watch(() => props.tutorId, restart);
         Вы записаны на занятие!
       </div>
       <p class="mt-1">Подробности — в личном кабинете.</p>
+      <p
+        v-if="repeatFailed"
+        class="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900
+          dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+      >
+        Еженедельный повтор не получился: это время уже занято на следующих неделях.
+        Записано только выбранное занятие — напишите репетитору, чтобы подобрать
+        постоянное время.
+      </p>
       <button type="button" class="btn-outline mt-3 text-base" @click="restart">Записаться ещё раз</button>
     </div>
 
@@ -204,6 +221,7 @@ watch(() => props.tutorId, restart);
             <input v-model="repeatWeekly" type="checkbox" class="h-4 w-4 accent-brand-500" />
             Повторять каждую неделю
           </label>
+          <MskTimeNotice />
           <p v-if="error" class="text-base text-red-600 dark:text-red-400">{{ error }}</p>
           <button v-if="auth.isAuthenticated" type="button" :disabled="isLoading" class="btn-primary self-start text-base" @click="confirm">
             Записаться

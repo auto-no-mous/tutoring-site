@@ -1,28 +1,67 @@
-// Section 6: the student always sees their own local time, with the MSK-equivalent
-// shown alongside, e.g. "18:00 (МСК 15:00)".
+// Время занятий на сайте - всегда московское, и у репетитора, и у ученика.
+//
+// Раньше ученику показывали его местное время, а письма и кабинет репетитора жили в
+// МСК: один и тот же урок назывался двумя числами, и при переносе договориться было
+// невозможно - ученик из МСК+2 переносил занятие "на 14:00", имея в виду своё, и
+// попадал на 12:00 у репетитора. Одно число на всех дороже удобства пересчёта, а
+// разницу со своим поясом человек видит в предупреждении (MskTimeNotice.vue) и в
+// подсказке рядом со временем (formatLocalHint ниже).
+export const MSK_TIMEZONE = "Europe/Moscow";
 
 export function formatTime(isoUtc: string): string {
-  return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date(isoUtc));
+  return new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: MSK_TIMEZONE,
+  }).format(new Date(isoUtc));
 }
 
-export function formatMskTime(isoUtc: string): string {
-  return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" }).format(
-    new Date(isoUtc),
-  );
-}
+/** Синоним formatTime: время и так московское, имя осталось у старых вызовов. */
+export const formatMskTime = formatTime;
 
 export function formatDate(isoUtc: string): string {
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }).format(
-    new Date(isoUtc),
-  );
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: MSK_TIMEZONE,
+  }).format(new Date(isoUtc));
 }
 
 export function formatDateTimeWithMsk(isoUtc: string): string {
-  return `${formatDate(isoUtc)} ${formatTime(isoUtc)} (МСК ${formatMskTime(isoUtc)})`;
+  return `${formatDate(isoUtc)} ${formatTime(isoUtc)} (МСК)`;
 }
 
 export function formatTimeWithMsk(isoUtc: string): string {
-  return `${formatTime(isoUtc)} (МСК ${formatMskTime(isoUtc)})`;
+  return `${formatTime(isoUtc)} (МСК)`;
+}
+
+/** Разница часового пояса с Москвой в часах: +2 для Екатеринбурга, 0 для Москвы. */
+export function mskOffsetHours(timeZone: string, at: Date = new Date()): number {
+  const inZone = (zone: string) =>
+    new Date(new Intl.DateTimeFormat("en-US", { timeZone: zone, dateStyle: "short", timeStyle: "medium" }).format(at));
+  try {
+    return Math.round((inZone(timeZone).getTime() - inZone(MSK_TIMEZONE).getTime()) / 3600000);
+  } catch {
+    // Пояс мог остаться мусорным со времён, когда это поле было свободным текстом.
+    return 0;
+  }
+}
+
+/** "у вас 16:00" - для того, кто живёт не по Москве; иначе пустая строка. */
+export function formatLocalHint(isoUtc: string, timeZone: string): string {
+  if (!timeZone || timeZone === MSK_TIMEZONE || mskOffsetHours(timeZone) === 0) return "";
+  const local = new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  }).format(new Date(isoUtc));
+  return `у вас ${local}`;
+}
+
+/** Часы:минуты в поясе читателя - для чата, где важно "когда написали", а не урок. */
+export function formatLocalClock(isoUtc: string): string {
+  return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date(isoUtc));
 }
 
 export function todayIso(): string {
@@ -63,7 +102,7 @@ export function formatDayLabel(isoUtc: string): string {
 // time for today's messages, otherwise a short date - mirrors common chat apps.
 export function formatThreadTimestamp(isoUtc: string): string {
   const date = new Date(isoUtc);
-  if (isSameLocalDay(date, new Date())) return formatTime(isoUtc);
+  if (isSameLocalDay(date, new Date())) return formatLocalClock(isoUtc);
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(date);
 }
 
