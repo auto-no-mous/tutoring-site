@@ -5,6 +5,7 @@ import { onMounted, ref } from "vue";
 import { deleteStudent, listStudents, updateStudent } from "@/api/admin";
 import ResetPasswordButton from "@/components/admin/ResetPasswordButton.vue";
 import type { User } from "@/types/user";
+import { timezoneOptions } from "@/utils/timezones";
 
 const students = ref<User[]>([]);
 const editingId = ref<string | null>(null);
@@ -100,7 +101,9 @@ onMounted(load);
             </label>
             <label class="flex flex-col gap-1 text-xs">
               Часовой пояс
-              <input v-model="editTimezone" placeholder="Europe/Moscow" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700" />
+              <select v-model="editTimezone" class="rounded-md border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-700">
+                <option v-for="tz in timezoneOptions(editTimezone)" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+              </select>
             </label>
           </div>
 

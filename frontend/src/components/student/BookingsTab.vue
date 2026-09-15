@@ -11,7 +11,7 @@ import RescheduleModal from "@/components/RescheduleModal.vue";
 import { useToastStore } from "@/stores/toast";
 import type { Booking } from "@/types/booking";
 import type { StudentGroupOccurrence } from "@/types/group";
-import { formatDateTimeWithMsk } from "@/utils/time";
+import { formatDateTimeWithMsk, MSK_TIMEZONE } from "@/utils/time";
 import { groupByWeekAndDay, isBeforeToday } from "@/utils/scheduleGrouping";
 
 const toast = useToastStore();
@@ -23,7 +23,9 @@ const occurrences = ref<StudentGroupOccurrence[]>([]);
 const whiteboards = ref<Whiteboard[]>([]);
 const reschedulingBooking = ref<Booking | null>(null);
 
-const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+// Дни группируются по московскому календарю, как и само время занятий (раздел 6):
+// по местному календарю занятие в 23:00 МСК уехало бы под заголовок следующего дня.
+const scheduleTimeZone = MSK_TIMEZONE;
 
 // A flat, keyable union of individual bookings and group occurrences so both kinds
 // can share one day/week-grouped schedule (see BookingScheduleGroups.vue, generic
@@ -32,21 +34,21 @@ type ScheduleItem = ({ kind: "booking" } & Booking) | ({ kind: "occurrence" } & 
 
 const upcoming = computed<ScheduleItem[]>(() => {
   const bookingItems: ScheduleItem[] = bookings.value
-    .filter((b) => b.status === "scheduled" && !isBeforeToday(b.start_at, localTimeZone))
+    .filter((b) => b.status === "scheduled" && !isBeforeToday(b.start_at, scheduleTimeZone))
     .map((b) => ({ kind: "booking", ...b }));
   const occurrenceItems: ScheduleItem[] = occurrences.value
-    .filter((o) => o.status !== "cancelled" && !isBeforeToday(o.start_at, localTimeZone))
+    .filter((o) => o.status !== "cancelled" && !isBeforeToday(o.start_at, scheduleTimeZone))
     .map((o) => ({ kind: "occurrence", ...o }));
   return [...bookingItems, ...occurrenceItems].sort((a, b) => a.start_at.localeCompare(b.start_at));
 });
 const past = computed(() =>
   bookings.value
-    .filter((b) => b.status !== "scheduled" || isBeforeToday(b.start_at, localTimeZone))
+    .filter((b) => b.status !== "scheduled" || isBeforeToday(b.start_at, scheduleTimeZone))
     .sort((a, b) => b.start_at.localeCompare(a.start_at))
     .slice(0, 20),
 );
 
-const weeks = computed(() => groupByWeekAndDay(upcoming.value, (item) => item.start_at, localTimeZone));
+const weeks = computed(() => groupByWeekAndDay(upcoming.value, (item) => item.start_at, scheduleTimeZone));
 
 async function load(): Promise<void> {
   [bookings.value, occurrences.value, whiteboards.value] = await Promise.all([
