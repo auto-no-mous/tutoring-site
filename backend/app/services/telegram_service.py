@@ -1,11 +1,14 @@
 import logging
 import secrets
+import ssl
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import Bot
 from telegram.error import TelegramError
+from telegram.request import HTTPXRequest
 
 from app.core.config import settings
 from app.models.enums import NotificationChannelPref
@@ -21,12 +24,35 @@ LINK_TOKEN_TTL = timedelta(minutes=15)
 _bot: Bot | None = None
 
 
+TELEGRAM_API_ROOT = "https://api.telegram.org"
+
+
+def api_root() -> str:
+    """Telegram API напрямую или через пересылку из settings.telegram_api_url. Bot
+    дописывает к base_url/base_file_url токен, поэтому оба строятся от этого корня."""
+    return (settings.telegram_api_url or TELEGRAM_API_ROOT).rstrip("/")
+
+
+def build_request(read_timeout: float = 5.0) -> HTTPXRequest:
+    """HTTP-клиент для Telegram API. Если задан сертификат пересылки, доверяем только
+    ему: сертификат самоподписанный и выдан на IP."""
+    httpx_kwargs: dict[str, Any] = {}
+    if settings.telegram_api_ca_file:
+        httpx_kwargs["verify"] = ssl.create_default_context(cafile=settings.telegram_api_ca_file)
+    return HTTPXRequest(read_timeout=read_timeout, httpx_kwargs=httpx_kwargs)
+
+
 def _get_bot() -> Bot | None:
     global _bot
     if not settings.telegram_enabled or not settings.telegram_bot_token:
         return None
     if _bot is None:
-        _bot = Bot(token=settings.telegram_bot_token)
+        _bot = Bot(
+            token=settings.telegram_bot_token,
+            base_url=f"{api_root()}/bot",
+            base_file_url=f"{api_root()}/file/bot",
+            request=build_request(),
+        )
     return _bot
 
 

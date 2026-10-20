@@ -65,7 +65,16 @@ def main() -> None:
     if not settings.telegram_bot_token:
         raise SystemExit("TELEGRAM_BOT_TOKEN не задан в backend/.env - получите токен у @BotFather (см. README.md).")
 
-    app = Application.builder().token(settings.telegram_bot_token).build()
+    app = (
+        Application.builder()
+        .token(settings.telegram_bot_token)
+        .base_url(f"{telegram_service.api_root()}/bot")
+        .base_file_url(f"{telegram_service.api_root()}/file/bot")
+        .request(telegram_service.build_request())
+        # getUpdates держит соединение открытым (long polling) - нужен запас по чтению.
+        .get_updates_request(telegram_service.build_request(read_timeout=60))
+        .build()
+    )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ALL, fallback))
 

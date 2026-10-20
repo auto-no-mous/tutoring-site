@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     # Bot's @username (without the @), used to build the t.me deep link shown in
     # Settings for the "Подключить Telegram" flow - see app.services.telegram_service.
     telegram_bot_username: str | None = None
+    # Из Москвы api.telegram.org недоступен, поэтому в продакшене и уведомления, и бот
+    # ходят в Telegram через nginx-пересылку на сервере в Нидерландах (ops/README.md,
+    # «Доступ к Telegram API»). TELEGRAM_API_URL - её адрес вместе с секретным путём,
+    # например https://203.0.113.5/<secret>; пусто - напрямую в api.telegram.org.
+    # TELEGRAM_API_CA_FILE - её самоподписанный сертификат: доверяем только ему.
+    telegram_api_url: str | None = None
+    telegram_api_ca_file: str | None = None
 
     # Вход через VK ID - OAuth 2.1 с обязательным PKCE (см. app.services.oauth_providers).
     # Секрет приложения не нужен: код обменивается на токен по code_verifier. Прежний
