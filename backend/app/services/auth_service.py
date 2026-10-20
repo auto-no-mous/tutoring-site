@@ -75,6 +75,13 @@ async def update_user_settings(db: AsyncSession, user: User, payload: UserSettin
     if "email" in data:
         email_changed = await prepare_email_change(db, user, data.pop("email"))
 
+    if "notification_settings" in data:
+        # Сохраняем целиком, с умолчаниями: exclude_unset выше выкинул бы из
+        # вложенной схемы всё, что клиент не прислал явно.
+        data["notification_settings"] = (
+            payload.notification_settings.model_dump() if payload.notification_settings else {}
+        )
+
     for field, value in data.items():
         setattr(user, field, value)
     if {"first_name", "last_name", "patronymic"} & data.keys():

@@ -68,10 +68,11 @@ class Booking(UUIDPKMixin, TimestampMixin, Base):
     meeting_link: Mapped[str | None] = mapped_column(String(512), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Set once the "upcoming lesson" reminder has been sent to the TUTOR (section
-    # 2.7), so a periodically-run reminder job doesn't re-notify the same booking.
-    # Tutor and student are reminded independently, each at their own configured
-    # lead time (User.reminder_lead_minutes), hence two separate columns.
+    # Set once the "upcoming lesson" reminder has been posted to the TUTOR's
+    # «Системные уведомления» on the site (section 2.7), so a periodically-run
+    # reminder job doesn't repeat it; student_reminder_sent_at - the same for the
+    # student. Telegram/email reminders have their own lead time per channel and are
+    # tracked separately, in BookingReminder.
     reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     student_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

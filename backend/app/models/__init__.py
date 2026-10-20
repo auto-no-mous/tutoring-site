@@ -6,7 +6,7 @@ from app.models.homework import HomeworkAssignment, HomeworkSubmission, Homework
 from app.models.identity import OAuthState, UserIdentity
 from app.models.lesson_type import LessonType
 from app.models.email_log import EmailLog
-from app.models.notification import NotificationLog
+from app.models.notification import BookingReminder, NotificationLog
 from app.models.review import Review
 from app.models.schedule import WeeklyAvailability
 from app.models.student_settings import TutorStudentSettings
@@ -35,6 +35,7 @@ __all__ = [
     "UserIdentity",
     "LessonType",
     "EmailLog",
+    "BookingReminder",
     "NotificationLog",
     "NotificationTemplate",
     "SystemNotification",

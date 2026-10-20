@@ -12,14 +12,14 @@ from app.models.enums import (
     BookingStatus,
     EmailKind,
     NotificationChannel,
-    NotificationChannelPref,
     NotificationEvent,
     NotificationStatus,
     SystemNotificationEvent,
 )
-from app.models.notification import NotificationLog
+from app.models.notification import BookingReminder, NotificationLog
 from app.models.tutor import TutorProfile
 from app.models.user import User
+from app.schemas.user import MAX_REMINDER_LEAD_MINUTES, NotificationSettings
 from app.services import system_notification_service
 from app.services.email_service import send_email
 from app.services.email_templates import render_email
@@ -27,9 +27,6 @@ from app.services.schedule_service import MSK
 from app.services.telegram_service import send_telegram_message
 from app.utils.time import ensure_aware, utcnow
 
-# Cap on Settings' "уведомлять за N минут" field (schemas/user.py) - a week is more
-# than generous, and bounds how far ahead send_upcoming_reminders has to scan.
-MAX_REMINDER_LEAD_MINUTES = 7 * 24 * 60
 
 logger = logging.getLogger("app.notifications")
 
@@ -45,7 +42,7 @@ async def notify(
     email_text: str | None = None,
 ) -> None:
     """Dispatches a notification over the channels the user chose in Settings
-    (User.notification_channel: off / email / telegram / both, section 2.7).
+    (User.notification_settings: per channel - on/off and which events, section 2.7).
     Best-effort: failures are logged to NotificationLog and swallowed so a
     misconfigured channel never breaks the calling business operation (booking,
     chat message, etc.).
@@ -56,27 +53,41 @@ async def notify(
     if user is None:
         return
 
-    channel_pref = user.notification_channel
-    if channel_pref == NotificationChannelPref.OFF.value:
-        return
+    prefs = notification_settings(user)
+    for channel in NotificationChannel:
+        if prefs.channel(channel).wants(event_type):
+            await _deliver(db, user, channel, event_type, title, body, email_html=email_html, email_text=email_text)
 
-    wants_telegram = channel_pref in (NotificationChannelPref.TELEGRAM.value, NotificationChannelPref.BOTH.value)
-    wants_email = channel_pref in (NotificationChannelPref.EMAIL.value, NotificationChannelPref.BOTH.value)
 
-    if user.telegram_chat_id and wants_telegram:
-        await _dispatch(db, user.id, NotificationChannel.TELEGRAM, event_type, title, body, user.telegram_chat_id)
+def notification_settings(user: User) -> NotificationSettings:
+    return NotificationSettings.model_validate(user.notification_settings or {})
 
-    if user.email and wants_email:
-        await _dispatch(
-            db,
-            user.id,
-            NotificationChannel.EMAIL,
-            event_type,
-            title,
-            email_text or body,
-            user.email,
-            email_html=email_html,
-        )
+
+def _destination(user: User, channel: NotificationChannel) -> str | None:
+    return user.telegram_chat_id if channel == NotificationChannel.TELEGRAM else user.email
+
+
+async def _deliver(
+    db: AsyncSession,
+    user: User,
+    channel: NotificationChannel,
+    event_type: NotificationEvent,
+    title: str,
+    body: str,
+    *,
+    email_html: str | None = None,
+    email_text: str | None = None,
+) -> bool:
+    """Отправляет в один канал, если туда есть куда слать (Telegram привязан, почта
+    указана). False - адреса нет, ничего не ушло."""
+    destination = _destination(user, channel)
+    if not destination:
+        return False
+    if channel == NotificationChannel.EMAIL:
+        await _dispatch(db, user.id, channel, event_type, title, email_text or body, destination, email_html=email_html)
+    else:
+        await _dispatch(db, user.id, channel, event_type, title, body, destination)
+    return True
 
 
 async def notify_tutor(
@@ -237,25 +248,25 @@ def _is_due(start_at: dt.datetime, now: dt.datetime, lead_minutes: int, toleranc
 
 
 async def send_upcoming_reminders(db: AsyncSession, tolerance_minutes: float = 10.0) -> int:
-    """Notifies each participant of an individual lesson starting soon, at THEIR OWN
-    configured lead time (User.reminder_lead_minutes, editable in Settings next to
-    the Telegram connect button - default 60 min). Tutor and student are reminded
-    independently since they can each set a different lead time, so a booking's two
-    reminders (reminder_sent_at / student_reminder_sent_at) are tracked separately.
+    """Напоминает участникам индивидуального занятия, что оно скоро. У каждого канала
+    своё «за сколько минут» (User.notification_settings, Настройки -> «Уведомления»),
+    так что в Telegram напоминание может прийти за 15 минут, а на почту за час -
+    отправка отмечается по каждому каналу отдельно (BookingReminder). Репетитор и
+    ученик настраивают это каждый для себя и напоминаются независимо.
+
+    Плюс запись в «Системные уведомления» на сайте: она приходит вместе с самым ранним
+    из включённых напоминаний, а если в каналах они выключены - за
+    DEFAULT_SITE_REMINDER_MINUTES (отмечается в Booking.reminder_sent_at /
+    student_reminder_sent_at).
 
     The default tolerance is sized against the scheduler cadence documented in
-    README.md ("Telegram-бот" section, systemd timer example: every 10 minutes) - a
-    ±10 min window comfortably covers a 10-minute gap between runs with margin for
-    scheduler jitter. If you run the external scheduler less often than that, widen
-    this value accordingly or a reminder can be missed entirely (the window closes
-    before the next run ever checks it).
+    ops/README.md (systemd timer, every 10 minutes) - a ±10 min window comfortably
+    covers a 10-minute gap between runs with margin for scheduler jitter. If you run
+    the external scheduler less often than that, widen this value accordingly or a
+    reminder can be missed entirely (the window closes before the next run ever
+    checks it). Each (booking, recipient, channel) is only ever reminded once.
 
-    Meant to be run frequently (e.g. every minute) by an external scheduler - this
-    codebase doesn't wire one up itself (see app/scripts/send_reminders.py,
-    cron-friendly one-shot design; run-local.ps1 loops it for local testing). The
-    tolerance window is what makes an infrequent/imprecise scheduler still work: as
-    long as it runs at least once within +/-tolerance_minutes of the due moment, the
-    reminder fires; each (booking, recipient) pair is only ever reminded once."""
+    Возвращает, сколько напоминаний ушло в каналы (Telegram/почта)."""
     now = utcnow()
     window_end = now + dt.timedelta(minutes=MAX_REMINDER_LEAD_MINUTES + tolerance_minutes)
 
@@ -264,62 +275,90 @@ async def send_upcoming_reminders(db: AsyncSession, tolerance_minutes: float = 1
             Booking.status == BookingStatus.SCHEDULED.value,
             Booking.start_at > now,
             Booking.start_at <= window_end,
-            (Booking.reminder_sent_at.is_(None)) | (Booking.student_reminder_sent_at.is_(None)),
         )
     )
     bookings = list(result.scalars().all())
 
     sent = 0
     for booking in bookings:
-        start_at = ensure_aware(booking.start_at)
-        start_msk = start_at.astimezone(MSK)
-        time_str = f"{start_msk:%H:%M}"
+        tutor_profile = await db.get(TutorProfile, booking.tutor_id)
+        tutor_user = await db.get(User, tutor_profile.user_id) if tutor_profile else None
+        student_user = await db.get(User, booking.student_id) if booking.student_id else None
 
-        if booking.reminder_sent_at is None:
-            tutor_profile = await db.get(TutorProfile, booking.tutor_id)
-            tutor_user = await db.get(User, tutor_profile.user_id) if tutor_profile else None
-            if tutor_user is not None and _is_due(start_at, now, tutor_user.reminder_lead_minutes, tolerance_minutes):
-                student = await db.get(User, booking.student_id) if booking.student_id else None
-                student_name = student.display_name if student else "учеником"
-                reminder_text, reminder_html = _reminder_email(student_name, start_msk, for_tutor=True)
-                await notify(
-                    db, tutor_user.id, NotificationEvent.UPCOMING_REMINDER,
-                    "Скоро занятие",
-                    f"Занятие с {student_name} начнётся {start_msk:%d.%m.%Y %H:%M} (МСК).",
-                    email_html=reminder_html, email_text=reminder_text,
-                )
-                await system_notification_service.notify(
-                    db, tutor_user.id, SystemNotificationEvent.UPCOMING_LESSON_REMINDER,
-                    student_name=student_name, time=time_str, lead_minutes=str(tutor_user.reminder_lead_minutes),
-                )
-                booking.reminder_sent_at = now
-                sent += 1
+        if tutor_user is not None:
+            sent += await _remind(
+                db, booking, tutor_user, now, tolerance_minutes,
+                other_name=student_user.display_name if student_user else "учеником",
+                for_tutor=True,
+            )
+        if student_user is not None:
+            sent += await _remind(
+                db, booking, student_user, now, tolerance_minutes,
+                other_name=tutor_user.display_name if tutor_user else "репетитором",
+                for_tutor=False,
+            )
 
-        if booking.student_id is not None and booking.student_reminder_sent_at is None:
-            student_user = await db.get(User, booking.student_id)
-            if student_user is not None and _is_due(
-                start_at, now, student_user.reminder_lead_minutes, tolerance_minutes
-            ):
-                tutor_profile2 = await db.get(TutorProfile, booking.tutor_id)
-                tutor_user2 = await db.get(User, tutor_profile2.user_id) if tutor_profile2 else None
-                tutor_name = tutor_user2.display_name if tutor_user2 else "репетитором"
-                hint = local_time_hint(student_user, start_at)
-                reminder_text, reminder_html = _reminder_email(
-                    tutor_name, start_msk, for_tutor=False, local_hint=hint
-                )
-                await notify(
-                    db, student_user.id, NotificationEvent.UPCOMING_REMINDER,
-                    "Скоро занятие",
-                    f"Занятие с {tutor_name} начнётся {start_msk:%d.%m.%Y %H:%M} (МСК){hint}.",
-                    email_html=reminder_html, email_text=reminder_text,
-                )
-                await system_notification_service.notify(
-                    db, student_user.id, SystemNotificationEvent.UPCOMING_LESSON_REMINDER,
-                    tutor_name=tutor_name, time=time_str, lead_minutes=str(student_user.reminder_lead_minutes),
-                )
-                booking.student_reminder_sent_at = now
-                sent += 1
+    await db.commit()
+    return sent
 
-    if sent:
-        await db.commit()
+
+# «Системные уведомления» на сайте приходят и тем, кто выключил напоминания в
+# Telegram и на почту, - так было и при прежнем переключателе «Не присылать».
+DEFAULT_SITE_REMINDER_MINUTES = 60
+
+
+async def _remind(
+    db: AsyncSession,
+    booking: Booking,
+    user: User,
+    now: dt.datetime,
+    tolerance_minutes: float,
+    *,
+    other_name: str,
+    for_tutor: bool,
+) -> int:
+    start_at = ensure_aware(booking.start_at)
+    start_msk = start_at.astimezone(MSK)
+    hint = "" if for_tutor else local_time_hint(user, start_at)
+    prefs = notification_settings(user)
+
+    already = set(
+        (
+            await db.scalars(
+                select(BookingReminder.channel).where(
+                    BookingReminder.booking_id == booking.id, BookingReminder.user_id == user.id
+                )
+            )
+        ).all()
+    )
+
+    sent = 0
+    leads: list[int] = []
+    for channel in NotificationChannel:
+        channel_prefs = prefs.channel(channel)
+        if not channel_prefs.wants(NotificationEvent.UPCOMING_REMINDER) or not _destination(user, channel):
+            continue
+        leads.append(channel_prefs.reminder_lead_minutes)
+        if channel.value in already or not _is_due(start_at, now, channel_prefs.reminder_lead_minutes, tolerance_minutes):
+            continue
+        reminder_text, reminder_html = _reminder_email(other_name, start_msk, for_tutor=for_tutor, local_hint=hint)
+        await _deliver(
+            db, user, channel, NotificationEvent.UPCOMING_REMINDER,
+            "Скоро занятие",
+            f"Занятие с {other_name} начнётся {start_msk:%d.%m.%Y %H:%M} (МСК){hint}.",
+            email_html=reminder_html, email_text=reminder_text,
+        )
+        db.add(BookingReminder(booking_id=booking.id, user_id=user.id, channel=channel.value, sent_at=now))
+        sent += 1
+
+    site_lead = max(leads, default=DEFAULT_SITE_REMINDER_MINUTES)
+    site_sent_attr = "reminder_sent_at" if for_tutor else "student_reminder_sent_at"
+    if getattr(booking, site_sent_attr) is None and _is_due(start_at, now, site_lead, tolerance_minutes):
+        name_param = {"student_name": other_name} if for_tutor else {"tutor_name": other_name}
+        await system_notification_service.notify(
+            db, user.id, SystemNotificationEvent.UPCOMING_LESSON_REMINDER,
+            **name_param, time=f"{start_msk:%H:%M}", lead_minutes=str(site_lead),
+        )
+        setattr(booking, site_sent_attr, now)
+
     return sent

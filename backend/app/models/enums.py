@@ -109,18 +109,6 @@ class NotificationEvent(StrEnum):
     OTHER = "other"
 
 
-class NotificationChannelPref(StrEnum):
-    """Как пользователь хочет получать уведомления и напоминания о занятиях
-    (Настройки -> "Напоминания и уведомления"). Заменила прежний флаг
-    email_notifications_enabled: каналов стало два, и булева галочка их уже не
-    описывала."""
-
-    OFF = "off"
-    EMAIL = "email"
-    TELEGRAM = "telegram"
-    BOTH = "both"
-
-
 class NotificationStatus(StrEnum):
     PENDING = "pending"
     SENT = "sent"

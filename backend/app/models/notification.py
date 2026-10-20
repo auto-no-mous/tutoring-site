@@ -24,3 +24,17 @@ class NotificationLog(UUIDPKMixin, Base):
         DateTime(timezone=True), server_default=None, default=utcnow, index=True
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BookingReminder(Base):
+    """Какие напоминания «Скоро занятие» по занятию уже ушли: кому и в какой канал.
+    У каждого канала своё «за сколько минут» (User.notification_settings), поэтому
+    один и тот же человек получает напоминание в Telegram и на почту в разное время,
+    и отмечать отправку нужно по каждому каналу отдельно."""
+
+    __tablename__ = "booking_reminders"
+
+    booking_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("bookings.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    channel: Mapped[str] = mapped_column(String(16), primary_key=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

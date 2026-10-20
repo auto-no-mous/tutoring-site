@@ -2,8 +2,51 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models.enums import NotificationChannelPref
+from app.models.enums import NotificationChannel, NotificationEvent
 from app.schemas.common import IANATimezone, UTCDateTime
+
+# Напоминание дальше недели вперёд не нужно, а окно, которое просматривает
+# notification_service.send_upcoming_reminders, рассчитано ровно на этот потолок.
+MAX_REMINDER_LEAD_MINUTES = 7 * 24 * 60
+
+
+class ChannelNotificationSettings(BaseModel):
+    """Настройки одного канала (Настройки -> «Уведомления»): сам канал и какие
+    события в него слать. События, у которых своего пункта нет (сообщения в чате,
+    заявки в группы и т.п.), идут по каналу, пока он включён."""
+
+    enabled: bool = True
+    new_booking: bool = True
+    schedule_change: bool = True
+    reminder: bool = True
+    reminder_lead_minutes: int = Field(default=60, ge=1, le=MAX_REMINDER_LEAD_MINUTES)
+
+    def wants(self, event: NotificationEvent) -> bool:
+        if not self.enabled:
+            return False
+        switch = _EVENT_SWITCHES.get(event)
+        return True if switch is None else bool(getattr(self, switch))
+
+
+_EVENT_SWITCHES = {
+    NotificationEvent.NEW_BOOKING: "new_booking",
+    NotificationEvent.SCHEDULE_CHANGE: "schedule_change",
+    NotificationEvent.UPCOMING_REMINDER: "reminder",
+}
+
+
+class NotificationSettings(BaseModel):
+    """Хранится в User.notification_settings (JSON) - по ключу на канал. Новый канал
+    это новое поле здесь, без миграции: у тех, кто его ещё не настраивал, сработают
+    умолчания. Раньше был один переключатель «почта / мессенджер / оба / никуда»,
+    и с каждым новым каналом вариантов становилось бы кратно больше."""
+
+    telegram: ChannelNotificationSettings = Field(default_factory=ChannelNotificationSettings)
+    email: ChannelNotificationSettings = Field(default_factory=ChannelNotificationSettings)
+
+    def channel(self, channel: NotificationChannel) -> ChannelNotificationSettings:
+        settings: ChannelNotificationSettings = getattr(self, channel.value)
+        return settings
 
 
 class UserOut(BaseModel):
@@ -22,8 +65,7 @@ class UserOut(BaseModel):
     is_active: bool
     timezone: str
     telegram_chat_id: str | None
-    notification_channel: str
-    reminder_lead_minutes: int
+    notification_settings: NotificationSettings
     # Чем можно войти в аккаунт: "password" и/или провайдеры (vk, yandex) - см.
     # User.auth_providers. Раздел "Способы входа" в настройках строится по нему.
     auth_providers: list[str]
@@ -44,9 +86,5 @@ class UserSettingsUpdate(BaseModel):
     # оседали значения вроде "Chelyabinsk", от которых нельзя посчитать смещение.
     timezone: IANATimezone | None = None
     telegram_chat_id: str | None = None
-    # off / email / telegram / both - см. NotificationChannelPref.
-    notification_channel: NotificationChannelPref | None = None
-    # How long before a lesson to send the "Скоро занятие" reminder (section 2.7) -
-    # capped at a week (see notification_service.MAX_REMINDER_LEAD_MINUTES, which
-    # send_upcoming_reminders' scan window is sized against).
-    reminder_lead_minutes: int | None = Field(default=None, ge=1, le=7 * 24 * 60)
+    # Заменяется целиком: что прислали, то и сохраняем (недостающее - умолчания).
+    notification_settings: NotificationSettings | None = None

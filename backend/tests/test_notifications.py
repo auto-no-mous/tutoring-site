@@ -138,7 +138,7 @@ async def test_upcoming_reminder_sent_once(client: AsyncClient, db_session: Asyn
     ).json()["id"]
 
     # Both tutor and student default to a 60-minute reminder lead time (see
-    # User.reminder_lead_minutes / Settings) - land the booking right at that mark so
+    # User.notification_settings / Settings) - land the booking right at that mark so
     # both are due at once.
     start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=60)
     booking = Booking(
@@ -182,12 +182,14 @@ async def test_reminder_lead_time_is_per_user_and_independent(client: AsyncClien
         )
     ).json()["id"]
 
-    # Student wants an earlier heads-up (15 min); tutor keeps the 60-minute default.
+    # Student wants a later heads-up (15 min); tutor keeps the 60-minute default.
     settings_resp = await client.patch(
-        "/api/v1/auth/me", headers=student["headers"], json={"reminder_lead_minutes": 15}
+        "/api/v1/auth/me",
+        headers=student["headers"],
+        json={"notification_settings": {"email": {"reminder_lead_minutes": 15}}},
     )
     assert settings_resp.status_code == 200, settings_resp.text
-    assert settings_resp.json()["reminder_lead_minutes"] == 15
+    assert settings_resp.json()["notification_settings"]["email"]["reminder_lead_minutes"] == 15
 
     start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=15)
     booking = Booking(
@@ -224,16 +226,17 @@ async def test_reminder_lead_time_is_per_user_and_independent(client: AsyncClien
 async def test_reminder_lead_minutes_bounds_validated(client: AsyncClient) -> None:
     student = await _register(client, "notif-student6@example.com", "student")
 
-    too_low = await client.patch("/api/v1/auth/me", headers=student["headers"], json={"reminder_lead_minutes": 0})
+    def lead(minutes: int) -> dict:
+        return {"notification_settings": {"telegram": {"reminder_lead_minutes": minutes}}}
+
+    too_low = await client.patch("/api/v1/auth/me", headers=student["headers"], json=lead(0))
     assert too_low.status_code == 422
 
-    too_high = await client.patch(
-        "/api/v1/auth/me", headers=student["headers"], json={"reminder_lead_minutes": 7 * 24 * 60 + 1}
-    )
+    too_high = await client.patch("/api/v1/auth/me", headers=student["headers"], json=lead(7 * 24 * 60 + 1))
     assert too_high.status_code == 422
 
     default_resp = await client.get("/api/v1/auth/me", headers=student["headers"])
-    assert default_resp.json()["reminder_lead_minutes"] == 60
+    assert default_resp.json()["notification_settings"]["telegram"]["reminder_lead_minutes"] == 60
 
 
 async def test_reminder_tells_a_non_moscow_student_their_own_time(

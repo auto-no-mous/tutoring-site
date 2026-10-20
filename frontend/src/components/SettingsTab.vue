@@ -17,22 +17,14 @@ import {
   updateMySettings,
   uploadMyPhoto,
 } from "@/api/users";
+import NotificationSettingsEditor from "@/components/NotificationSettingsEditor.vue";
 import PhotoCropModal from "@/components/PhotoCropModal.vue";
 import { useAuthStore } from "@/stores/auth";
 import { detectTimezone, timezoneOptions } from "@/utils/timezones";
 import { apiErrorMessage } from "@/utils/apiError";
 import type { RecurringSeriesDetail } from "@/types/booking";
-import type { NotificationChannel } from "@/types/user";
+import type { NotificationSettings } from "@/types/user";
 import type { TutorProfile } from "@/types/tutor";
-
-// needsTelegram - вариант бессмысленен без привязанного мессенджера: уведомления
-// просто некуда слать. Такие кнопки выключаются, пока Telegram не подключён.
-const NOTIFICATION_CHANNELS: { value: NotificationChannel; label: string; needsTelegram: boolean }[] = [
-  { value: "both", label: "Почта и мессенджер", needsTelegram: true },
-  { value: "email", label: "Только почта", needsTelegram: false },
-  { value: "telegram", label: "Только мессенджер", needsTelegram: true },
-  { value: "off", label: "Не присылать", needsTelegram: false },
-];
 
 const WEEKDAY_NAMES = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
 
@@ -45,8 +37,10 @@ const email = ref(auth.user?.email ?? "");
 // Если пояс ещё не выбирали, предлагаем тот, что сообщает браузер.
 const timezone = ref(auth.user?.timezone || detectTimezone());
 const timezones = computed(() => timezoneOptions(auth.user?.timezone));
-const notificationChannel = ref<NotificationChannel>(auth.user?.notification_channel ?? "both");
-const reminderLeadMinutes = ref(auth.user?.reminder_lead_minutes ?? 60);
+// Копия, а не ссылка на auth.user: до «Сохранить» правки живут только в форме.
+const notificationSettings = ref<NotificationSettings | null>(
+  auth.user ? structuredClone(auth.user.notification_settings) : null,
+);
 const savedMessage = ref("");
 const emailError = ref("");
 const resendMessage = ref("");
@@ -158,8 +152,7 @@ async function save(): Promise<void> {
       grade: grade.value,
       email: email.value || undefined,
       timezone: timezone.value,
-      notification_channel: notificationChannel.value,
-      reminder_lead_minutes: reminderLeadMinutes.value,
+      notification_settings: notificationSettings.value ?? undefined,
     });
     auth.user = updated;
     savedMessage.value = "Сохранено";
@@ -207,11 +200,13 @@ async function checkTelegramLinked(): Promise<void> {
     await auth.fetchCurrentUser();
     if (auth.user?.telegram_chat_id) {
       telegramDeepLink.value = null;
-      // При привязке сервер сам переводит канал в "Почта и мессенджер"
-      // (backend telegram_service.link_chat_by_token) - забираем это значение в
-      // форму, иначе она продолжила бы показывать прежний выбор и затёрла бы его
-      // при следующем сохранении.
-      notificationChannel.value = auth.user.notification_channel;
+      // При привязке сервер сам включает канал Telegram (backend
+      // telegram_service.link_chat_by_token) - забираем это значение в форму, иначе
+      // она продолжила бы показывать канал выключенным и затёрла бы его при
+      // следующем сохранении.
+      if (notificationSettings.value) {
+        notificationSettings.value.telegram.enabled = auth.user.notification_settings.telegram.enabled;
+      }
     }
   } finally {
     isCheckingTelegram.value = false;
@@ -398,51 +393,22 @@ onMounted(load);
         </span>
       </div>
 
-      <label class="flex flex-col gap-1 text-sm">
-        Уведомлять о занятии за
-        <span class="flex items-center gap-2">
-          <input
-            v-model.number="reminderLeadMinutes"
-            type="number"
-            min="1"
-            max="10080"
-            class="w-24 rounded-md border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
-          />
-          мин до его начала
-        </span>
-        <span class="text-xs text-slate-400">Придёт в Telegram/на почту и в «Системные уведомления». По умолчанию — 60 минут.</span>
-      </label>
-
-      <div class="flex flex-col gap-2 text-sm">
-        <span>Напоминания о занятиях и уведомления</span>
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="option in NOTIFICATION_CHANNELS"
-            :key="option.value"
-            type="button"
-            :disabled="option.needsTelegram && !auth.user?.telegram_chat_id"
-            :title="option.needsTelegram && !auth.user?.telegram_chat_id ? 'Сначала подключите Telegram выше' : undefined"
-            class="rounded-lg border px-3 py-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-300 dark:disabled:hover:border-slate-700"
-            :class="
-              notificationChannel === option.value
-                ? 'border-brand-500 bg-brand-50 font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'
-                : 'border-slate-300 text-slate-600 hover:border-brand-400 dark:border-slate-700 dark:text-slate-300'
-            "
-            @click="notificationChannel = option.value"
-          >
-            {{ option.label }}
-          </button>
-        </div>
+      <div v-if="notificationSettings" class="flex flex-col gap-2 text-sm">
+        <span>Уведомления</span>
+        <NotificationSettingsEditor
+          v-model="notificationSettings"
+          :available="{ telegram: Boolean(auth.user?.telegram_chat_id), email: Boolean(auth.user?.email) }"
+          :unavailable-hint="{
+            telegram: 'Telegram не подключён — кнопка «Подключить Telegram» выше.',
+            email: 'Почта не указана — впишите её в поле «Почта» выше и сохраните.',
+          }"
+        />
         <p class="text-xs text-slate-500">
-          {{
-            !auth.user?.telegram_chat_id && (notificationChannel === "telegram" || notificationChannel === "both")
-              ? "Мессенджер сейчас не подключён — уведомления в него приходить не будут. Подключите Telegram выше или выберите «Только почта»."
-              : !auth.user?.telegram_chat_id
-                ? "Варианты с мессенджером станут доступны после подключения Telegram — кнопка выше."
-                : notificationChannel === "off"
-                ? "Напоминания и уведомления о занятиях приходить не будут. Письма о регистрации и сбросе пароля отправляются всегда."
-                : "Письма о регистрации и сбросе пароля отправляются всегда, независимо от этой настройки."
-          }}
+          Напоминание о занятии появляется и в «Системных уведомлениях» на сайте.
+          <template v-if="auth.user?.role === 'tutor'">
+            Сообщения в чате и заявки в группы приходят в каждый включённый канал.
+          </template>
+          Письма о регистрации и сбросе пароля отправляются всегда.
         </p>
       </div>
 

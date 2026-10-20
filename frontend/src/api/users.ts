@@ -1,5 +1,5 @@
 import { apiClient } from "@/api/client";
-import type { User } from "@/types/user";
+import type { NotificationSettings, User } from "@/types/user";
 
 export interface UserSettingsUpdate {
   first_name?: string;
@@ -9,8 +9,7 @@ export interface UserSettingsUpdate {
   email?: string;
   timezone?: string;
   telegram_chat_id?: string | null;
-  notification_channel?: string;
-  reminder_lead_minutes?: number;
+  notification_settings?: NotificationSettings;
 }
 
 export async function updateMySettings(payload: UserSettingsUpdate) {

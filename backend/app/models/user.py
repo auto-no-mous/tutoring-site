@@ -2,11 +2,11 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
-from app.models.enums import AuthProvider, NotificationChannelPref
+from app.models.enums import AuthProvider
 from app.models.identity import UserIdentity
 from app.utils.time import utcnow
 
@@ -65,17 +65,12 @@ class User(UUIDPKMixin, TimestampMixin, Base):
 
     # Notification channel settings (section 2.7)
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Куда слать уведомления и напоминания: off / email / telegram / both
-    # (NotificationChannelPref). Письма о регистрации и сбросе пароля сюда не
-    # относятся - они транзакционные и уходят всегда.
-    notification_channel: Mapped[str] = mapped_column(
-        String(16), default=NotificationChannelPref.BOTH.value, server_default=NotificationChannelPref.BOTH.value
-    )
-    # How long before a lesson this user wants the "Скоро занятие" reminder (see
-    # notification_service.send_upcoming_reminders) - editable in Settings, next to
-    # the Telegram connect button. Each participant of a booking has their own value,
-    # so a tutor and student on the same lesson can be reminded at different times.
-    reminder_lead_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    # Что и куда слать: по каналу на ключ, внутри - сам канал, отдельные события и
+    # за сколько минут напоминать о занятии. Формат и умолчания - схема
+    # app.schemas.user.NotificationSettings (читать через неё, а не напрямую: у
+    # старых записей и новых каналов ключей может не быть). Письма о регистрации и
+    # сбросе пароля сюда не относятся - они транзакционные и уходят всегда.
+    notification_settings: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Ученик, заведённый репетитором вручную (раздел "Ученики" в статистике): обычный
     # аккаунт без единого способа входа. Поле указывает, чей он: пока оно заполнено,
