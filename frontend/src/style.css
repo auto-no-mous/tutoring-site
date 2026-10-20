@@ -156,6 +156,18 @@ body::before {
     accent-color: var(--color-brand-500);
   }
 
+  /* Тёмная тема для нативных элементов: раскрытый список <select>, календарь
+     даты, полосы прокрутки. Без этого браузер рисует список опций белым, а текст
+     в нём наследует светлый цвет тёмной темы - белое на белом. */
+  .dark {
+    color-scheme: dark;
+  }
+  .dark option,
+  .dark optgroup {
+    background-color: var(--color-slate-900);
+    color: var(--color-slate-100);
+  }
+
   input:not([type="checkbox"], [type="radio"]):focus-visible,
   select:focus-visible,
   textarea:focus-visible,
