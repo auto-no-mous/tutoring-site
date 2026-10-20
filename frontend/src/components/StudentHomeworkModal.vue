@@ -27,9 +27,26 @@ async function load(): Promise<void> {
   try {
     items.value = await getStudentHomeworkForTutor(props.studentId);
     showForm.value = items.value.length === 0;
+    if (showForm.value) resetForm();
   } finally {
     isLoading.value = false;
   }
+}
+
+// Новое задание обычно продолжает прошлое, поэтому название и способ сдачи берём из
+// последнего (список приходит от новых к старым). Материал - всегда новый.
+function resetForm(): void {
+  const last = items.value[0];
+  title.value = last?.title ?? "";
+  submissionMode.value = last?.submission_mode === "file_upload" ? "file_upload" : "mark_done";
+  contentUrl.value = "";
+  file.value = null;
+  error.value = "";
+}
+
+function openForm(): void {
+  resetForm();
+  showForm.value = true;
 }
 
 function onFileChange(event: Event): void {
@@ -40,16 +57,13 @@ async function create(): Promise<void> {
   error.value = "";
   try {
     await createHomework({
-      title: title.value,
+      title: title.value.trim() || undefined,
       submission_mode: submissionMode.value,
       student_ids: [props.studentId],
       group_ids: [],
       content_url: contentUrl.value || undefined,
       file: file.value ?? undefined,
     });
-    title.value = "";
-    contentUrl.value = "";
-    file.value = null;
     showForm.value = false;
     await load();
     emit("changed");
@@ -98,7 +112,7 @@ onMounted(load);
             :class="homeworkCardClass(item.status)"
           >
             <div class="flex items-center justify-between">
-              <div class="font-medium">{{ item.title }}</div>
+              <div class="font-medium">{{ item.title || "Без названия" }}</div>
               <select
                 :value="item.status"
                 class="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
@@ -127,15 +141,11 @@ onMounted(load);
             v-if="!showForm"
             type="button"
             class="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
-            @click="showForm = true"
+            @click="openForm"
           >
             + Новое задание
           </button>
           <form v-else class="flex flex-col gap-2" @submit.prevent="create">
-            <label class="flex flex-col gap-1 text-sm">
-              Название задания
-              <input v-model="title" required class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700" />
-            </label>
             <label class="flex flex-col gap-1 text-sm">
               Что должен сделать ученик
               <select v-model="submissionMode" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700">
@@ -152,6 +162,14 @@ onMounted(load);
               class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
               @change="onFileChange"
             />
+            <label class="flex flex-col gap-1 text-sm">
+              Название задания
+              <input
+                v-model="title"
+                placeholder="необязательно"
+                class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700"
+              />
+            </label>
             <p v-if="error" class="text-xs text-red-600 dark:text-red-400">{{ error }}</p>
             <div class="flex items-center gap-2">
               <button type="submit" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white">

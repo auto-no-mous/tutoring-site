@@ -74,9 +74,12 @@ const createFile = ref<File | null>(null);
 const createFileInputEl = ref<HTMLInputElement | null>(null);
 const createError = ref("");
 
+// Новое задание обычно продолжает прошлое, поэтому название и способ сдачи берём из
+// последнего выданного (список приходит от новых к старым). Материал - всегда новый.
 function resetCreateForm(): void {
-  createTitle.value = "";
-  createSubmissionMode.value = "mark_done";
+  const last = assignments.value[0];
+  createTitle.value = last?.title ?? "";
+  createSubmissionMode.value = last?.submission_mode === "file_upload" ? "file_upload" : "mark_done";
   createStudentIds.value = [];
   createGroupIds.value = [];
   createContentUrl.value = "";
@@ -87,7 +90,7 @@ function resetCreateForm(): void {
 
 function toggleCreateForm(): void {
   showCreateForm.value = !showCreateForm.value;
-  if (!showCreateForm.value) resetCreateForm();
+  resetCreateForm();
 }
 
 function onCreateFileChange(event: Event): void {
@@ -277,14 +280,6 @@ onMounted(load);
             @update:group-ids="createGroupIds = $event"
           />
         </label>
-        <label class="flex flex-col gap-1 text-sm">
-          Название задания
-          <input
-            v-model="createTitle"
-            placeholder="необязательно"
-            class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
-          />
-        </label>
         <div class="flex flex-col gap-1 text-sm">
           Что должен сделать ученик
           <div class="inline-flex w-fit rounded-md border border-slate-300 p-0.5 text-xs dark:border-slate-700">
@@ -314,6 +309,14 @@ onMounted(load);
           class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
           @change="onCreateFileChange"
         />
+        <label class="flex flex-col gap-1 text-sm">
+          Название задания
+          <input
+            v-model="createTitle"
+            placeholder="необязательно"
+            class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
+          />
+        </label>
         <p v-if="createError" class="text-sm text-red-600 dark:text-red-400">{{ createError }}</p>
         <button type="submit" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white">
           Отправить

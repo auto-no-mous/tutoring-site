@@ -96,4 +96,24 @@ describe("tutor HomeworkTab", () => {
     expect(cards[1].classes()).toContain("border-l-green-500");
     expect(cards[2].classes()).toContain("border-l-amber-400");
   });
+
+  it("новое задание берёт название и способ сдачи из последнего, но не материал", async () => {
+    listMyAssignments.mockResolvedValue([
+      assignment({ id: "a-new", title: "Параграф 12", submission_mode: "file_upload" }),
+      assignment({ id: "a-old", title: "Старое", submission_mode: "mark_done" }),
+    ]);
+    const wrapper = mount(HomeworkTab);
+    await flushPromises();
+
+    await wrapper.findAll("button").find((b) => b.text() === "+ ДЗ")!.trigger("click");
+
+    const form = wrapper.find("form");
+    const inputs = form.findAll("input:not([type=file])");
+    const linkInput = inputs.find((i) => i.element.closest("label")?.textContent?.includes("Ссылка"))!;
+    const titleInput = inputs.find((i) => i.element.closest("label")?.textContent?.includes("Название"))!;
+    expect((titleInput.element as HTMLInputElement).value).toBe("Параграф 12");
+    expect((linkInput.element as HTMLInputElement).value).toBe("");
+    const active = form.findAll("button").find((b) => b.classes().includes("bg-brand-500") && b.attributes("type") === "button");
+    expect(active?.text()).toBe("Загрузить файл");
+  });
 });
