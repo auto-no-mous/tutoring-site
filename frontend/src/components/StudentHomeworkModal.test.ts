@@ -82,4 +82,23 @@ describe("StudentHomeworkModal", () => {
       expect.objectContaining({ title: undefined, submission_mode: "mark_done", content_url: "https://example.com/new" }),
     );
   });
+
+  it("показывает последние 5 заданий, остальные - по кнопке", async () => {
+    getStudentHomeworkForTutor.mockResolvedValue(
+      Array.from({ length: 7 }, (_, i) => homework({ submission_id: `sub-${i}`, title: `Задание ${i + 1}` })),
+    );
+    mount(StudentHomeworkModal, { props: { studentId: "s-1", studentName: "Пётр" }, attachTo: document.body });
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("Задание 5");
+    expect(document.body.textContent).not.toContain("Задание 6");
+
+    const more = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.includes("Показать ещё"));
+    expect(more!.textContent).toContain("Показать ещё 2");
+    more!.click();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("Задание 7");
+    expect(Array.from(document.body.querySelectorAll("button")).some((b) => b.textContent?.includes("Показать ещё"))).toBe(false);
+  });
 });

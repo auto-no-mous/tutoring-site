@@ -91,4 +91,27 @@ describe("student HomeworkTab", () => {
     expect(cards[1].classes()).toContain("border-l-sky-500");
     expect(cards[2].classes()).toContain("border-l-green-500");
   });
+
+  it("показывает последние 5 заданий, остальные - по кнопке", async () => {
+    myHomework.mockResolvedValue(
+      Array.from({ length: 8 }, (_, i) => homework({ submission_id: `sub-${i}`, title: `Задание ${i + 1}`, status: "done" })),
+    );
+    const wrapper = mount(HomeworkTab);
+    await flushPromises();
+
+    expect(wrapper.findAll("[data-status]")).toHaveLength(5);
+    expect(wrapper.text()).not.toContain("Задание 6");
+
+    await wrapper.findAll("button").find((b) => b.text().includes("Показать ещё 3"))!.trigger("click");
+    expect(wrapper.findAll("[data-status]")).toHaveLength(8);
+    expect(wrapper.text()).not.toContain("Показать ещё");
+  });
+
+  it("без лишних заданий кнопки нет", async () => {
+    myHomework.mockResolvedValue(Array.from({ length: 5 }, (_, i) => homework({ submission_id: `sub-${i}` })));
+    const wrapper = mount(HomeworkTab);
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Показать ещё");
+  });
 });

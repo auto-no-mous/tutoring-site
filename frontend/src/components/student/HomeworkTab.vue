@@ -4,10 +4,11 @@ import { onMounted, ref } from "vue";
 import { deleteSubmissionFile, markDone, myHomework, uploadSubmission } from "@/api/homework";
 import FileDropZone from "@/components/FileDropZone.vue";
 import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
+import ShowMoreHomework from "@/components/homework/ShowMoreHomework.vue";
 import { useNotificationsStore } from "@/stores/notifications";
 import type { StudentHomework } from "@/types/homework";
 import { apiErrorMessage } from "@/utils/apiError";
-import { homeworkCardClass, homeworkStatusLabel, homeworkStatusTextClass } from "@/utils/homework";
+import { homeworkCardClass, homeworkStatusLabel, homeworkStatusTextClass, useHomeworkPage } from "@/utils/homework";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
 const notifications = useNotificationsStore();
@@ -16,6 +17,7 @@ const items = ref<StudentHomework[]>([]);
 const files = ref<Record<string, File | null>>({});
 const errors = ref<Record<string, string>>({});
 const busyId = ref<string | null>(null);
+const page = useHomeworkPage(items);
 
 async function load(): Promise<void> {
   items.value = await myHomework();
@@ -77,7 +79,7 @@ onMounted(load);
   <div class="flex max-w-2xl flex-col gap-3">
     <p v-if="items.length === 0" class="text-sm text-slate-400">Домашних заданий пока нет.</p>
     <div
-      v-for="item in items"
+      v-for="item in page.visible.value"
       :key="item.submission_id"
       :data-status="item.status"
       class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800"
@@ -134,5 +136,6 @@ onMounted(load);
         {{ errors[item.submission_id] }}
       </p>
     </div>
+    <ShowMoreHomework :remaining="page.remaining.value" @more="page.showMore" />
   </div>
 </template>

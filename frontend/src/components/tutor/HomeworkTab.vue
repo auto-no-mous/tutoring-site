@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { DialogContent, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import { listMyGroups } from "@/api/groups";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/api/homework";
 import { getMyStudents } from "@/api/tutors";
 import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
+import ShowMoreHomework from "@/components/homework/ShowMoreHomework.vue";
 import HomeworkRecipientPicker from "@/components/tutor/HomeworkRecipientPicker.vue";
 import { useNotificationsStore } from "@/stores/notifications";
 import type { Group } from "@/types/group";
@@ -23,6 +24,7 @@ import {
   homeworkCardClass,
   homeworkStatusLabel,
   homeworkStatusTextClass,
+  useHomeworkPage,
 } from "@/utils/homework";
 import { formatDate, formatDateTimeWithMsk } from "@/utils/time";
 
@@ -237,6 +239,11 @@ const filteredAssignments = computed(() => {
   });
 });
 
+// Новый фильтр - новая выборка: снова с первых заданий, а не с того, сколько было
+// раскрыто в прошлой.
+const page = useHomeworkPage(filteredAssignments);
+watch([filterStudentId, filterStatus, filterDateFrom, filterDateTo], page.reset);
+
 async function changeStatus(submission: HomeworkSubmission, event: Event): Promise<void> {
   await setSubmissionStatus(submission.id, (event.target as HTMLSelectElement).value);
   await load();
@@ -365,7 +372,7 @@ onMounted(load);
       <!-- Карточка та же, что в окне «ДЗ · ученик»: материал, срок, сдачи учеников с
            их файлами и переключателем статуса - плюс дата выдачи и правка задания. -->
       <div
-        v-for="assignment in filteredAssignments"
+        v-for="assignment in page.visible.value"
         :key="assignment.id"
         :data-status="assignment.status"
         class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800"
@@ -421,6 +428,7 @@ onMounted(load);
           </div>
         </div>
       </div>
+      <ShowMoreHomework :remaining="page.remaining.value" @more="page.showMore" />
     </div>
 
     <!-- Edit modal -->

@@ -1,3 +1,5 @@
+import { computed, ref, type Ref } from "vue";
+
 // Статус домашки показывают три разных места - вкладка ученика, вкладка репетитора и
 // окно «ДЗ · ученик», - и раньше каждое называло и красило его по-своему.
 
@@ -38,4 +40,26 @@ export function homeworkStatusTextClass(status: string): string {
 export function homeworkFileName(path: string): string {
   const name = path.split("/").pop() ?? path;
   return name.length > 40 ? `${name.slice(0, 37)}…` : name;
+}
+
+// У учеников копятся десятки заданий, и свежие тонули под старыми. Показываем
+// последние HOMEWORK_PAGE_SIZE (списки приходят от новых к старым), остальные
+// догружаются кнопкой. Сколько раскрыто - помним при перезагрузке списка после сдачи
+// или смены статуса, иначе карточка, с которой только что работали, пропадала бы.
+export const HOMEWORK_PAGE_SIZE = 5;
+
+export function useHomeworkPage<T>(items: Ref<T[]>) {
+  const limit = ref(HOMEWORK_PAGE_SIZE);
+  const visible = computed(() => items.value.slice(0, limit.value));
+  const remaining = computed(() => Math.max(0, items.value.length - limit.value));
+  return {
+    visible,
+    remaining,
+    showMore: () => {
+      limit.value += HOMEWORK_PAGE_SIZE;
+    },
+    reset: () => {
+      limit.value = HOMEWORK_PAGE_SIZE;
+    },
+  };
 }

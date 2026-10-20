@@ -116,4 +116,24 @@ describe("tutor HomeworkTab", () => {
     const active = form.findAll("button").find((b) => b.classes().includes("bg-brand-500") && b.attributes("type") === "button");
     expect(active?.text()).toBe("Загрузить файл");
   });
+
+  it("показывает последние 5 заданий, остальные - по кнопке; новый фильтр начинает сначала", async () => {
+    listMyAssignments.mockResolvedValue(
+      Array.from({ length: 12 }, (_, i) => assignment({ id: `a-${i}`, status: i % 2 ? "done" : "submitted" })),
+    );
+    const wrapper = mount(HomeworkTab);
+    await flushPromises();
+
+    expect(wrapper.findAll("[data-status]")).toHaveLength(5);
+    await wrapper.findAll("button").find((b) => b.text().includes("Показать ещё 5"))!.trigger("click");
+    expect(wrapper.findAll("[data-status]")).toHaveLength(10);
+
+    await wrapper.findAll("button").find((b) => b.text() === "Фильтры")!.trigger("click");
+    const statusFilter = wrapper.findAll("select").find((s) => s.findAll("option").some((o) => o.attributes("value") === "all"))!;
+    await statusFilter.setValue("done");
+
+    // Выполненных 6: снова видно 5, а не 10.
+    expect(wrapper.findAll("[data-status]")).toHaveLength(5);
+    expect(wrapper.findAll("button").find((b) => b.text().includes("Показать ещё"))!.text()).toContain("Показать ещё 1");
+  });
 });

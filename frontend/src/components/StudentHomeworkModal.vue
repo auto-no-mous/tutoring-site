@@ -5,8 +5,9 @@ import { onMounted, ref } from "vue";
 
 import { createHomework, getStudentHomeworkForTutor, setSubmissionStatus } from "@/api/homework";
 import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
+import ShowMoreHomework from "@/components/homework/ShowMoreHomework.vue";
 import type { StudentHomework } from "@/types/homework";
-import { HOMEWORK_STATUS_OPTIONS, homeworkCardClass } from "@/utils/homework";
+import { HOMEWORK_STATUS_OPTIONS, homeworkCardClass, useHomeworkPage } from "@/utils/homework";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
 const props = defineProps<{ studentId: string; studentName: string }>();
@@ -14,6 +15,7 @@ const emit = defineEmits<{ close: []; changed: [] }>();
 
 const items = ref<StudentHomework[]>([]);
 const isLoading = ref(true);
+const page = useHomeworkPage(items);
 const showForm = ref(false);
 
 const title = ref("");
@@ -106,7 +108,7 @@ onMounted(load);
         <div v-else class="mt-3 flex flex-1 flex-col gap-3 overflow-y-auto">
           <p v-if="items.length === 0" class="text-sm text-slate-400">Заданий пока нет.</p>
           <div
-            v-for="item in items"
+            v-for="item in page.visible.value"
             :key="item.submission_id"
             class="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800"
             :class="homeworkCardClass(item.status)"
@@ -134,6 +136,7 @@ onMounted(load);
               Статус изменён вручную{{ item.submitted_at ? ` · ${formatDateTimeWithMsk(item.submitted_at)}` : "" }}
             </div>
           </div>
+          <ShowMoreHomework :remaining="page.remaining.value" @more="page.showMore" />
         </div>
 
         <div class="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">
