@@ -677,8 +677,13 @@ onMounted(load);
             <input v-model="meetingLink" class="w-48 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
           </label>
           <label class="flex flex-col gap-1 text-sm">
-            Заметка
-            <input v-model="notes" class="w-48 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700" />
+            Примечание
+            <input
+              v-model="notes"
+              maxlength="2000"
+              placeholder="видно только вам"
+              class="w-48 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
+            />
           </label>
         </div>
 

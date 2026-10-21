@@ -46,9 +46,14 @@ def _to_booking_out(
     lesson_type_name: str | None = None,
     lesson_type_format: str | None = None,
     tutor_display_name: str | None = None,
+    *,
+    for_student: bool = False,
 ) -> BookingOut:
     return BookingOut.model_validate(booking, from_attributes=True).model_copy(
         update={
+            # Примечание к занятию - блокнот репетитора, ученику оно не уходит ни в
+            # одном ответе (как и примечание к ученику, TutorStudentSettings.note).
+            **({"notes": None} if for_student else {}),
             "student_display_name": student_name,
             "series_is_active": series_is_active,
             "lesson_type_name": lesson_type_name,
@@ -71,6 +76,7 @@ async def _to_student_booking_out(db: DbSession, booking) -> BookingOut:
         lesson_type_name=lesson_type_names.get(booking.lesson_type_id),
         lesson_type_format=lesson_type_formats.get(booking.lesson_type_id),
         tutor_display_name=tutor_names.get(booking.tutor_id),
+        for_student=True,
     )
 
 
@@ -123,6 +129,7 @@ async def list_my_bookings(current_user: CurrentUser, db: DbSession) -> list[Boo
             lesson_type_name=lesson_type_names.get(r.lesson_type_id),
             lesson_type_format=lesson_type_formats.get(r.lesson_type_id),
             tutor_display_name=tutor_names.get(r.tutor_id),
+            for_student=True,
         )
         for r in rows
     ]

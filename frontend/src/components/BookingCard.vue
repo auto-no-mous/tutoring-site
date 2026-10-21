@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ChevronDown, StickyNote } from "lucide-vue-next";
+import { ChevronDown } from "lucide-vue-next";
 import { computed, ref, toRef } from "vue";
 
 import MeetingLinkModal from "@/components/MeetingLinkModal.vue";
 import StudentHomeworkModal from "@/components/StudentHomeworkModal.vue";
 import WhiteboardLinks from "@/components/WhiteboardLinks.vue";
 import WhiteboardsModal from "@/components/WhiteboardsModal.vue";
+import LessonNoteEditor from "@/components/tutor/LessonNoteEditor.vue";
 import type { Whiteboard } from "@/api/whiteboards";
 import { bookingDurationMinutes, useBookingActions } from "@/composables/useBookingActions";
 import type { Booking } from "@/types/booking";
@@ -21,7 +22,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ changed: []; "reschedule-requested": [Booking]; "boards-changed": [] }>();
 
-const { isBusy, cancel, removeBlock, saveMeetingLink: saveLink, saveDuration: saveNewDuration } = useBookingActions(
+const { isBusy, cancel, removeBlock, saveMeetingLink: saveLink, saveDuration: saveNewDuration, saveNotes } = useBookingActions(
   toRef(props, "booking"),
   () => emit("changed"),
 );
@@ -91,9 +92,6 @@ async function saveDuration(): Promise<void> {
         <div v-if="!booking.is_manual_block" class="text-xs text-slate-400">
           <template v-if="role === 'tutor'">{{ booking.lesson_type_name ?? "Занятие" }} · </template>{{ displayDurationMinutes }} мин<template v-if="formatLabel"> · {{ formatLabel }}</template>
         </div>
-        <div v-if="booking.notes" class="mt-1 flex items-center gap-1 text-xs text-slate-500">
-          <StickyNote class="h-3.5 w-3.5" />{{ booking.notes }}
-        </div>
       </div>
       <div class="flex items-center gap-2">
         <a
@@ -130,6 +128,14 @@ async function saveDuration(): Promise<void> {
         </button>
       </div>
     </div>
+
+    <LessonNoteEditor
+      v-if="role === 'tutor'"
+      class="mt-2"
+      :note="booking.notes"
+      :busy="isBusy"
+      @save="saveNotes"
+    />
 
     <button
       type="button"

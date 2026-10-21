@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Ban, BookOpen, CalendarClock, Link2, Repeat, StickyNote, Timer, Trash2, Video, X } from "lucide-vue-next";
+import { Ban, BookOpen, CalendarClock, Link2, Repeat, Timer, Trash2, Video, X } from "lucide-vue-next";
 import { DialogClose, DialogContent, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
 import { computed, ref, toRef } from "vue";
 
@@ -7,6 +7,7 @@ import MeetingLinkModal from "@/components/MeetingLinkModal.vue";
 import StudentHomeworkModal from "@/components/StudentHomeworkModal.vue";
 import WhiteboardLinks from "@/components/WhiteboardLinks.vue";
 import WhiteboardsModal from "@/components/WhiteboardsModal.vue";
+import LessonNoteEditor from "@/components/tutor/LessonNoteEditor.vue";
 import type { Whiteboard } from "@/api/whiteboards";
 import { bookingDurationMinutes, useBookingActions } from "@/composables/useBookingActions";
 import type { Booking } from "@/types/booking";
@@ -24,7 +25,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: []; changed: []; "reschedule-requested": [Booking]; "boards-changed": [] }>();
 
-const { isBusy, cancel, removeBlock, saveMeetingLink, saveDuration } = useBookingActions(
+const { isBusy, cancel, removeBlock, saveMeetingLink, saveDuration, saveNotes } = useBookingActions(
   toRef(props, "booking"),
   () => emit("changed"),
 );
@@ -131,9 +132,7 @@ async function onRemove(): Promise<void> {
           <div>
             <div class="text-xl font-semibold">{{ booking.is_manual_block ? "Личная блокировка" : studentName }}</div>
             <div v-if="hasStudent && studentGrade" class="text-sm text-slate-500">{{ studentGrade }}-й класс</div>
-            <div v-if="booking.notes" class="mt-2 flex items-start gap-1.5 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-              <StickyNote class="mt-0.5 h-4 w-4 shrink-0" />{{ booking.notes }}
-            </div>
+            <LessonNoteEditor class="mt-3" size="md" :note="booking.notes" :busy="isBusy" @save="saveNotes" />
           </div>
 
           <div v-if="!booking.is_manual_block" class="flex flex-col gap-3">

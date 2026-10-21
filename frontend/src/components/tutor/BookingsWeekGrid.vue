@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { StickyNote } from "lucide-vue-next";
+
 import type { Booking } from "@/types/booking";
 import type { TutorStudent } from "@/types/tutor";
 import type { CalendarWeek } from "@/utils/scheduleGrouping";
@@ -65,7 +67,13 @@ function studentGrade(booking: Booking): number | null {
                 "
                 @click="emit('open', booking)"
               >
-                <span class="font-semibold tabular-nums">{{ formatTime(booking.start_at) }}</span>
+                <span class="flex items-center justify-between gap-1">
+                  <span class="font-semibold tabular-nums">{{ formatTime(booking.start_at) }}</span>
+                  <!-- Само примечание - в окне занятия; здесь только знак, что оно есть. -->
+                  <span v-if="booking.notes" :title="booking.notes" aria-label="Есть примечание" data-note>
+                    <StickyNote class="h-3 w-3 shrink-0 text-amber-500" />
+                  </span>
+                </span>
                 <span class="leading-tight">{{ studentName(booking) }}</span>
                 <span v-if="studentGrade(booking)" class="text-slate-400">{{ studentGrade(booking) }} кл.</span>
               </button>

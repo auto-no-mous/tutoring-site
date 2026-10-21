@@ -376,4 +376,15 @@ describe("BookingsTab: недельный вид", () => {
 
     expect(wrapper.findComponent(BookingDetailsModal).exists()).toBe(false);
   });
+
+  it("отмечает в сетке занятия с примечанием", async () => {
+    listTutorBookings.mockResolvedValue([bookingAt(2, { notes: "начать с дробей" }), bookingAt(5)] as never);
+    localStorage.setItem("tutor-bookings-layout", "week");
+    const wrapper = mountTab();
+    await flushPromises();
+
+    const marks = wrapper.findAll("[data-note]");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].attributes("title")).toBe("начать с дробей");
+  });
 });

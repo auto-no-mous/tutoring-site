@@ -10,6 +10,10 @@ from app.schemas.common import UTCDateTime
 # защищает от опечатки вроде 6000 минут, которая перекрыла бы весь календарь.
 MAX_LESSON_DURATION_MINUTES = 8 * 60
 
+# Примечание к занятию - пара строк для себя, а не конспект; потолок только от
+# случайно вставленного мегабайта текста.
+NOTES_MAX_LENGTH = 2000
+
 
 class BookingCreate(BaseModel):
     tutor_id: uuid.UUID
@@ -24,7 +28,7 @@ class ManualBookingCreate(BaseModel):
     start_at: UTCDateTime
     end_at: UTCDateTime
     meeting_link: str | None = None
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=NOTES_MAX_LENGTH)
     repeat_weekly: bool = False
     # Пересечение с уже занятым временем по умолчанию запрещено, но репетитор может
     # настоять: бывает, что два занятия действительно идут внахлёст (подменил коллегу,
@@ -39,7 +43,7 @@ class BookingTutorUpdate(BaseModel):
     start_at: UTCDateTime | None = None
     end_at: UTCDateTime | None = None
     meeting_link: str | None = None
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=NOTES_MAX_LENGTH)
     # When true and meeting_link is being set, also applies it to every other of this
     # tutor's scheduled bookings with the same student (see
     # booking_service.update_booking_by_tutor) - powers the "Постоянная ссылка на
@@ -78,6 +82,8 @@ class BookingOut(BaseModel):
     is_manual_block: bool
     booked_by: str
     meeting_link: str | None
+    # Примечание репетитора к занятию. Только для репетитора: в ответах ученику всегда
+    # None (см. api/v1/bookings.py::_to_booking_out).
     notes: str | None
     recurring_series_id: uuid.UUID | None
     cancelled_by: str | None

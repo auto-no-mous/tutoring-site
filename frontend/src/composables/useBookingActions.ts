@@ -55,5 +55,10 @@ export function useBookingActions(booking: Ref<Booking>, onChanged: () => void) 
     return run(() => updateBooking(booking.value.id, { end_at: end.toISOString() }));
   }
 
-  return { isBusy, cancel, removeBlock, saveMeetingLink, saveDuration };
+  // Примечание - только репетитора; пустое снимает его.
+  function saveNotes(notes: string | null): Promise<boolean> {
+    return run(() => updateBooking(booking.value.id, { notes }));
+  }
+
+  return { isBusy, cancel, removeBlock, saveMeetingLink, saveDuration, saveNotes };
 }

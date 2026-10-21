@@ -95,9 +95,10 @@ async def test_student_books_and_lists_lesson(client: AsyncClient) -> None:
     assert tutor_list[0]["lesson_type_format"] == "individual"
 
 
-async def test_manual_booking_notes_and_lesson_type_visible_to_both_roles(client: AsyncClient) -> None:
-    """Regression test: the tutor's manual-booking "Примечание" was stored but never
-    rendered on any card, for either role - see BookingCard.vue."""
+async def test_lesson_note_is_the_tutors_alone(client: AsyncClient) -> None:
+    """Примечание к занятию - блокнот репетитора, как и примечание к ученику: ученик
+    не получает его ни в списке, ни в ответе на свою отмену. Тип занятия при этом видят
+    оба."""
     tutor = await _setup_tutor(client, "book-tutor-notes@example.com")
     student = await _register(client, "book-student-notes@example.com", "student")
 
@@ -124,8 +125,44 @@ async def test_manual_booking_notes_and_lesson_type_visible_to_both_roles(client
     assert tutor_list[0]["notes"] == "Повторить домашнее задание перед началом"
 
     student_list = (await client.get("/api/v1/bookings/me", headers=student["headers"])).json()
-    assert student_list[0]["notes"] == "Повторить домашнее задание перед началом"
+    assert student_list[0]["notes"] is None
     assert student_list[0]["lesson_type_name"] == "Занятие"
+
+    # Примечание правится и после создания - и снимается пустым значением.
+    booking_id = created["id"]
+    edited = await client.patch(
+        f"/api/v1/bookings/{booking_id}", headers=tutor["headers"], json={"notes": "Начать с дробей"}
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["notes"] == "Начать с дробей"
+
+    # Ученик сам не может его записать: правка занятия - только у репетитора.
+    forbidden = await client.patch(
+        f"/api/v1/bookings/{booking_id}", headers=student["headers"], json={"notes": "моё"}
+    )
+    assert forbidden.status_code == 403
+
+    cancelled = await client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=student["headers"], json={})
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["notes"] is None
+
+    cleared = await client.patch(f"/api/v1/bookings/{booking_id}", headers=tutor["headers"], json={"notes": None})
+    assert cleared.json()["notes"] is None
+
+
+async def test_lesson_note_length_is_capped(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "book-tutor-notes-cap@example.com")
+    start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=3)
+    resp = await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "start_at": start_at.isoformat(),
+            "end_at": (start_at + dt.timedelta(hours=1)).isoformat(),
+            "notes": "x" * 2001,
+        },
+    )
+    assert resp.status_code == 422
 
 
 async def test_booking_conflict_rejected(client: AsyncClient) -> None:

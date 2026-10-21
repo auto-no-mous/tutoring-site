@@ -168,4 +168,20 @@ describe("BookingDetailsModal", () => {
     expect(deleteBooking).toHaveBeenCalledWith("bk-1");
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
+
+  it("правит примечание к занятию", async () => {
+    const wrapper = mountModal({ notes: "старое" });
+    await flushPromises();
+
+    (body().querySelector('button[title="Изменить примечание"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const textarea = body().querySelector('textarea[aria-label="Примечание к занятию"]') as HTMLTextAreaElement;
+    textarea.value = "новое";
+    textarea.dispatchEvent(new Event("input"));
+    button("Сохранить")!.click();
+    await flushPromises();
+
+    expect(updateBooking).toHaveBeenCalledWith("bk-1", { notes: "новое" });
+    expect(wrapper.emitted("changed")).toHaveLength(1);
+  });
 });
