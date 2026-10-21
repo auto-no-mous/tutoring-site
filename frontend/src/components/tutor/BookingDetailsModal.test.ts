@@ -76,6 +76,17 @@ describe("BookingDetailsModal", () => {
     expect(body().textContent).toContain("есть невыполненное");
   });
 
+  it("у кнопок управления есть подпись и без текста - на узком окне остаются иконки", async () => {
+    mountModal();
+    await flushPromises();
+
+    for (const label of ["Перенести", "Изменить ссылку", "Изменить длительность", "Отменить занятие"]) {
+      const el = body().querySelector(`button[aria-label="${label}"]`);
+      expect(el, label).not.toBeNull();
+      expect(el!.getAttribute("title")).toBe(label);
+    }
+  });
+
   it("без ссылки предлагает её указать", async () => {
     mountModal({ meeting_link: null });
     await flushPromises();

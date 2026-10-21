@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpen, CalendarClock, Repeat, StickyNote, Video, X } from "lucide-vue-next";
+import { Ban, BookOpen, CalendarClock, Link2, Repeat, StickyNote, Timer, Trash2, Video, X } from "lucide-vue-next";
 import { DialogClose, DialogContent, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
 import { computed, ref, toRef } from "vue";
 
@@ -61,6 +61,21 @@ async function onSaveLink(link: string, applyToStudent: boolean): Promise<void> 
   await saveMeetingLink(link, applyToStudent);
 }
 
+// Кнопки управления: одинаковая рамка, подпись прячется на узком блоке (см. шаблон).
+// Порог - по замеру: ряд из четырёх кнопок с подписями шрифтом сайта занимает
+// ~42.5rem, 44rem - с запасом. Порог в rem, как и текст, поэтому при любом масштабе
+// и размере шрифта в браузере они меняются вместе. Окно шириной max-w-3xl даёт ряду
+// 45rem - на обычном экране подписи видны.
+const ACTION =
+  "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-50 dark:border-slate-700";
+const DANGER = "border-red-300 text-red-600 dark:border-red-800";
+const LABEL = "hidden @min-[44rem]:inline";
+
+function toggleDurationEditor(): void {
+  durationMinutes.value = bookingDurationMinutes(props.booking);
+  isEditingDuration.value = !isEditingDuration.value;
+}
+
 async function onSaveDuration(): Promise<void> {
   if (await saveDuration(durationMinutes.value)) isEditingDuration.value = false;
 }
@@ -82,7 +97,7 @@ async function onRemove(): Promise<void> {
         class="fixed inset-0 z-50 bg-black/40 data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in"
       />
       <DialogContent
-        class="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-y-auto rounded-2xl bg-white shadow-xl
+        class="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-y-auto rounded-2xl bg-white shadow-xl
           data-[state=closed]:animate-pop-out data-[state=open]:animate-pop-in dark:bg-slate-900"
         :aria-describedby="undefined"
       >
@@ -164,71 +179,88 @@ async function onRemove(): Promise<void> {
             <p v-if="isOver && !booking.is_manual_block" class="text-sm text-slate-500">
               Занятие уже прошло. Отметить, как оно прошло, можно в «Истории занятий».
             </p>
-            <div v-else class="flex flex-wrap items-center gap-2 text-sm">
-              <template v-if="booking.is_manual_block">
+            <!-- Кнопки всегда в один ряд. Хватает ширины окна - с подписями, не хватает
+                 (узкий экран, крупный масштаб) - только иконки с подсказкой. Решает
+                 container query по ширине самого блока, а не экрана: окно ограничено
+                 по ширине, и экран тут ничего не говорит. -->
+            <div v-else class="@container">
+              <div class="flex flex-nowrap items-center gap-2 text-sm">
                 <button
+                  v-if="booking.is_manual_block"
                   type="button"
-                  class="rounded-md border border-red-300 px-3 py-1.5 text-red-600 disabled:opacity-50 dark:border-red-800"
+                  :class="[ACTION, DANGER]"
+                  title="Удалить"
+                  aria-label="Удалить"
                   :disabled="isBusy"
                   @click="onRemove"
                 >
-                  Удалить
+                  <Trash2 class="h-4 w-4 shrink-0" /><span :class="LABEL">Удалить</span>
                 </button>
-              </template>
-              <template v-else>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-50 dark:border-slate-700"
-                  :disabled="isBusy"
-                  @click="emit('reschedule-requested', booking)"
-                >
-                  <CalendarClock class="h-4 w-4" />Перенести
-                </button>
-                <button
-                  v-if="booking.meeting_link"
-                  type="button"
-                  class="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-50 dark:border-slate-700"
-                  :disabled="isBusy"
-                  @click="showMeetingLinkModal = true"
-                >
-                  Изменить ссылку
-                </button>
-                <button
-                  v-if="!isEditingDuration"
-                  type="button"
-                  class="rounded-md border border-slate-300 px-3 py-1.5 dark:border-slate-700"
-                  @click="durationMinutes = bookingDurationMinutes(booking); isEditingDuration = true"
-                >
-                  Изменить длительность
-                </button>
-                <div v-else class="flex items-center gap-2">
-                  <input
-                    v-model.number="durationMinutes"
-                    type="number"
-                    min="1"
-                    aria-label="Длительность, минут"
-                    class="w-20 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
-                  />
-                  <span class="text-slate-500">мин</span>
+                <template v-else>
                   <button
                     type="button"
-                    class="rounded-md bg-brand-500 px-3 py-1.5 text-white disabled:opacity-50"
+                    :class="ACTION"
+                    title="Перенести"
+                    aria-label="Перенести"
                     :disabled="isBusy"
-                    @click="onSaveDuration"
+                    @click="emit('reschedule-requested', booking)"
                   >
-                    Сохранить
+                    <CalendarClock class="h-4 w-4 shrink-0" /><span :class="LABEL">Перенести</span>
                   </button>
-                  <button type="button" class="text-slate-500 underline" @click="isEditingDuration = false">Отмена</button>
-                </div>
+                  <button
+                    v-if="booking.meeting_link"
+                    type="button"
+                    :class="ACTION"
+                    title="Изменить ссылку"
+                    aria-label="Изменить ссылку"
+                    :disabled="isBusy"
+                    @click="showMeetingLinkModal = true"
+                  >
+                    <Link2 class="h-4 w-4 shrink-0" /><span :class="LABEL">Изменить ссылку</span>
+                  </button>
+                  <button
+                    type="button"
+                    :class="[ACTION, isEditingDuration ? 'border-brand-400 text-brand-700 dark:text-brand-300' : '']"
+                    title="Изменить длительность"
+                    aria-label="Изменить длительность"
+                    :aria-pressed="isEditingDuration"
+                    @click="toggleDurationEditor"
+                  >
+                    <Timer class="h-4 w-4 shrink-0" /><span :class="LABEL">Изменить длительность</span>
+                  </button>
+                  <button
+                    type="button"
+                    :class="[ACTION, DANGER, 'ml-auto']"
+                    title="Отменить занятие"
+                    aria-label="Отменить занятие"
+                    :disabled="isBusy"
+                    @click="onCancel"
+                  >
+                    <Ban class="h-4 w-4 shrink-0" /><span :class="LABEL">Отменить занятие</span>
+                  </button>
+                </template>
+              </div>
+              <!-- Поле длительности - отдельной строкой, чтобы не раздвигать ряд кнопок. -->
+              <div v-if="isEditingDuration && !booking.is_manual_block" class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <span class="text-slate-500">Длительность</span>
+                <input
+                  v-model.number="durationMinutes"
+                  type="number"
+                  min="1"
+                  aria-label="Длительность, минут"
+                  class="w-20 rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
+                />
+                <span class="text-slate-500">мин</span>
                 <button
                   type="button"
-                  class="ml-auto rounded-md border border-red-300 px-3 py-1.5 text-red-600 disabled:opacity-50 dark:border-red-800"
+                  class="rounded-md bg-brand-500 px-3 py-1.5 text-white disabled:opacity-50"
                   :disabled="isBusy"
-                  @click="onCancel"
+                  @click="onSaveDuration"
                 >
-                  Отменить занятие
+                  Сохранить
                 </button>
-              </template>
+                <button type="button" class="text-slate-500 underline" @click="isEditingDuration = false">Отмена</button>
+              </div>
             </div>
           </div>
         </div>
