@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, toRaw } from "vue";
 
 import {
   listOAuthProviders,
@@ -38,8 +38,10 @@ const email = ref(auth.user?.email ?? "");
 const timezone = ref(auth.user?.timezone || detectTimezone());
 const timezones = computed(() => timezoneOptions(auth.user?.timezone));
 // Копия, а не ссылка на auth.user: до «Сохранить» правки живут только в форме.
+// toRaw обязателен: пользователь в сторе реактивный, а structuredClone на прокси Vue
+// бросает DataCloneError - и вся вкладка не отображалась.
 const notificationSettings = ref<NotificationSettings | null>(
-  auth.user ? structuredClone(auth.user.notification_settings) : null,
+  auth.user ? structuredClone(toRaw(auth.user.notification_settings)) : null,
 );
 const savedMessage = ref("");
 const emailError = ref("");
