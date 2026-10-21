@@ -2,8 +2,11 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getMyStudents } from "@/api/tutors";
 import BookingCard from "@/components/BookingCard.vue";
+import BookingDetailsModal from "@/components/tutor/BookingDetailsModal.vue";
 import BookingsTab from "@/components/tutor/BookingsTab.vue";
+import RescheduleModal from "@/components/RescheduleModal.vue";
 
 const createManualBooking = vi.fn();
 const listTutorBookings = vi.fn(async () => []);
@@ -56,6 +59,7 @@ function mountTab() {
     global: {
       stubs: {
         BookingCard: true,
+        BookingDetailsModal: true,
         RescheduleModal: true,
         RouterLink: { template: "<a><slot /></a>" },
       },
@@ -301,5 +305,75 @@ describe("BookingsTab: история занятий", () => {
     await flushPromises();
 
     expect(setBookingOutcome).toHaveBeenCalledWith("bk-past", "student_no_show");
+  });
+});
+
+describe("BookingsTab: недельный вид", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    listTutorBookings.mockResolvedValue([bookingAt(2)] as never);
+    vi.mocked(getMyStudents).mockResolvedValue([
+      { id: "s-1", first_name: "Пётр", last_name: "Петров", grade: 7, last_lesson_at: null },
+    ]);
+  });
+
+  const toggle = (wrapper: ReturnType<typeof mountTab>, label: string) =>
+    wrapper.find('[aria-label="Вид расписания"]').findAll("button").find((b) => b.text() === label)!;
+
+  it("переключается на сетку по неделям: время, фамилия и имя, класс", async () => {
+    const wrapper = mountTab();
+    await flushPromises();
+    expect(wrapper.find("[data-week]").exists()).toBe(false);
+
+    await toggle(wrapper, "Неделя").trigger("click");
+
+    const week = wrapper.find('[data-week="Текущая неделя"], [data-week="Следующая неделя"]');
+    expect(week.findAll("[data-day]")).toHaveLength(7);
+    const row = wrapper.find("[data-day] button");
+    expect(row.text()).toContain("Петров Пётр");
+    expect(row.text()).toContain("7 кл.");
+    expect(wrapper.findComponent(BookingCard).exists()).toBe(false);
+  });
+
+  it("запоминает выбранный вид", async () => {
+    const first = mountTab();
+    await flushPromises();
+    await toggle(first, "Неделя").trigger("click");
+    first.unmount();
+
+    const second = mountTab();
+    await flushPromises();
+    expect(second.find("[data-week]").exists()).toBe(true);
+  });
+
+  it("строка открывает окно занятия, а перенос из него - окно переноса", async () => {
+    localStorage.setItem("tutor-bookings-layout", "week");
+    const wrapper = mountTab();
+    await flushPromises();
+
+    await wrapper.find("[data-day] button").trigger("click");
+    const details = wrapper.findComponent(BookingDetailsModal);
+    expect(details.props("booking").id).toBe("bk-2");
+    expect(details.props("studentName")).toBe("Петров Пётр");
+    expect(details.props("studentGrade")).toBe(7);
+
+    details.vm.$emit("reschedule-requested", details.props("booking"));
+    await flushPromises();
+    expect(wrapper.findComponent(BookingDetailsModal).exists()).toBe(false);
+    expect(wrapper.findComponent(RescheduleModal).exists()).toBe(true);
+  });
+
+  it("закрывает окно, когда занятие пропало из расписания", async () => {
+    localStorage.setItem("tutor-bookings-layout", "week");
+    const wrapper = mountTab();
+    await flushPromises();
+    await wrapper.find("[data-day] button").trigger("click");
+
+    listTutorBookings.mockResolvedValue([bookingAt(2, { status: "cancelled_by_tutor" })] as never);
+    wrapper.findComponent(BookingDetailsModal).vm.$emit("changed");
+    await flushPromises();
+
+    expect(wrapper.findComponent(BookingDetailsModal).exists()).toBe(false);
   });
 });

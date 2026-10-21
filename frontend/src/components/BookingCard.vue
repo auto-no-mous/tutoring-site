@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { ChevronDown, StickyNote } from "lucide-vue-next";
-import { computed, ref } from "vue";
+import { computed, ref, toRef } from "vue";
 
-import { cancelBooking, deleteBooking, updateBooking } from "@/api/bookings";
 import MeetingLinkModal from "@/components/MeetingLinkModal.vue";
 import StudentHomeworkModal from "@/components/StudentHomeworkModal.vue";
 import WhiteboardLinks from "@/components/WhiteboardLinks.vue";
 import WhiteboardsModal from "@/components/WhiteboardsModal.vue";
 import type { Whiteboard } from "@/api/whiteboards";
-import { useToastStore } from "@/stores/toast";
+import { bookingDurationMinutes, useBookingActions } from "@/composables/useBookingActions";
 import type { Booking } from "@/types/booking";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
@@ -22,17 +21,17 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ changed: []; "reschedule-requested": [Booking]; "boards-changed": [] }>();
 
-const toast = useToastStore();
+const { isBusy, cancel, removeBlock, saveMeetingLink: saveLink, saveDuration: saveNewDuration } = useBookingActions(
+  toRef(props, "booking"),
+  () => emit("changed"),
+);
 
 const showActions = ref(false);
 const isEditingDuration = ref(false);
 const showHomeworkModal = ref(false);
 const showMeetingLinkModal = ref(false);
 const showWhiteboardsModal = ref(false);
-const durationMinutes = ref(
-  Math.round((new Date(props.booking.end_at).getTime() - new Date(props.booking.start_at).getTime()) / 60000),
-);
-const isBusy = ref(false);
+const durationMinutes = ref(bookingDurationMinutes(props.booking));
 
 const isManualBlock = computed(() => props.role === "tutor" && props.booking.is_manual_block);
 
@@ -45,9 +44,7 @@ const canManageBoards = computed(
 
 const FORMAT_LABELS: Record<string, string> = { individual: "Индивидуальное", group: "Групповое" };
 const formatLabel = computed(() => (props.booking.lesson_type_format ? FORMAT_LABELS[props.booking.lesson_type_format] : null));
-const displayDurationMinutes = computed(() =>
-  Math.round((new Date(props.booking.end_at).getTime() - new Date(props.booking.start_at).getTime()) / 60000),
-);
+const displayDurationMinutes = computed(() => bookingDurationMinutes(props.booking));
 
 const HOMEWORK_BUTTON_STYLE: Record<string, string> = {
   none: "border-slate-300 text-slate-500 dark:border-slate-700",
@@ -61,38 +58,7 @@ function onHomeworkChanged(): void {
 
 async function saveMeetingLink(link: string, applyToStudent: boolean): Promise<void> {
   showMeetingLinkModal.value = false;
-  isBusy.value = true;
-  try {
-    await updateBooking(props.booking.id, { meeting_link: link, apply_link_to_student: applyToStudent });
-    emit("changed");
-  } finally {
-    isBusy.value = false;
-  }
-}
-
-async function cancel(): Promise<void> {
-  if (!window.confirm("Отменить это занятие?")) return;
-  isBusy.value = true;
-  try {
-    await cancelBooking(props.booking.id);
-    toast.show("Занятие отменено");
-    emit("changed");
-  } catch {
-    toast.show("Не удалось отменить занятие");
-  } finally {
-    isBusy.value = false;
-  }
-}
-
-async function removeBlock(): Promise<void> {
-  if (!window.confirm("Удалить эту запись?")) return;
-  isBusy.value = true;
-  try {
-    await deleteBooking(props.booking.id);
-    emit("changed");
-  } finally {
-    isBusy.value = false;
-  }
+  await saveLink(link, applyToStudent);
 }
 
 function openReschedule(): void {
@@ -100,22 +66,12 @@ function openReschedule(): void {
 }
 
 function startEditDuration(): void {
-  durationMinutes.value = Math.round(
-    (new Date(props.booking.end_at).getTime() - new Date(props.booking.start_at).getTime()) / 60000,
-  );
+  durationMinutes.value = bookingDurationMinutes(props.booking);
   isEditingDuration.value = true;
 }
 
 async function saveDuration(): Promise<void> {
-  const newEnd = new Date(new Date(props.booking.start_at).getTime() + durationMinutes.value * 60000);
-  isBusy.value = true;
-  try {
-    await updateBooking(props.booking.id, { end_at: newEnd.toISOString() });
-    isEditingDuration.value = false;
-    emit("changed");
-  } finally {
-    isBusy.value = false;
-  }
+  if (await saveNewDuration(durationMinutes.value)) isEditingDuration.value = false;
 }
 </script>
 

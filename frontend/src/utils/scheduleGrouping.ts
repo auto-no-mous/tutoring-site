@@ -70,6 +70,17 @@ export function dateInTimeZone(date: Date, timeZone: string): string {
   return `${y}-${m}-${d}`;
 }
 
+// «Текущая неделя» / «Следующая неделя» / «Неделя DD.MM.YYYY – DD.MM.YYYY».
+function weekLabel(dateIso: string, todayIso: string): string {
+  const d = parseDateOnly(dateIso);
+  const currentMonday = mondayOf(parseDateOnly(todayIso));
+  const nextMonday = addDays(currentMonday, 7);
+  if (d >= currentMonday && d < nextMonday) return "Текущая неделя";
+  if (d >= nextMonday && d < addDays(currentMonday, 14)) return "Следующая неделя";
+  const mon = mondayOf(d);
+  return `Неделя ${formatRuDate(mon)} – ${formatRuDate(addDays(mon, 6))}`;
+}
+
 export function groupByWeekAndDay<T>(
   items: T[],
   getStartAtIso: (item: T) => string,
@@ -87,18 +98,8 @@ export function groupByWeekAndDay<T>(
 
   const todayDate = parseDateOnly(todayIso);
   const tomorrowIso = toDateOnlyIso(addDays(todayDate, 1));
-  const currentMonday = mondayOf(todayDate);
-  const nextMonday = addDays(currentMonday, 7);
-  const nextNextMonday = addDays(currentMonday, 14);
 
-  function weekLabelFor(dateIso: string): string {
-    const d = parseDateOnly(dateIso);
-    if (d >= currentMonday && d < nextMonday) return "Текущая неделя";
-    if (d >= nextMonday && d < nextNextMonday) return "Следующая неделя";
-    const mon = mondayOf(d);
-    const sun = addDays(mon, 6);
-    return `Неделя ${formatRuDate(mon)} – ${formatRuDate(sun)}`;
-  }
+  const weekLabelFor = (dateIso: string) => weekLabel(dateIso, todayIso);
 
   function dayLabelFor(dateIso: string): string {
     if (dateIso === todayIso) return "Сегодня";
@@ -150,4 +151,72 @@ export function groupByWeekAndDay<T>(
  */
 export function isBeforeToday(startAtIso: string, timeZone: string): boolean {
   return dateInTimeZone(new Date(startAtIso), timeZone) < dateInTimeZone(new Date(), timeZone);
+}
+
+const WEEKDAY_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+export interface CalendarDay<T> {
+  dateIso: string;
+  weekday: string;
+  dateLabel: string;
+  items: T[];
+  isToday: boolean;
+  isPast: boolean;
+}
+
+export interface CalendarWeek<T> {
+  label: string;
+  isCurrentWeek: boolean;
+  days: CalendarDay<T>[];
+}
+
+/**
+ * Недельная сетка: недели целиком, с понедельника по воскресенье, все семь дней - даже
+ * пустые. В отличие от groupByWeekAndDay, где показываются только дни с занятиями,
+ * здесь это календарь, и пропуск дня или недели сбивал бы с толку. Недели идут подряд
+ * от текущей до последней, где есть занятия; более ранние элементы отбрасываются.
+ */
+export function groupIntoCalendarWeeks<T>(
+  items: T[],
+  getStartAtIso: (item: T) => string,
+  timeZone: string,
+  now: Date = new Date(),
+): CalendarWeek<T>[] {
+  const todayIso = dateInTimeZone(now, timeZone);
+  const firstMonday = mondayOf(parseDateOnly(todayIso));
+
+  const byDate = new Map<string, T[]>();
+  let lastDateIso = todayIso;
+  for (const item of items) {
+    const dateIso = dateInTimeZone(new Date(getStartAtIso(item)), timeZone);
+    if (parseDateOnly(dateIso) < firstMonday) continue;
+    if (!byDate.has(dateIso)) byDate.set(dateIso, []);
+    byDate.get(dateIso)!.push(item);
+    if (dateIso > lastDateIso) lastDateIso = dateIso;
+  }
+  for (const list of byDate.values()) {
+    list.sort((a, b) => getStartAtIso(a).localeCompare(getStartAtIso(b)));
+  }
+
+  const lastMonday = mondayOf(parseDateOnly(lastDateIso));
+  const weeks: CalendarWeek<T>[] = [];
+  for (let monday = firstMonday; monday <= lastMonday; monday = addDays(monday, 7)) {
+    const mondayIso = toDateOnlyIso(monday);
+    weeks.push({
+      label: weekLabel(mondayIso, todayIso),
+      isCurrentWeek: monday.getTime() === firstMonday.getTime(),
+      days: WEEKDAY_SHORT.map((weekday, i) => {
+        const dateIso = toDateOnlyIso(addDays(monday, i));
+        return {
+          dateIso,
+          weekday,
+          dateLabel: formatRuDateShort(addDays(monday, i)),
+          items: byDate.get(dateIso) ?? [],
+          isToday: dateIso === todayIso,
+          isPast: dateIso < todayIso,
+        };
+      }),
+    });
+  }
+  return weeks;
 }

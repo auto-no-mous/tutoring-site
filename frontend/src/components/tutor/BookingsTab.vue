@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
+import { CalendarDays, List } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
 
 import { createManualBooking, listTutorBookings, setBookingOutcome } from "@/api/bookings";
@@ -16,13 +17,15 @@ import { listMyWhiteboards, type Whiteboard } from "@/api/whiteboards";
 import BookingCard from "@/components/BookingCard.vue";
 import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
 import RescheduleModal from "@/components/RescheduleModal.vue";
+import BookingDetailsModal from "@/components/tutor/BookingDetailsModal.vue";
+import BookingsWeekGrid from "@/components/tutor/BookingsWeekGrid.vue";
 import { useToastStore } from "@/stores/toast";
 import { apiErrorMessage } from "@/utils/apiError";
 import type { Booking } from "@/types/booking";
 import type { Group } from "@/types/group";
 import type { LessonType, Slot, TutorStudent } from "@/types/tutor";
 import { addDaysIso, formatDate, formatDateTimeWithMsk, formatMskTime, formatTime, mskDateTimeToUtcIso, todayIso } from "@/utils/time";
-import { groupByWeekAndDay, isBeforeToday } from "@/utils/scheduleGrouping";
+import { groupByWeekAndDay, groupIntoCalendarWeeks, isBeforeToday } from "@/utils/scheduleGrouping";
 
 const toast = useToastStore();
 
@@ -304,6 +307,47 @@ const hasMoreHistory = computed(() => historyVisibleCount.value < historyAll.val
 
 const weeks = computed(() => groupByWeekAndDay(upcoming.value, (b) => b.start_at, MSK));
 
+// --- Список карточек или недельная сетка -------------------------------------------
+
+const LAYOUT_STORAGE_KEY = "tutor-bookings-layout";
+// Выбор запоминается: кто привык смотреть неделей, не должен переключать каждый раз.
+const scheduleLayout = ref<"list" | "week">(
+  localStorage.getItem(LAYOUT_STORAGE_KEY) === "week" ? "week" : "list",
+);
+watch(scheduleLayout, (layout) => localStorage.setItem(LAYOUT_STORAGE_KEY, layout));
+
+// В сетке - вся текущая неделя, включая уже прошедшие дни: это календарь, и пустой
+// понедельник в среду выглядел бы как неделя без занятий.
+const calendarWeeks = computed(() =>
+  groupIntoCalendarWeeks(
+    bookings.value.filter((b) => b.status === "scheduled"),
+    (b) => b.start_at,
+    MSK,
+  ),
+);
+
+const studentsById = computed<Record<string, TutorStudent>>(() =>
+  Object.fromEntries(students.value.map((s) => [s.id, s])),
+);
+
+// Храним id, а не сам объект: после любого действия список перезагружается, и окно
+// должно показывать свежие данные. Пропало занятие из расписания (отменили) - окно
+// закрывается само.
+const openedBookingId = ref<string | null>(null);
+const openedBooking = computed(
+  () => bookings.value.find((b) => b.id === openedBookingId.value && b.status === "scheduled") ?? null,
+);
+
+function openedStudentName(booking: Booking): string {
+  const student = booking.student_id ? studentsById.value[booking.student_id] : undefined;
+  return student ? `${student.last_name} ${student.first_name}`.trim() : (booking.student_display_name ?? "—");
+}
+
+function requestRescheduleFromDetails(booking: Booking): void {
+  openedBookingId.value = null;
+  openReschedule(booking);
+}
+
 // The ДЗ badge reflects one aggregate status per student, not per lesson - showing it
 // on every upcoming card for a student with a recurring series was misleading (looked
 // like each lesson had its own homework). Show it only on that student's earliest
@@ -442,9 +486,9 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="flex max-w-2xl flex-col gap-6">
+  <div class="flex flex-col gap-6">
     <div>
-      <div class="flex flex-wrap gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <button
           v-if="viewMode === 'schedule'"
           type="button"
@@ -460,8 +504,33 @@ onMounted(load);
         >
           {{ viewMode === "history" ? "← К расписанию" : "История занятий" }}
         </button>
+        <div
+          v-if="viewMode === 'schedule'"
+          class="ml-auto inline-flex rounded-md border border-slate-300 p-0.5 text-sm dark:border-slate-700"
+          role="group"
+          aria-label="Вид расписания"
+        >
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded px-2.5 py-1"
+            :class="scheduleLayout === 'list' ? 'bg-brand-500 text-white' : 'text-slate-500'"
+            :aria-pressed="scheduleLayout === 'list'"
+            @click="scheduleLayout = 'list'"
+          >
+            <List class="h-4 w-4" />Список
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded px-2.5 py-1"
+            :class="scheduleLayout === 'week' ? 'bg-brand-500 text-white' : 'text-slate-500'"
+            :aria-pressed="scheduleLayout === 'week'"
+            @click="scheduleLayout = 'week'"
+          >
+            <CalendarDays class="h-4 w-4" />Неделя
+          </button>
+        </div>
       </div>
-      <form v-if="showForm" class="mt-3 flex flex-col gap-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800" @submit.prevent="createBlock()">
+      <form v-if="showForm" class="mt-3 flex max-w-2xl flex-col gap-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800" @submit.prevent="createBlock()">
         <div class="flex flex-wrap items-end gap-2">
           <label class="flex flex-col gap-1 text-sm">
             Ученик / группа
@@ -648,10 +717,14 @@ onMounted(load);
           Создать
         </button>
       </form>
-      <p v-if="error" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+      <p v-if="error" class="mt-2 max-w-2xl text-sm text-red-600 dark:text-red-400">{{ error }}</p>
     </div>
 
-    <section v-if="viewMode === 'schedule'">
+    <section v-if="viewMode === 'schedule' && scheduleLayout === 'week'">
+      <BookingsWeekGrid :weeks="calendarWeeks" :students="studentsById" @open="openedBookingId = $event.id" />
+    </section>
+
+    <section v-else-if="viewMode === 'schedule'" class="max-w-2xl">
       <BookingScheduleGroups :weeks="weeks">
         <template #default="{ item: booking }">
           <BookingCard
@@ -667,7 +740,7 @@ onMounted(load);
       </BookingScheduleGroups>
     </section>
 
-    <section v-else>
+    <section v-else class="max-w-2xl">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-lg font-medium">История занятий</h2>
         <div class="flex flex-wrap gap-1">
@@ -724,6 +797,23 @@ onMounted(load);
         Показать ещё
       </button>
     </section>
+
+    <BookingDetailsModal
+      v-if="openedBooking"
+      :booking="openedBooking"
+      :student-name="openedStudentName(openedBooking)"
+      :student-grade="openedBooking.student_id ? (studentsById[openedBooking.student_id]?.grade ?? null) : null"
+      :homework-status="
+        openedBooking.student_id
+          ? ((homeworkStatusByStudent[openedBooking.student_id] as 'pending' | 'done' | undefined) ?? 'none')
+          : 'none'
+      "
+      :whiteboards="boardsForStudent(openedBooking.student_id)"
+      @close="openedBookingId = null"
+      @changed="load"
+      @boards-changed="loadWhiteboards"
+      @reschedule-requested="requestRescheduleFromDetails"
+    />
 
     <RescheduleModal
       v-if="reschedulingBooking"

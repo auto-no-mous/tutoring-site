@@ -28,6 +28,17 @@ export function formatDate(isoUtc: string): string {
   }).format(new Date(isoUtc));
 }
 
+/** «Среда, 21 октября» - день занятия по Москве, для заголовков. */
+export function formatLongDate(isoUtc: string): string {
+  const text = new Intl.DateTimeFormat("ru-RU", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: MSK_TIMEZONE,
+  }).format(new Date(isoUtc));
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export function formatDateTimeWithMsk(isoUtc: string): string {
   return `${formatDate(isoUtc)} ${formatTime(isoUtc)} (МСК)`;
 }

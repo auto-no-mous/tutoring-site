@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { groupByWeekAndDay, isBeforeToday } from "@/utils/scheduleGrouping";
+import { groupByWeekAndDay, groupIntoCalendarWeeks, isBeforeToday } from "@/utils/scheduleGrouping";
 
 interface Item {
   start_at: string;
@@ -77,5 +77,55 @@ describe("isBeforeToday", () => {
     // 22:30 UTC 1 сентября - это уже 01:30 2 сентября по Москве, то есть сегодня.
     expect(isBeforeToday("2026-09-01T22:30:00Z", "Europe/Moscow")).toBe(false);
     expect(isBeforeToday("2026-09-01T22:30:00Z", "UTC")).toBe(true);
+  });
+});
+
+describe("groupIntoCalendarWeeks", () => {
+  // Среда, 21.10.2026, 12:00 по Москве.
+  const now = new Date("2026-10-21T09:00:00Z");
+  const at = (iso: string): Item => ({ start_at: iso });
+
+  it("всегда даёт текущую неделю целиком, с понедельника по воскресенье", () => {
+    const [week, ...rest] = groupIntoCalendarWeeks<Item>([], (i) => i.start_at, "Europe/Moscow", now);
+
+    expect(rest).toHaveLength(0);
+    expect(week.label).toBe("Текущая неделя");
+    expect(week.isCurrentWeek).toBe(true);
+    expect(week.days.map((d) => d.weekday)).toEqual(["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]);
+    expect(week.days[0].dateIso).toBe("2026-10-19");
+    expect(week.days[2].isToday).toBe(true);
+    expect(week.days.map((d) => d.isPast)).toEqual([true, true, false, false, false, false, false]);
+  });
+
+  it("раскладывает занятия по московским дням и сортирует их по времени", () => {
+    const weeks = groupIntoCalendarWeeks(
+      // 23:30 UTC вторника - это уже среда по Москве.
+      [at("2026-10-23T12:00:00Z"), at("2026-10-23T07:00:00Z"), at("2026-10-20T21:30:00Z")],
+      (i) => i.start_at,
+      "Europe/Moscow",
+      now,
+    );
+
+    expect(weeks[0].days[2].items).toEqual([at("2026-10-20T21:30:00Z")]);
+    expect(weeks[0].days[4].items).toEqual([at("2026-10-23T07:00:00Z"), at("2026-10-23T12:00:00Z")]);
+  });
+
+  it("идёт неделями подряд до последнего занятия, не пропуская пустые", () => {
+    const weeks = groupIntoCalendarWeeks([at("2026-11-04T09:00:00Z")], (i) => i.start_at, "Europe/Moscow", now);
+
+    expect(weeks.map((w) => w.label)).toEqual([
+      "Текущая неделя",
+      "Следующая неделя",
+      "Неделя 02.11.2026 – 08.11.2026",
+    ]);
+    expect(weeks[1].days.every((d) => d.items.length === 0)).toBe(true);
+    expect(weeks[2].days[2].items).toHaveLength(1);
+  });
+
+  it("отбрасывает занятия раньше текущей недели", () => {
+    const weeks = groupIntoCalendarWeeks([at("2026-10-15T09:00:00Z")], (i) => i.start_at, "Europe/Moscow", now);
+
+    expect(weeks).toHaveLength(1);
+    expect(weeks[0].days.flatMap((d) => d.items)).toEqual([]);
   });
 });
