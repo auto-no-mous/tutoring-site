@@ -42,6 +42,26 @@ describe("BookingCard: примечание к занятию", () => {
     expect(wrapper.emitted("changed")).toHaveLength(1);
   });
 
+  it("ссылка «Добавить примечание» - в строке с «Управление занятием», справа", async () => {
+    const wrapper = mount(BookingCard, { props: { booking: booking(), role: "tutor" } });
+    const add = wrapper.findAll("button").find((b) => b.text().includes("Добавить примечание"))!;
+    const manage = wrapper.findAll("button").find((b) => b.text().includes("Управление занятием"))!;
+
+    expect(add.element.parentElement).toBe(manage.element.parentElement);
+    expect(add.element.parentElement!.lastElementChild).toBe(add.element);
+    expect(add.element.parentElement!.className).toContain("justify-between");
+
+    // Пока примечание правится, ссылка не нужна; у занятия с примечанием её тоже нет.
+    await add.trigger("click");
+    expect(wrapper.find("textarea").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("Добавить примечание");
+
+    await wrapper.setProps({ booking: booking({ notes: "есть" }) });
+    await wrapper.findAll("button").find((b) => b.text() === "Отмена")!.trigger("click");
+    expect(wrapper.text()).not.toContain("Добавить примечание");
+    expect(wrapper.text()).toContain("есть");
+  });
+
   it("ученику примечание и редактор не показываются", () => {
     // Сервер ученику примечание не отдаёт; карточка на всякий случай тоже молчит.
     const wrapper = mount(BookingCard, { props: { booking: booking({ notes: "секрет" }), role: "student" } });

@@ -5,7 +5,10 @@ import { nextTick, ref } from "vue";
 // Примечание репетитора к занятию: видно только ему (сервер ученику его не отдаёт).
 // Один и тот же редактор в карточке списка (BookingCard) и в окне занятия
 // (BookingDetailsModal) - чтобы примечание правилось одинаково в обоих видах.
-const props = defineProps<{ note: string | null; busy?: boolean; size?: "sm" | "md" }>();
+// withoutAddButton - ссылку «Добавить примечание» рисует родитель там, где ей удобнее
+// (карточка списка ставит её в строку с «Управление занятием»), и открывает редактор
+// через startEdit; пока примечания нет и оно не правится, сам редактор пуст.
+const props = defineProps<{ note: string | null; busy?: boolean; size?: "sm" | "md"; withoutAddButton?: boolean }>();
 const emit = defineEmits<{ save: [string | null] }>();
 
 const NOTES_MAX_LENGTH = 2000;
@@ -25,10 +28,12 @@ function save(): void {
   emit("save", draft.value.trim() || null);
   isEditing.value = false;
 }
+
+defineExpose({ startEdit, isEditing });
 </script>
 
 <template>
-  <div :class="size === 'md' ? 'text-sm' : 'text-xs'">
+  <div v-if="isEditing || note || !withoutAddButton" :class="size === 'md' ? 'text-sm' : 'text-xs'">
     <div v-if="isEditing" class="flex flex-col gap-1.5">
       <textarea
         ref="textarea"

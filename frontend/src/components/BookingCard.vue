@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown } from "lucide-vue-next";
+import { ChevronDown, StickyNote } from "lucide-vue-next";
 import { computed, ref, toRef } from "vue";
 
 import MeetingLinkModal from "@/components/MeetingLinkModal.vue";
@@ -28,6 +28,7 @@ const { isBusy, cancel, removeBlock, saveMeetingLink: saveLink, saveDuration: sa
 );
 
 const showActions = ref(false);
+const noteEditor = ref<InstanceType<typeof LessonNoteEditor> | null>(null);
 const isEditingDuration = ref(false);
 const showHomeworkModal = ref(false);
 const showMeetingLinkModal = ref(false);
@@ -131,20 +132,32 @@ async function saveDuration(): Promise<void> {
 
     <LessonNoteEditor
       v-if="role === 'tutor'"
+      ref="noteEditor"
       class="mt-2"
       :note="booking.notes"
       :busy="isBusy"
+      without-add-button
       @save="saveNotes"
     />
 
-    <button
-      type="button"
-      class="mt-2 inline-flex items-center gap-1 text-xs text-slate-500 underline transition-colors hover:text-brand-600 dark:hover:text-brand-300"
-      @click="showActions = !showActions"
-    >
-      {{ showActions ? "Скрыть управление" : "Управление занятием" }}
-      <ChevronDown class="h-3.5 w-3.5 transition-transform duration-300" :class="{ 'rotate-180': showActions }" />
-    </button>
+    <div class="mt-2 flex items-center justify-between gap-2 text-xs">
+      <button
+        type="button"
+        class="inline-flex items-center gap-1 text-slate-500 underline transition-colors hover:text-brand-600 dark:hover:text-brand-300"
+        @click="showActions = !showActions"
+      >
+        {{ showActions ? "Скрыть управление" : "Управление занятием" }}
+        <ChevronDown class="h-3.5 w-3.5 transition-transform duration-300" :class="{ 'rotate-180': showActions }" />
+      </button>
+      <button
+        v-if="role === 'tutor' && !booking.notes && !noteEditor?.isEditing"
+        type="button"
+        class="inline-flex items-center gap-1 text-slate-500 underline transition-colors hover:text-brand-600 dark:hover:text-brand-300"
+        @click="noteEditor?.startEdit()"
+      >
+        <StickyNote class="h-3.5 w-3.5" />Добавить примечание
+      </button>
+    </div>
 
     <Transition name="collapse">
       <div v-if="showActions">
