@@ -1,0 +1,18 @@
+# Логи nginx сайта: контейнер пишет их на хост (/var/log/my-tutor/nginx монтируется
+# в /var/log/nginx, см. ops/README.md, «Логи nginx»). Раньше они жили в stdout
+# контейнера и пропадали при каждой выкладке вместе с ним.
+#
+# 30 дней: в логе IP-адреса посетителей, это персональные данные - хранить их
+# дольше, чем нужно для разбора инцидентов, незачем.
+# copytruncate - чтобы не дёргать nginx внутри контейнера сигналом о переоткрытии
+# файлов; потеря пары строк в момент ротации здесь не важна.
+/var/log/my-tutor/nginx/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}

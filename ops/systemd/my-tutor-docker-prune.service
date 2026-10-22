@@ -1,0 +1,11 @@
+[Unit]
+Description=Trim the Docker build cache of my-tutor.ru to the newest 1.5 GB
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Каждая выкладка пересобирает образы, и старые слои копятся: к октябрю 2026 кэш
+# дорос до 7 ГБ на 30-гигабайтном диске. Свежие слои (в пределах 1.5 ГБ) остаются,
+# чтобы следующая сборка не шла с нуля.
+ExecStart=/usr/bin/docker builder prune -f --reserved-space 1.5GB

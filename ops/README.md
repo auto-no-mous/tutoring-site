@@ -135,6 +135,54 @@ sudo systemctl enable --now my-tutor-extend-schedules.timer my-tutor-reminders.t
 переживают: они зовут `docker compose exec -T backend` по имени сервиса. Запуск,
 попавший ровно в момент пересборки, завершится ошибкой - следующий отработает.
 
+`my-tutor-docker-prune.timer` — по воскресеньям в 05:00 UTC урезает кэш сборки
+Docker до самых свежих 1,5 ГБ. Каждая выкладка пересобирает образы, старые слои
+копятся: к октябрю 2026 кэш дорос до 7 ГБ на 30-гигабайтном диске. Свежие слои
+остаются, чтобы следующая сборка не шла с нуля. Установка - как у остальных:
+
+```
+sudo cp ops/systemd/my-tutor-docker-prune.* /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now my-tutor-docker-prune.timer
+```
+
+## Логи nginx
+
+Контейнер `nginx` пишет `access.log`/`error.log` в `/var/log/my-tutor/nginx` на
+хосте: в серверном `docker-compose.override.yml` у сервиса `nginx` есть том
+`/var/log/my-tutor/nginx:/var/log/nginx`. Без него логи шли в stdout контейнера и
+пропадали при каждой выкладке вместе с ним - разобрать, кто и что запрашивал вчера,
+было не по чему.
+
+Ротация - `ops/logrotate/my-tutor-nginx`, копия в `/etc/logrotate.d/`: раз в сутки,
+30 дней, со сжатием. В логе IP-адреса посетителей (персональные данные), поэтому
+дольше не храним.
+
+```
+sudo mkdir -p /var/log/my-tutor/nginx && sudo chmod 750 /var/log/my-tutor/nginx
+sudo cp ops/logrotate/my-tutor-nginx /etc/logrotate.d/
+```
+
+## fail2ban
+
+`/etc/fail2ban/jail.local` (не в git, копия прежней версии лежит рядом с датой в
+имени). Банится только порт SSH, а не все: за одним адресом может стоять NAT целого
+провайдера, и сайт на 80/443 должен оставаться доступен.
+
+- `[sshd]` с `mode = aggressive`. Вход по паролю выключен, поэтому боты не получают
+  «неверный пароль» - сервер сразу закрывает им соединение (`Connection closed by
+  authenticating user ... [preauth]`), а режим `normal` таких строк не считает. В
+  октябре 2026 при тысяче с лишним попыток в сутки за всё время было забанено 22
+  адреса. `journalmatch = _SYSTEMD_UNIT=ssh.service` - см. server-credentials про
+  OpenSSH 10 и `sshd-session`.
+- `[recidive]`: три бана за сутки - бан на неделю. Тоже только порт SSH
+  (`banaction = nftables` явно: стандартный recidive банит все порты).
+- В `ignoreip` - рабочий адрес владельца и адрес, с которого на сервер ходит
+  ассистент при выкладках: у его канала медленное рукопожатие, и в режиме aggressive
+  его обрывы засчитывались бы.
+
+Проверить: `sudo fail2ban-client status sshd` (Total failed должен расти вместе с
+попытками в `journalctl -u ssh`), `sudo fail2ban-client status recidive`.
+
 ## Бэкапы
 
 `backup.sh` — ежедневный бэкап продакшен-сервера: дамп PostgreSQL
