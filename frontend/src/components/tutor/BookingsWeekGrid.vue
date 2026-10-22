@@ -29,15 +29,19 @@ function studentGrade(booking: Booking): number | null {
   <div class="flex flex-col gap-6">
     <section v-for="week in weeks" :key="week.label" :data-week="week.label">
       <h2 class="text-lg font-medium">{{ week.label }}</h2>
-      <!-- На узком экране семь столбцов не помещаются - сетка прокручивается вбок,
-           а не сжимается до нечитаемого. -->
-      <div class="mt-2 overflow-x-auto">
-        <div class="grid min-w-[56rem] grid-cols-7 gap-1.5">
+      <!-- Неделя переносится по строкам, когда семь дней в ряд не помещаются: 7 в ряд,
+           иначе 4 + 3, на телефоне - по 2. Раньше сетка прокручивалась вбок, и на
+           телефоне неделю приходилось листать пальцем поперёк страницы. Решает ширина
+           самого блока (container query), пороги - чтобы день не был уже ~8rem:
+           столько нужно на время и «Фамилию Имя». По два дня в ряд пустые дни ниже, иначе
+           почти пустая неделя растягивалась на телефоне на два экрана. -->
+      <div class="@container mt-2">
+        <div class="grid grid-cols-2 gap-1.5 @min-[34rem]:grid-cols-4 @min-[56rem]:grid-cols-7">
           <div
             v-for="day in week.days"
             :key="day.dateIso"
             :data-day="day.dateIso"
-            class="flex min-h-28 flex-col rounded-lg border"
+            class="flex min-h-16 flex-col rounded-lg border @min-[34rem]:min-h-28"
             :class="[
               day.isToday
                 ? 'border-brand-300 bg-brand-50/70 dark:border-brand-800 dark:bg-brand-900/30'
