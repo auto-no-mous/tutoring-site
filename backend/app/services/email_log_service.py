@@ -15,8 +15,10 @@ from app.utils.time import utcnow
 
 logger = logging.getLogger("app.email")
 
-# Тело письма в журнале обрезается: это контроль отправки, а не почтовый ящик.
+# Превью - для списка; полный текст хранится отдельно (EmailLog.body_text), но тоже с
+# потолком: в журнал не должен попасть мегабайт текста из рассылки.
 PREVIEW_LIMIT = 2000
+BODY_TEXT_LIMIT = 200_000
 STATS_WINDOW_DAYS = 30
 
 
@@ -29,6 +31,7 @@ async def record(
     address_to: str,
     subject: str,
     body_preview: str = "",
+    body_text: str | None = None,
     user_id: uuid.UUID | None = None,
     sent_by_id: uuid.UUID | None = None,
     error: str | None = None,
@@ -52,6 +55,7 @@ async def record(
                     address_to=address_to,
                     subject=subject[:512],
                     body_preview=body_preview[:PREVIEW_LIMIT],
+                    body_text=body_text[:BODY_TEXT_LIMIT] if body_text is not None else None,
                     user_id=user_id,
                     sent_by_id=sent_by_id,
                     error=error,
@@ -60,6 +64,10 @@ async def record(
             await db.commit()
     except Exception:
         logger.exception("EMAIL log write failed to=%s subject=%s", address_to, subject)
+
+
+async def get_entry(db: AsyncSession, entry_id: uuid.UUID) -> EmailLog | None:
+    return await db.get(EmailLog, entry_id)
 
 
 def _filtered(

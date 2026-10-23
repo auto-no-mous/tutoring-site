@@ -22,6 +22,7 @@ from app.schemas.booking import BookingOut, BookingPageOut, BookingTutorUpdate, 
 from app.schemas.email import (
     AdminEmailSend,
     AdminEmailSendResult,
+    EmailLogDetailOut,
     EmailLogPageOut,
     EmailStatsOut,
 )
@@ -457,6 +458,14 @@ async def list_emails(
     return await email_log_service.list_page(
         db, direction=direction, status=status_filter, kind=kind, query=q, page=page, page_size=page_size
     )
+
+
+@router.get("/emails/{entry_id}", response_model=EmailLogDetailOut)
+async def get_email(entry_id: uuid.UUID, db: DbSession) -> EmailLogDetailOut:
+    entry = await email_log_service.get_entry(db, entry_id)
+    if entry is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Письмо не найдено")
+    return EmailLogDetailOut.model_validate(entry)
 
 
 @router.post("/emails/send", response_model=AdminEmailSendResult)

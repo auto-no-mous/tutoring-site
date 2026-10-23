@@ -90,6 +90,7 @@ async def send_email(
             address_to=to,
             subject=subject,
             body_preview=body,
+            body_text=body,
             user_id=user_id,
             sent_by_id=sent_by_id,
             error=f"{type(exc).__name__}: {exc}",
@@ -105,6 +106,7 @@ async def send_email(
         address_to=to,
         subject=subject,
         body_preview=body,
+        body_text=body,
         user_id=user_id,
         sent_by_id=sent_by_id,
     )

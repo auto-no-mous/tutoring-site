@@ -2,9 +2,10 @@
 import { ChevronDown, Mail, MailWarning, Search, Send } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
 
-import { getEmailStats, listEmails, listStudents, listTutors, sendAdminEmail } from "@/api/admin";
+import { getEmail, getEmailStats, listEmails, listStudents, listTutors, sendAdminEmail } from "@/api/admin";
+import LinkifiedText from "@/components/LinkifiedText.vue";
 import { useToastStore } from "@/stores/toast";
-import type { EmailLogEntry, EmailStats } from "@/types/email";
+import type { EmailLogDetail, EmailLogEntry, EmailStats } from "@/types/email";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
 const toast = useToastStore();
@@ -19,6 +20,30 @@ const KIND_LABELS: Record<string, string> = {
   inbound: "Входящее",
   other: "Прочее",
 };
+
+// Полный текст письма подгружается по кнопке и раскрывается на месте: в списке -
+// только начало, чтобы страница журнала не тащила тела всех писем сразу.
+const opened = ref<Record<string, EmailLogDetail | "loading" | "error">>({});
+
+async function toggleFull(entry: EmailLogEntry): Promise<void> {
+  if (opened.value[entry.id] && opened.value[entry.id] !== "error") {
+    const rest = { ...opened.value };
+    delete rest[entry.id];
+    opened.value = rest;
+    return;
+  }
+  opened.value = { ...opened.value, [entry.id]: "loading" };
+  try {
+    opened.value = { ...opened.value, [entry.id]: await getEmail(entry.id) };
+  } catch {
+    opened.value = { ...opened.value, [entry.id]: "error" };
+  }
+}
+
+function fullOf(entry: EmailLogEntry): EmailLogDetail | null {
+  const value = opened.value[entry.id];
+  return typeof value === "object" ? value : null;
+}
 
 const stats = ref<EmailStats | null>(null);
 const entries = ref<EmailLogEntry[]>([]);
@@ -343,9 +368,37 @@ onMounted(async () => {
             <span class="ml-auto text-xs text-slate-400">{{ formatDateTimeWithMsk(entry.created_at) }}</span>
           </div>
           <p v-if="entry.error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ entry.error }}</p>
-          <p v-else-if="entry.body_preview" class="mt-1 line-clamp-2 text-xs text-slate-500">
-            {{ entry.body_preview }}
-          </p>
+          <template v-if="entry.body_preview || entry.error">
+            <div
+              v-if="fullOf(entry)"
+              class="mt-2 max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-slate-50 p-3 text-sm text-slate-700 dark:bg-slate-800/60 dark:text-slate-200"
+              data-full-text
+            >
+              <LinkifiedText :text="fullOf(entry)!.body_text ?? fullOf(entry)!.body_preview" />
+              <p v-if="fullOf(entry)!.body_text === null" class="mt-3 text-xs italic text-slate-400">
+                Полный текст этого письма не сохранялся: до 23.10.2026 журнал хранил только начало.
+              </p>
+            </div>
+            <p v-else-if="entry.body_preview" class="mt-1 line-clamp-2 text-xs text-slate-500">
+              <LinkifiedText :text="entry.body_preview" />
+            </p>
+            <button
+              type="button"
+              class="mt-1 text-xs text-brand-700 underline underline-offset-2 hover:text-brand-800 disabled:opacity-50 dark:text-brand-300"
+              :disabled="opened[entry.id] === 'loading'"
+              @click="toggleFull(entry)"
+            >
+              {{
+                opened[entry.id] === "loading"
+                  ? "Загружаем…"
+                  : fullOf(entry)
+                    ? "Свернуть"
+                    : opened[entry.id] === "error"
+                      ? "Не удалось загрузить — ещё раз"
+                      : "Показать полностью"
+              }}
+            </button>
+          </template>
         </div>
       </div>
 

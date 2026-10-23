@@ -17,6 +17,12 @@ export interface EmailLogEntry {
   created_at: string;
 }
 
+// Полный текст письма - отдельным запросом по кнопке «Показать полностью». null у
+// писем, для которых журнал хранил только превью (до 23.10.2026).
+export interface EmailLogDetail extends EmailLogEntry {
+  body_text: string | null;
+}
+
 export interface EmailLogPage {
   entries: EmailLogEntry[];
   total: number;

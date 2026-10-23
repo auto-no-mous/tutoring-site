@@ -2,8 +2,9 @@
 
 Postfix отдаёт копию каждого входящего письма скрипту ops/mail/ingest-mail.py, а
 тот вызывает этот эндпоинт - так входящие видны в журнале почты админки. Само
-письмо по-прежнему пересылается на личный ящик администратора; здесь хранится
-только конверт и превью текста.
+письмо на info@ по-прежнему пересылается на личный ящик администратора, а для
+служебных адресов журнал - единственная копия; здесь хранится конверт и текст
+письма (без HTML и вложений, только их имена).
 
 Эндпоинт не в /admin: ходит в него машина, а не человек с JWT. Авторизация -
 общий секрет в заголовке (MAIL_INGEST_TOKEN), тот же файл лежит на хосте у
@@ -28,6 +29,9 @@ class InboundEmailIn(BaseModel):
     address_to: str = Field(max_length=320)
     subject: str = Field(default="", max_length=512)
     body_preview: str = Field(default="", max_length=email_log_service.PREVIEW_LIMIT)
+    # Весь текст письма. Необязателен: прежняя версия ops/mail/ingest-mail.py слала
+    # только превью, и после обновления бэкенда она не должна начать получать 422.
+    body_text: str | None = Field(default=None, max_length=email_log_service.BODY_TEXT_LIMIT)
 
 
 @router.post("/inbound", status_code=status.HTTP_204_NO_CONTENT)
@@ -49,4 +53,5 @@ async def ingest_inbound_email(
         address_to=payload.address_to,
         subject=payload.subject,
         body_preview=payload.body_preview,
+        body_text=payload.body_text,
     )

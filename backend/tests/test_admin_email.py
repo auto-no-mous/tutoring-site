@@ -207,3 +207,80 @@ async def test_inbound_ingest_disabled_without_token(
     )
 
     assert resp.status_code == 401
+
+
+async def test_admin_reads_full_email_text(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Список отдаёт превью, полный текст - отдельным запросом по кнопке."""
+    headers = await _admin_headers(client, db_session)
+    long_text = "Здравствуйте! " + "подробности " * 400 + "https://example.com/full"
+    entry = EmailLog(
+        direction=EmailDirection.INBOUND.value,
+        kind=EmailKind.INBOUND.value,
+        status=EmailStatus.RECEIVED.value,
+        address_from="somebody@gmail.com",
+        address_to="postmaster@my-tutor.ru",
+        subject="Длинное письмо",
+        body_preview=long_text[:2000],
+        body_text=long_text,
+    )
+    old = EmailLog(
+        direction=EmailDirection.INBOUND.value,
+        kind=EmailKind.INBOUND.value,
+        status=EmailStatus.RECEIVED.value,
+        address_from="somebody@gmail.com",
+        address_to="info@my-tutor.ru",
+        subject="Старое письмо",
+        body_preview="только начало",
+    )
+    db_session.add_all([entry, old])
+    await db_session.commit()
+
+    listing = (await client.get("/api/v1/admin/emails", headers=headers)).json()["entries"]
+    assert all("body_text" not in e for e in listing)
+
+    full = await client.get(f"/api/v1/admin/emails/{entry.id}", headers=headers)
+    assert full.status_code == 200
+    assert full.json()["body_text"] == long_text
+
+    # Записи до появления полного текста: только превью, body_text пуст.
+    assert (await client.get(f"/api/v1/admin/emails/{old.id}", headers=headers)).json()["body_text"] is None
+
+    missing = await client.get("/api/v1/admin/emails/00000000-0000-0000-0000-000000000000", headers=headers)
+    assert missing.status_code == 404
+
+    student = await _register(client, "mail-reader-student@example.com", "student")
+    forbidden = await client.get(f"/api/v1/admin/emails/{entry.id}", headers=student["headers"])
+    assert forbidden.status_code == 403
+
+
+async def test_inbound_ingest_stores_full_text_and_accepts_old_script(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.services import email_log_service
+
+    # Журнал пишет в собственной сессии - направляем её в тестовую базу.
+    monkeypatch.setattr(
+        email_log_service, "AsyncSessionLocal", async_sessionmaker(bind=db_session.bind, expire_on_commit=False)
+    )
+    monkeypatch.setattr(settings, "mail_ingest_token", "s3cret")
+    token = {"X-Mail-Ingest-Token": "s3cret"}
+    base = {"address_from": "somebody@gmail.com", "address_to": "info@my-tutor.ru"}
+
+    new = await client.post(
+        "/api/v1/mail/inbound",
+        json={**base, "subject": "Новое", "body_preview": "начало", "body_text": "начало и весь текст"},
+        headers=token,
+    )
+    assert new.status_code == 204
+    # Прежняя версия скрипта на сервере шлёт только превью - это не должно ломаться.
+    old = await client.post(
+        "/api/v1/mail/inbound", json={**base, "subject": "Старое", "body_preview": "только начало"}, headers=token
+    )
+    assert old.status_code == 204
+
+    rows = {r.subject: r for r in (await db_session.scalars(select(EmailLog))).all()}
+    assert rows["Новое"].body_text == "начало и весь текст"
+    assert rows["Старое"].body_text is None

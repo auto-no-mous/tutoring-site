@@ -2,7 +2,7 @@ import { apiClient } from "@/api/client";
 import type { Booking } from "@/types/booking";
 import type { Group, GroupApplication, GroupMembership } from "@/types/group";
 import type { NotificationTemplate } from "@/types/notification";
-import type { AdminEmailSendResult, EmailLogPage, EmailStats } from "@/types/email";
+import type { AdminEmailSendResult, EmailLogDetail, EmailLogPage, EmailStats } from "@/types/email";
 import type { BlogPostAdmin, BlogPostPayload } from "@/types/blog";
 import type { Direction, Subject } from "@/types/subject";
 import type { Slot, TutorProfile } from "@/types/tutor";
@@ -245,6 +245,11 @@ export interface EmailLogFilters {
 
 export async function listEmails(filters: EmailLogFilters = {}) {
   const { data } = await apiClient.get<EmailLogPage>("/admin/emails", { params: filters });
+  return data;
+}
+
+export async function getEmail(id: string) {
+  const { data } = await apiClient.get<EmailLogDetail>(`/admin/emails/${id}`);
   return data;
 }
 

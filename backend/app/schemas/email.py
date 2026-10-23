@@ -22,6 +22,12 @@ class EmailLogOut(BaseModel):
     created_at: UTCDateTime
 
 
+class EmailLogDetailOut(EmailLogOut):
+    # Весь текст письма - отдельным запросом, чтобы список не тащил тела всех писем.
+    # None у записей, для которых сохранялось только превью.
+    body_text: str | None
+
+
 class EmailLogPageOut(BaseModel):
     entries: list[EmailLogOut]
     total: int

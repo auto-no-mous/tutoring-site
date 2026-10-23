@@ -2,26 +2,34 @@
 """Отдаёт входящее письмо бэкенду, чтобы оно попало в журнал почты админки.
 
 Postfix передаёт сюда письмо целиком на stdin (см. алиас mailingest в
-ops/mail/install.sh). Скрипт разбирает конверт, берёт превью текста и делает
+ops/mail/install.sh). Скрипт разбирает конверт, достаёт текст письма и делает
 POST на /api/v1/mail/inbound с общим секретом.
 
-Письмо при этом всё равно пересылается на личный ящик администратора - это
-только копия для статистики, поэтому скрипт ВСЕГДА завершается с кодом 0:
-недоступный бэкенд не должен превращаться в отбойник для отправителя.
+Текст передаётся целиком (body_text) и отдельно - начало для списка (body_preview).
+Если у письма нет текстовой версии, только HTML, он переводится в текст здесь же,
+адреса ссылок сохраняются в скобках: админка чужой HTML не отображает (иначе письмо
+могло бы выполнить скрипт в её браузере), показывает только текст. Вложения не
+передаются - только их имена в конце текста.
+
+Скрипт ВСЕГДА завершается с кодом 0: недоступный бэкенд не должен превращаться в
+отбойник для отправителя.
 """
 
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
 from email import message_from_binary_file, policy
 from email.header import decode_header, make_header
 from email.utils import parseaddr
+from html.parser import HTMLParser
 from pathlib import Path
 
 API_URL = "https://my-tutor.ru/api/v1/mail/inbound"
 TOKEN_FILE = Path("/etc/my-tutor-mail-ingest.token")
 PREVIEW_LIMIT = 2000
+BODY_TEXT_LIMIT = 200_000
 TIMEOUT_SECONDS = 10
 
 
@@ -35,22 +43,86 @@ def decoded(value: str | None) -> str:
         return value
 
 
-def text_preview(message) -> str:
-    """Первая текстовая часть письма, обрезанная до PREVIEW_LIMIT."""
-    part = message.get_body(preferencelist=("plain", "html")) if hasattr(message, "get_body") else None
-    if part is None:
-        for candidate in message.walk():
-            if candidate.get_content_type() == "text/plain":
-                part = candidate
-                break
-    if part is None:
-        return ""
+class _HtmlToText(HTMLParser):
+    """HTML письма в читаемый текст: блоки - с новой строки, у ссылки - её адрес в
+    скобках, стили и скрипты выбрасываются. Без сторонних библиотек: скрипт
+    запускается системным python3 на хосте, а не в окружении бэкенда."""
+
+    BLOCK = {"p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "hr", "blockquote"}
+    SKIP = {"style", "script", "head", "title"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip = 0
+        self._href: str | None = None
+        self._link_text: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+        elif tag in self.BLOCK:
+            self.parts.append("\n")
+        if tag == "a":
+            self._href = dict(attrs).get("href")
+            self._link_text = []
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self._skip = max(0, self._skip - 1)
+        elif tag in self.BLOCK:
+            self.parts.append("\n")
+        if tag == "a" and self._href:
+            text = "".join(self._link_text).strip()
+            if re.match(r"^(https?:|mailto:)", self._href) and self._href not in text:
+                self.parts.append(f" ({self._href})")
+            self._href = None
+
+    def handle_data(self, data):
+        if self._skip:
+            return
+        text = re.sub(r"\s+", " ", data)
+        self.parts.append(text)
+        if self._href is not None:
+            self._link_text.append(text)
+
+
+def html_to_text(html: str) -> str:
+    parser = _HtmlToText()
+    parser.feed(html)
+    parser.close()
+    lines = [line.strip() for line in "".join(parser.parts).split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _part_text(part) -> str:
     try:
-        payload = part.get_content()
+        return part.get_content()
     except Exception:
         raw = part.get_payload(decode=True) or b""
-        payload = raw.decode(part.get_content_charset() or "utf-8", errors="replace")
-    return payload.strip()[:PREVIEW_LIMIT]
+        return raw.decode(part.get_content_charset() or "utf-8", errors="replace")
+
+
+def body_text(message) -> str:
+    """Весь текст письма: текстовая версия, а если её нет - HTML, переведённый в
+    текст. В конце - имена вложений (сами вложения в журнал не попадают)."""
+    text = ""
+    part = message.get_body(preferencelist=("plain", "html")) if hasattr(message, "get_body") else None
+    if part is not None:
+        content = _part_text(part)
+        text = html_to_text(content) if part.get_content_type() == "text/html" else content.strip()
+    else:
+        for candidate in message.walk():
+            if candidate.get_content_type() == "text/plain":
+                text = _part_text(candidate).strip()
+                break
+
+    names = []
+    if hasattr(message, "iter_attachments"):
+        names = [a.get_filename() or a.get_content_type() for a in message.iter_attachments()]
+    if names:
+        text = (text + "\n\n" if text else "") + "Вложения (в журнале не сохраняются): " + ", ".join(names)
+    return text[:BODY_TEXT_LIMIT]
 
 
 def main() -> int:
@@ -68,8 +140,10 @@ def main() -> int:
             "address_from": parseaddr(decoded(message.get("From")))[1] or "unknown",
             "address_to": parseaddr(decoded(message.get("To")))[1] or "unknown",
             "subject": decoded(message.get("Subject"))[:512],
-            "body_preview": text_preview(message),
         }
+        text = body_text(message)
+        payload["body_preview"] = text[:PREVIEW_LIMIT]
+        payload["body_text"] = text
     except Exception as exc:
         print(f"ingest-mail: не разобрать письмо: {exc}", file=sys.stderr)
         return 0
