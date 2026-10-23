@@ -1,6 +1,8 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createHomework } from "@/api/homework";
+import { getMyStudents } from "@/api/tutors";
 import HomeworkTab from "@/components/tutor/HomeworkTab.vue";
 
 const listMyAssignments = vi.fn();
@@ -109,7 +111,7 @@ describe("tutor HomeworkTab", () => {
 
     const form = wrapper.find("form");
     const inputs = form.findAll("input:not([type=file])");
-    const linkInput = inputs.find((i) => i.element.closest("label")?.textContent?.includes("Ссылка"))!;
+    const linkInput = form.find('input[aria-label="Ссылка на материал"]');
     const titleInput = inputs.find((i) => i.element.closest("label")?.textContent?.includes("Название"))!;
     expect((titleInput.element as HTMLInputElement).value).toBe("Параграф 12");
     expect((linkInput.element as HTMLInputElement).value).toBe("");
@@ -135,5 +137,34 @@ describe("tutor HomeworkTab", () => {
     // Выполненных 6: снова видно 5, а не 10.
     expect(wrapper.findAll("[data-status]")).toHaveLength(5);
     expect(wrapper.findAll("button").find((b) => b.text().includes("Показать ещё"))!.text()).toContain("Показать ещё 1");
+  });
+
+  it("материал - ссылка или файл: вид как в прошлом задании, в запрос уходит только он", async () => {
+    vi.mocked(getMyStudents).mockResolvedValue([
+      { id: "s-1", first_name: "Пётр", last_name: "Петров", grade: 7, last_lesson_at: null },
+    ]);
+    listMyAssignments.mockResolvedValue([assignment({ content_type: "file", content_url: null })]);
+    const wrapper = mount(HomeworkTab, { attachTo: document.body });
+    await flushPromises();
+    await wrapper.findAll("button").find((b) => b.text() === "+ ДЗ")!.trigger("click");
+
+    const form = wrapper.find("form");
+    expect(form.find('[role="radio"][aria-checked="true"]').text()).toBe("Файл");
+    expect(form.find('input[aria-label="Ссылка на материал"]').exists()).toBe(false);
+
+    const fileInput = form.find('input[type="file"]');
+    Object.defineProperty(fileInput.element, "files", {
+      value: [new File(["d"], "task.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })],
+    });
+    await fileInput.trigger("change");
+    // Получатель обязателен - выберем ученика через тот же список, что видит репетитор.
+    (wrapper.vm as unknown as { createStudentIds: string[] }).createStudentIds = ["s-1"];
+    await form.trigger("submit");
+    await flushPromises();
+
+    const payload = vi.mocked(createHomework).mock.calls[0][0];
+    expect(payload.file?.name).toBe("task.docx");
+    expect(payload).not.toHaveProperty("content_url");
+    wrapper.unmount();
   });
 });

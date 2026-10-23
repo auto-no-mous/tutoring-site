@@ -58,7 +58,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 // файлом на диске. Поэтому зона принимает три способа сразу: клик по ней открывает
 // обычный выбор файла, файл можно перетащить, а можно просто нажать Ctrl+V где угодно
 // на странице (как выбирается зона - см. onDocumentPaste выше).
-const props = defineProps<{ modelValue: File | null; disabled?: boolean; accept?: string }>();
+// hideTypeHint - не писать «не изображение» под файлом: это подсказка ученику, который
+// обычно сдаёт скриншот, а для материала задания (PDF, Word) она звучит странно.
+const props = defineProps<{ modelValue: File | null; disabled?: boolean; accept?: string; hideTypeHint?: boolean }>();
 const emit = defineEmits<{ "update:modelValue": [File | null] }>();
 
 const input = ref<HTMLInputElement | null>(null);
@@ -177,7 +179,7 @@ function humanSize(bytes: number): string {
         <template v-if="modelValue">
           <span class="truncate font-medium">{{ modelValue.name }}</span>
           <span class="text-slate-400">
-            {{ humanSize(modelValue.size) }}{{ isImage ? "" : " · не изображение" }}
+            {{ humanSize(modelValue.size) }}{{ isImage || hideTypeHint ? "" : " · не изображение" }}
           </span>
         </template>
         <template v-else>

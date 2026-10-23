@@ -5,9 +5,18 @@ import { onMounted, ref } from "vue";
 
 import { createHomework, getStudentHomeworkForTutor, setSubmissionStatus } from "@/api/homework";
 import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
+import HomeworkMaterialPicker from "@/components/homework/HomeworkMaterialPicker.vue";
 import ShowMoreHomework from "@/components/homework/ShowMoreHomework.vue";
 import type { StudentHomework } from "@/types/homework";
-import { HOMEWORK_STATUS_OPTIONS, homeworkCardClass, useHomeworkPage } from "@/utils/homework";
+import { apiErrorMessage } from "@/utils/apiError";
+import {
+  emptyHomeworkMaterial,
+  HOMEWORK_STATUS_OPTIONS,
+  homeworkCardClass,
+  homeworkMaterialPayload,
+  homeworkMaterialProblem,
+  useHomeworkPage,
+} from "@/utils/homework";
 import { formatDateTimeWithMsk } from "@/utils/time";
 
 const props = defineProps<{ studentId: string; studentName: string }>();
@@ -20,9 +29,9 @@ const showForm = ref(false);
 
 const title = ref("");
 const submissionMode = ref<"mark_done" | "file_upload">("mark_done");
-const contentUrl = ref("");
-const file = ref<File | null>(null);
+const material = ref(emptyHomeworkMaterial());
 const error = ref("");
+const isSaving = ref(false);
 
 async function load(): Promise<void> {
   isLoading.value = true;
@@ -35,14 +44,14 @@ async function load(): Promise<void> {
   }
 }
 
-// Новое задание обычно продолжает прошлое, поэтому название и способ сдачи берём из
-// последнего (список приходит от новых к старым). Материал - всегда новый.
+// Новое задание обычно продолжает прошлое, поэтому название, способ сдачи и вид
+// материала (ссылка или файл) берём из последнего (список приходит от новых к
+// старым). Сам материал - всегда новый, поле пустое.
 function resetForm(): void {
   const last = items.value[0];
   title.value = last?.title ?? "";
   submissionMode.value = last?.submission_mode === "file_upload" ? "file_upload" : "mark_done";
-  contentUrl.value = "";
-  file.value = null;
+  material.value = emptyHomeworkMaterial(last?.content_type === "file" ? "file" : "link");
   error.value = "";
 }
 
@@ -51,26 +60,27 @@ function openForm(): void {
   showForm.value = true;
 }
 
-function onFileChange(event: Event): void {
-  file.value = (event.target as HTMLInputElement).files?.[0] ?? null;
-}
-
 async function create(): Promise<void> {
-  error.value = "";
+  error.value = homeworkMaterialProblem(material.value) ?? "";
+  if (error.value) return;
+  isSaving.value = true;
   try {
     await createHomework({
       title: title.value.trim() || undefined,
       submission_mode: submissionMode.value,
       student_ids: [props.studentId],
       group_ids: [],
-      content_url: contentUrl.value || undefined,
-      file: file.value ?? undefined,
+      ...homeworkMaterialPayload(material.value),
     });
     showForm.value = false;
     await load();
     emit("changed");
-  } catch {
-    error.value = "Не удалось создать задание — укажите ссылку или файл (и только один вариант).";
+  } catch (err) {
+    // Причину знает сервер (тип или размер файла и т.п.). Раньше здесь на любой отказ
+    // стояло «укажите ссылку или файл», и отклонённый файл выглядел как невыбранный.
+    error.value = apiErrorMessage(err, "Не удалось создать задание");
+  } finally {
+    isSaving.value = false;
   }
 }
 
@@ -156,15 +166,7 @@ onMounted(load);
                 <option value="file_upload">Загрузить файл</option>
               </select>
             </label>
-            <label class="flex flex-col gap-1 text-sm">
-              Ссылка на материал (или прикрепите файл ниже)
-              <input v-model="contentUrl" class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 text-sm dark:border-slate-700" />
-            </label>
-            <input
-              type="file"
-              class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
-              @change="onFileChange"
-            />
+            <HomeworkMaterialPicker v-model="material" />
             <label class="flex flex-col gap-1 text-sm">
               Название задания
               <input
@@ -175,8 +177,12 @@ onMounted(load);
             </label>
             <p v-if="error" class="text-xs text-red-600 dark:text-red-400">{{ error }}</p>
             <div class="flex items-center gap-2">
-              <button type="submit" class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white">
-                Отправить
+              <button
+                type="submit"
+                :disabled="isSaving"
+                class="w-fit rounded-md bg-brand-500 px-4 py-2 text-sm text-white disabled:opacity-50"
+              >
+                {{ isSaving ? "Отправляем…" : "Отправить" }}
               </button>
               <button v-if="items.length > 0" type="button" class="text-xs text-slate-500 underline" @click="showForm = false">
                 Отмена

@@ -1,5 +1,7 @@
 import { computed, ref, type Ref } from "vue";
 
+import { attachmentProblem } from "@/utils/attachments";
+
 // Статус домашки показывают три разных места - вкладка ученика, вкладка репетитора и
 // окно «ДЗ · ученик», - и раньше каждое называло и красило его по-своему.
 
@@ -62,4 +64,28 @@ export function useHomeworkPage<T>(items: Ref<T[]>) {
       limit.value = HOMEWORK_PAGE_SIZE;
     },
   };
+}
+
+// --- Материал задания (HomeworkMaterialPicker) --------------------------------------
+
+export interface HomeworkMaterial {
+  kind: "link" | "file";
+  url: string;
+  file: File | null;
+}
+
+/** Что не так с материалом перед отправкой, или null - можно отправлять. */
+export function homeworkMaterialProblem(material: HomeworkMaterial): string | null {
+  if (material.kind === "link") return material.url.trim() ? null : "Вставьте ссылку на материал.";
+  if (!material.file) return "Выберите файл с материалом.";
+  return attachmentProblem(material.file);
+}
+
+/** Поля запроса: ровно одно из двух - сервер принимает либо ссылку, либо файл. */
+export function emptyHomeworkMaterial(kind: HomeworkMaterial["kind"] = "link"): HomeworkMaterial {
+  return { kind, url: "", file: null };
+}
+
+export function homeworkMaterialPayload(material: HomeworkMaterial): { content_url?: string; file?: File } {
+  return material.kind === "link" ? { content_url: material.url.trim() } : { file: material.file ?? undefined };
 }

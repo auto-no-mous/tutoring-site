@@ -13,14 +13,19 @@ import {
 } from "@/api/homework";
 import { getMyStudents } from "@/api/tutors";
 import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
+import HomeworkMaterialPicker from "@/components/homework/HomeworkMaterialPicker.vue";
 import ShowMoreHomework from "@/components/homework/ShowMoreHomework.vue";
 import HomeworkRecipientPicker from "@/components/tutor/HomeworkRecipientPicker.vue";
 import { useNotificationsStore } from "@/stores/notifications";
 import type { Group } from "@/types/group";
 import type { HomeworkAssignment, HomeworkSubmission } from "@/types/homework";
 import type { TutorStudent } from "@/types/tutor";
+import { apiErrorMessage } from "@/utils/apiError";
 import {
+  emptyHomeworkMaterial,
   HOMEWORK_STATUS_OPTIONS,
+  homeworkMaterialPayload,
+  homeworkMaterialProblem,
   homeworkCardClass,
   homeworkStatusLabel,
   homeworkStatusTextClass,
@@ -71,9 +76,7 @@ const createTitle = ref("");
 const createSubmissionMode = ref<"mark_done" | "file_upload">("mark_done");
 const createStudentIds = ref<string[]>([]);
 const createGroupIds = ref<string[]>([]);
-const createContentUrl = ref("");
-const createFile = ref<File | null>(null);
-const createFileInputEl = ref<HTMLInputElement | null>(null);
+const createMaterial = ref(emptyHomeworkMaterial());
 const createError = ref("");
 
 // Новое задание обычно продолжает прошлое, поэтому название и способ сдачи берём из
@@ -84,9 +87,7 @@ function resetCreateForm(): void {
   createSubmissionMode.value = last?.submission_mode === "file_upload" ? "file_upload" : "mark_done";
   createStudentIds.value = [];
   createGroupIds.value = [];
-  createContentUrl.value = "";
-  createFile.value = null;
-  if (createFileInputEl.value) createFileInputEl.value.value = "";
+  createMaterial.value = emptyHomeworkMaterial(last?.content_type === "file" ? "file" : "link");
   createError.value = "";
 }
 
@@ -95,34 +96,27 @@ function toggleCreateForm(): void {
   resetCreateForm();
 }
 
-function onCreateFileChange(event: Event): void {
-  createFile.value = (event.target as HTMLInputElement).files?.[0] ?? null;
-}
-
 async function submitCreate(): Promise<void> {
   createError.value = "";
   if (createStudentIds.value.length === 0 && createGroupIds.value.length === 0) {
     createError.value = "Выберите хотя бы одного получателя.";
     return;
   }
-  if (!createContentUrl.value.trim() && !createFile.value) {
-    createError.value = "Укажите ссылку на материал или прикрепите файл.";
-    return;
-  }
+  createError.value = homeworkMaterialProblem(createMaterial.value) ?? "";
+  if (createError.value) return;
   try {
     await createHomework({
       title: createTitle.value.trim() || undefined,
       submission_mode: createSubmissionMode.value,
       student_ids: createStudentIds.value,
       group_ids: createGroupIds.value,
-      content_url: createContentUrl.value.trim() || undefined,
-      file: createFile.value ?? undefined,
+      ...homeworkMaterialPayload(createMaterial.value),
     });
     resetCreateForm();
     showCreateForm.value = false;
     await load();
-  } catch {
-    createError.value = "Не удалось создать задание. Проверьте введённые данные.";
+  } catch (err) {
+    createError.value = apiErrorMessage(err, "Не удалось создать задание. Проверьте введённые данные.");
   }
 }
 
@@ -132,8 +126,7 @@ const editing = ref<HomeworkAssignment | null>(null);
 const editTitle = ref("");
 const editSubmissionMode = ref<"mark_done" | "file_upload">("mark_done");
 const editReplaceContent = ref(false);
-const editContentUrl = ref("");
-const editFile = ref<File | null>(null);
+const editMaterial = ref(emptyHomeworkMaterial());
 const editError = ref("");
 
 function openEdit(assignment: HomeworkAssignment): void {
@@ -141,8 +134,7 @@ function openEdit(assignment: HomeworkAssignment): void {
   editTitle.value = assignment.title ?? "";
   editSubmissionMode.value = assignment.submission_mode as "mark_done" | "file_upload";
   editReplaceContent.value = false;
-  editContentUrl.value = "";
-  editFile.value = null;
+  editMaterial.value = emptyHomeworkMaterial(assignment.content_type === "file" ? "file" : "link");
   editError.value = "";
 }
 
@@ -150,28 +142,23 @@ function closeEdit(): void {
   editing.value = null;
 }
 
-function onEditFileChange(event: Event): void {
-  editFile.value = (event.target as HTMLInputElement).files?.[0] ?? null;
-}
-
 async function submitEdit(): Promise<void> {
   if (!editing.value) return;
   editError.value = "";
-  if (editReplaceContent.value && !editContentUrl.value.trim() && !editFile.value) {
-    editError.value = "Укажите ссылку на материал или прикрепите файл — или отмените замену материала.";
-    return;
+  if (editReplaceContent.value) {
+    editError.value = homeworkMaterialProblem(editMaterial.value) ?? "";
+    if (editError.value) return;
   }
   try {
     await updateHomework(editing.value.id, {
       title: editTitle.value.trim() || undefined,
       submission_mode: editSubmissionMode.value,
-      content_url: editReplaceContent.value ? editContentUrl.value.trim() || undefined : undefined,
-      file: editReplaceContent.value ? editFile.value ?? undefined : undefined,
+      ...(editReplaceContent.value ? homeworkMaterialPayload(editMaterial.value) : {}),
     });
     closeEdit();
     await load();
-  } catch {
-    editError.value = "Не удалось сохранить изменения.";
+  } catch (err) {
+    editError.value = apiErrorMessage(err, "Не удалось сохранить изменения.");
   }
 }
 
@@ -302,20 +289,7 @@ onMounted(load);
             </button>
           </div>
         </div>
-        <label class="flex flex-col gap-1 text-sm">
-          Ссылка на материал
-          <input
-            v-model="createContentUrl"
-            placeholder="необязательно"
-            class="rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
-          />
-        </label>
-        <input
-          ref="createFileInputEl"
-          type="file"
-          class="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
-          @change="onCreateFileChange"
-        />
+        <HomeworkMaterialPicker v-model="createMaterial" />
         <label class="flex flex-col gap-1 text-sm">
           Название задания
           <input
@@ -475,18 +449,7 @@ onMounted(load);
                 <input v-model="editReplaceContent" type="checkbox" />
                 Заменить материал
               </label>
-              <template v-if="editReplaceContent">
-                <input
-                  v-model="editContentUrl"
-                  placeholder="Ссылка на материал (необязательно)"
-                  class="mt-2 w-full rounded-md border border-slate-300 bg-transparent px-2 py-1.5 dark:border-slate-700"
-                />
-                <input
-                  type="file"
-                  class="mt-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 dark:file:bg-white dark:file:text-slate-900 dark:hover:file:bg-slate-200"
-                  @change="onEditFileChange"
-                />
-              </template>
+              <HomeworkMaterialPicker v-if="editReplaceContent" v-model="editMaterial" class="mt-2" />
             </div>
             <p v-if="editError" class="text-sm text-red-600 dark:text-red-400">{{ editError }}</p>
             <div class="flex gap-2">

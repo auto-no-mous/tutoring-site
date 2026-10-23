@@ -689,3 +689,31 @@ async def test_tutor_assignment_list_carries_submissions(client: AsyncClient) ->
     assert submission["student_display_name"]
     assert submission["status"] == "submitted"
     assert len(submission["files"]) == 1
+
+
+async def test_homework_file_types_from_windows_and_clear_rejection(client: AsyncClient) -> None:
+    """Chrome на Windows присылает .zip как application/x-zip-compressed - такой архив
+    должен приниматься. А неподходящий тип отклоняется понятной причиной, которую
+    интерфейс показывает как есть (раньше вместо неё было общее «укажите ссылку или
+    файл»)."""
+    tutor = await _register(client, "hw-types-tutor@example.com", "tutor")
+    student = await _register(client, "hw-types-student@example.com", "student")
+    data = {"submission_mode": "mark_done", "student_ids": [student["user"]["id"]]}
+
+    zipped = await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data=data,
+        files={"file": ("tasks.zip", b"PK\x03\x04", "application/x-zip-compressed")},
+    )
+    assert zipped.status_code == 201, zipped.text
+    assert zipped.json()[0]["content_file_path"].endswith(".zip")
+
+    rar = await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data=data,
+        files={"file": ("tasks.rar", b"Rar!", "application/vnd.rar")},
+    )
+    assert rar.status_code == 400
+    assert rar.json()["detail"] == "Недопустимый тип файла"

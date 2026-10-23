@@ -21,6 +21,9 @@ ALLOWED_ATTACHMENT_TYPES = ALLOWED_IMAGE_TYPES | {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "text/plain",
     "application/zip",
+    # Так .zip называет Chrome на Windows - без этого архив от репетитора или ученика
+    # на Windows отклонялся как «недопустимый тип».
+    "application/x-zip-compressed",
 }
 
 # The stored file's extension is derived from this server-side, validated-content-type
@@ -42,6 +45,7 @@ _CONTENT_TYPE_EXTENSIONS: dict[str, str] = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
     "text/plain": ".txt",
     "application/zip": ".zip",
+    "application/x-zip-compressed": ".zip",
 }
 
 

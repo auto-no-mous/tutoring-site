@@ -19,6 +19,9 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
   // предлагать "проверьте данные" здесь бессмысленно.
   if (!err.response) return "Не удалось связаться с сервером. Проверьте соединение и попробуйте ещё раз.";
 
+  // 413 отдаёт nginx ещё до бэкенда (client_max_body_size) - HTML-страницей без detail.
+  if (err.response.status === 413) return "Файл слишком большой.";
+
   if (err.response.status === 429) {
     return "Слишком много попыток. Подождите немного и попробуйте ещё раз.";
   }
