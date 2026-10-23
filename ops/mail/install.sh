@@ -105,8 +105,15 @@ postconf -e "virtual_alias_maps = hash:/etc/postfix/virtual"
 postconf -e "smtpd_helo_required = yes"
 postconf -e "disable_vrfy_command = yes"
 postconf -e "smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination"
-postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain"
+postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain, reject_rbl_client bl.spamcop.net, reject_rbl_client psbl.surriel.com"
 postconf -e "smtpd_client_restrictions = permit_mynetworks, reject_unauth_pipelining"
+# Входящий спам отсекаем на входе, а не пересылаем дальше: пересылка спама с нашего
+# IP портит его репутацию. Spamhaus здесь нет намеренно - он не отвечает на запросы
+# через публичные резолверы (1.1.1.1/8.8.8.8), которыми пользуется сервер, а свой
+# резолвер ради одного списка поднимать незачем: из входящих за 60 дней (октябрь
+# 2026) Spamhaus знал 2 отправителя из 141.
+postconf -e "smtpd_helo_restrictions = permit_mynetworks, reject_invalid_helo_hostname, reject_non_fqdn_helo_hostname"
+postconf -e "smtpd_sender_restrictions = permit_mynetworks, reject_non_fqdn_sender, reject_unknown_sender_domain"
 # Проверки по DNSBL (zen.spamhaus.org) намеренно НЕ включены: сервер резолвит через
 # публичные 1.1.1.1/8.8.8.8, а Spamhaus такие запросы не обслуживает. Входящих у нас
 # всего три служебных адреса, и всё уходит в Gmail с его собственными фильтрами.
@@ -128,6 +135,9 @@ postconf -e "milter_default_action = accept"
 postconf -e "milter_protocol = 6"
 postconf -e "smtpd_milters = inet:127.0.0.1:8891"
 postconf -e "non_smtpd_milters = inet:127.0.0.1:8891"
+# Уведомления о недоставке Postfix формирует сам, и по умолчанию milter их не видит -
+# они уходили без подписи DKIM и в отчётах DMARC числились как fail.
+postconf -e "internal_mail_filter_classes = bounce"
 
 # SRS: при пересылке info@ -> личный ящик конверт переписывается на наш домен,
 # иначе SPF отправителя не сойдётся и Gmail положит письмо в спам.
