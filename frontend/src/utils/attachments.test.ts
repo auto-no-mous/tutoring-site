@@ -6,7 +6,7 @@ const file = (name: string, type = "", size = 10) => new File([new Uint8Array(si
 
 describe("attachmentProblem", () => {
   it("пропускает обычные документы и картинки, в том числе .zip с Windows", () => {
-    for (const name of ["a.pdf", "b.DOCX", "c.xlsx", "d.pptx", "e.txt", "f.jpeg", "g.png"]) {
+    for (const name of ["a.pdf", "b.DOCX", "c.xlsx", "d.pptx", "e.txt", "f.jpeg", "g.png", "h.odt", "i.ods", "j.ODP", "k.odg"]) {
       expect(attachmentProblem(file(name)), name).toBeNull();
     }
     expect(attachmentProblem(file("tasks.zip", "application/x-zip-compressed"))).toBeNull();

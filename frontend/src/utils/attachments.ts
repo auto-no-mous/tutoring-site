@@ -8,6 +8,8 @@
 
 export const ATTACHMENT_EXTENSIONS = [
   ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".zip",
+  // LibreOffice (OpenDocument): тексты, таблицы, презентации, рисунки.
+  ".odt", ".ods", ".odp", ".odg",
   ".jpg", ".jpeg", ".png", ".webp", ".gif",
 ];
 
@@ -23,7 +25,7 @@ export function attachmentProblem(file: File): string | null {
   // Скриншот из буфера обмена приходит без привычного имени, но с типом картинки.
   const isPastedImage = !ext && file.type.startsWith("image/");
   if (!isPastedImage && !ATTACHMENT_EXTENSIONS.includes(ext)) {
-    return `Такой файл не подойдёт${ext ? ` (${ext})` : ""}. Можно: PDF, Word, Excel, PowerPoint, TXT, ZIP или картинку.`;
+    return `Такой файл не подойдёт${ext ? ` (${ext})` : ""}. Можно: PDF, Word, Excel, PowerPoint, LibreOffice, TXT, ZIP или картинку.`;
   }
   if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
     return `Файл больше ${MAX_UPLOAD_MB} МБ - уменьшите его или положите в облако и дайте ссылку.`;

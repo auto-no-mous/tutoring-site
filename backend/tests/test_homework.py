@@ -717,3 +717,33 @@ async def test_homework_file_types_from_windows_and_clear_rejection(client: Asyn
     )
     assert rar.status_code == 400
     assert rar.json()["detail"] == "Недопустимый тип файла"
+
+
+async def test_libreoffice_files_are_accepted(client: AsyncClient) -> None:
+    """Файлы LibreOffice принимаются - и с правильным типом, и когда браузер типа не
+    знает (Windows без LibreOffice шлёт application/octet-stream или пустой тип): тогда
+    тип берётся по расширению, но только из разрешённых."""
+    tutor = await _register(client, "hw-odf-tutor@example.com", "tutor")
+    student = await _register(client, "hw-odf-student@example.com", "student")
+    data = {"submission_mode": "mark_done", "student_ids": [student["user"]["id"]]}
+
+    async def upload(name: str, content_type: str):
+        return await client.post(
+            "/api/v1/homework", headers=tutor["headers"], data=data, files={"file": (name, b"PK\x03\x04", content_type)}
+        )
+
+    for name, content_type, ext in [
+        ("Задачи.odt", "application/vnd.oasis.opendocument.text", ".odt"),
+        ("Таблица.ods", "application/vnd.oasis.opendocument.spreadsheet", ".ods"),
+        ("Слайды.odp", "application/vnd.oasis.opendocument.presentation", ".odp"),
+        ("Схема.odg", "application/vnd.oasis.opendocument.graphics", ".odg"),
+        ("Задачи.ODT", "application/octet-stream", ".odt"),
+        ("Слайды.odp", "", ".odp"),
+    ]:
+        resp = await upload(name, content_type)
+        assert resp.status_code == 201, (name, content_type, resp.text)
+        assert resp.json()[0]["content_file_path"].endswith(ext), name
+
+    # По расширению узнаём только разрешённое: исполняемое и разметка - нет.
+    for name in ("virus.exe", "page.html", "noext"):
+        assert (await upload(name, "application/octet-stream")).status_code == 400, name
