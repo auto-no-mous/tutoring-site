@@ -1,3 +1,4 @@
+import mimetypes
 import uuid
 
 from fastapi import HTTPException, UploadFile, status
@@ -63,6 +64,14 @@ _CONTENT_TYPE_EXTENSIONS: dict[str, str] = {
 # имени, но лишь среди разрешённых: обратная таблица к _CONTENT_TYPE_EXTENSIONS, так
 # что на диск по-прежнему попадает только расширение из белого списка.
 _GENERIC_CONTENT_TYPES = {"", "application/octet-stream"}
+
+# /files отдаёт StaticFiles бэкенда, а тип ответа он берёт из mimetypes. В slim-образе
+# Python нет системной таблицы типов, и .webp, .docx, .xlsx, .pptx, .odt... уходили как
+# application/octet-stream: картинка скачивалась вместо показа, документ - без
+# подсказки браузеру, чем его открыть. Регистрируем то же, что принимаем.
+for _type, _ext in _CONTENT_TYPE_EXTENSIONS.items():
+    if _type != "application/x-zip-compressed":
+        mimetypes.add_type(_type, _ext)
 _EXTENSION_CONTENT_TYPES: dict[str, str] = {".jpeg": "image/jpeg"}
 for _type, _ext in _CONTENT_TYPE_EXTENSIONS.items():
     _EXTENSION_CONTENT_TYPES.setdefault(_ext, _type)

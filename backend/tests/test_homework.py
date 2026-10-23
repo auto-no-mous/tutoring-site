@@ -747,3 +747,24 @@ async def test_libreoffice_files_are_accepted(client: AsyncClient) -> None:
     # По расширению узнаём только разрешённое: исполняемое и разметка - нет.
     for name in ("virus.exe", "page.html", "noext"):
         assert (await upload(name, "application/octet-stream")).status_code == 400, name
+
+
+async def test_uploaded_files_are_served_with_their_type(client: AsyncClient) -> None:
+    """Скачивание отдаёт файл с настоящим типом, а не application/octet-stream:
+    иначе .webp скачивается вместо показа, а документу не подсказано, чем его открыть."""
+    tutor = await _register(client, "hw-serve-tutor@example.com", "tutor")
+    student = await _register(client, "hw-serve-student@example.com", "student")
+    data = {"submission_mode": "mark_done", "student_ids": [student["user"]["id"]]}
+
+    for name, content_type in [
+        ("a.odt", "application/vnd.oasis.opendocument.text"),
+        ("b.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ("c.webp", "image/webp"),
+    ]:
+        created = await client.post(
+            "/api/v1/homework", headers=tutor["headers"], data=data, files={"file": (name, b"data", content_type)}
+        )
+        path = created.json()[0]["content_file_path"]
+        served = await client.get(path)
+        assert served.status_code == 200, path
+        assert served.headers["content-type"] == content_type, name
