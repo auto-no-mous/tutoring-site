@@ -44,6 +44,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# Любая ошибка - одной понятной строкой, без служебной трассировки PowerShell.
+trap { Write-Host "`nОшибка: $($_.Exception.Message)" -ForegroundColor Red; exit 1 }
 
 $RemoteBackupDir = "/opt/backups"
 $Attempts = 3

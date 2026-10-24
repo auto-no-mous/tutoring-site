@@ -1,0 +1,4 @@
+# Windows-скрипты для компьютера владельца (ops/local-backup): cmd.exe с переводами
+# строк LF путает строки, поэтому в рабочей копии - всегда CRLF.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
