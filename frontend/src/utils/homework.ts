@@ -68,24 +68,37 @@ export function useHomeworkPage<T>(items: Ref<T[]>) {
 
 // --- Материал задания (HomeworkMaterialPicker) --------------------------------------
 
+// Сколько файлов можно приложить к заданию и к сдаче - как на сервере
+// (homework_service.MAX_HOMEWORK_FILES).
+export const MAX_HOMEWORK_FILES = 10;
+
 export interface HomeworkMaterial {
   kind: "link" | "file";
   url: string;
-  file: File | null;
+  files: File[];
+}
+
+/** Первая причина, по которой не подойдёт какой-то из файлов, или null. */
+export function attachmentsProblem(files: File[]): string | null {
+  for (const file of files) {
+    const problem = attachmentProblem(file);
+    if (problem) return files.length > 1 ? `${file.name}: ${problem}` : problem;
+  }
+  return null;
 }
 
 /** Что не так с материалом перед отправкой, или null - можно отправлять. */
 export function homeworkMaterialProblem(material: HomeworkMaterial): string | null {
   if (material.kind === "link") return material.url.trim() ? null : "Вставьте ссылку на материал.";
-  if (!material.file) return "Выберите файл с материалом.";
-  return attachmentProblem(material.file);
+  if (material.files.length === 0) return "Выберите файл с материалом.";
+  return attachmentsProblem(material.files);
 }
 
-/** Поля запроса: ровно одно из двух - сервер принимает либо ссылку, либо файл. */
 export function emptyHomeworkMaterial(kind: HomeworkMaterial["kind"] = "link"): HomeworkMaterial {
-  return { kind, url: "", file: null };
+  return { kind, url: "", files: [] };
 }
 
-export function homeworkMaterialPayload(material: HomeworkMaterial): { content_url?: string; file?: File } {
-  return material.kind === "link" ? { content_url: material.url.trim() } : { file: material.file ?? undefined };
+/** Поля запроса: ровно одно из двух - сервер принимает либо ссылку, либо файлы. */
+export function homeworkMaterialPayload(material: HomeworkMaterial): { content_url?: string; files?: File[] } {
+  return material.kind === "link" ? { content_url: material.url.trim() } : { files: material.files };
 }

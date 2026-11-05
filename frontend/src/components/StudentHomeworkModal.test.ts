@@ -22,7 +22,7 @@ function homework(overrides: Record<string, unknown> = {}) {
     title: "Параграф 12",
     content_type: "link",
     content_url: "https://example.com/task",
-    content_file_path: null,
+    content_files: [],
     submission_mode: "file_upload",
     due_at: null,
     status: "pending",
@@ -129,7 +129,7 @@ describe("StudentHomeworkModal", () => {
     it("на экране только одно поле, вид - как в прошлом задании", async () => {
       await mountWithLast("file");
 
-      expect(kindButton("Файл").getAttribute("aria-checked")).toBe("true");
+      expect(kindButton("Файлы").getAttribute("aria-checked")).toBe("true");
       expect(linkInput()).toBeNull();
       expect(document.body.querySelector('input[type="file"]')).not.toBeNull();
     });
@@ -140,7 +140,7 @@ describe("StudentHomeworkModal", () => {
       await submit();
 
       const payload = createHomework.mock.calls[0][0];
-      expect((payload.file as File).name).toBe("task.pdf");
+      expect((payload.files as File[]).map((f) => f.name)).toEqual(["task.pdf"]);
       expect(payload).not.toHaveProperty("content_url");
     });
 
@@ -151,7 +151,7 @@ describe("StudentHomeworkModal", () => {
       link.dispatchEvent(new Event("input"));
       await flushPromises();
 
-      kindButton("Файл").click();
+      kindButton("Файлы").click();
       await flushPromises();
       kindButton("Ссылка").click();
       await flushPromises();

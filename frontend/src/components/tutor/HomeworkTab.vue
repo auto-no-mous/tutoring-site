@@ -13,6 +13,7 @@ import {
 } from "@/api/homework";
 import { getMyStudents } from "@/api/tutors";
 import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
+import HomeworkMaterialLinks from "@/components/homework/HomeworkMaterialLinks.vue";
 import HomeworkMaterialPicker from "@/components/homework/HomeworkMaterialPicker.vue";
 import ShowMoreHomework from "@/components/homework/ShowMoreHomework.vue";
 import HomeworkRecipientPicker from "@/components/tutor/HomeworkRecipientPicker.vue";
@@ -374,8 +375,7 @@ onMounted(load);
         </div>
 
         <div class="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
-          <a v-if="assignment.content_url" :href="assignment.content_url" target="_blank" class="underline">Материал (ссылка)</a>
-          <a v-if="assignment.content_file_path" :href="assignment.content_file_path" target="_blank" class="underline">Материал (файл)</a>
+          <HomeworkMaterialLinks :url="assignment.content_url" :files="assignment.content_files" />
           <span>Выдано {{ formatDate(assignment.created_at) }}</span>
           <span v-if="assignment.due_at">Срок: {{ formatDateTimeWithMsk(assignment.due_at) }}</span>
         </div>
@@ -442,7 +442,17 @@ onMounted(load);
               <p class="text-slate-500">
                 Текущий материал:
                 <a v-if="editing.content_url" :href="editing.content_url" target="_blank" class="underline">ссылка</a>
-                <a v-else-if="editing.content_file_path" :href="editing.content_file_path" target="_blank" class="underline">файл</a>
+                <template v-else-if="editing.content_files.length > 0">
+                  <a
+                    v-for="(file, index) in editing.content_files"
+                    :key="file.id"
+                    :href="file.file_path"
+                    target="_blank"
+                    class="mr-1 underline"
+                  >
+                    {{ editing.content_files.length > 1 ? `файл ${index + 1}` : "файл" }}
+                  </a>
+                </template>
                 <span v-else>не указан</span>
               </p>
               <label class="mt-1 flex items-center gap-2">

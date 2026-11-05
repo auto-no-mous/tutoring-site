@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
@@ -32,7 +32,6 @@ class HomeworkAssignment(UUIDPKMixin, TimestampMixin, Base):
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content_type: Mapped[str] = mapped_column(String(16), default=HomeworkContentType.LINK.value)
     content_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    content_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Whether the student must upload a file back or just tick "done" - tutor's choice
     # (sections 2.8, 3.2).
     submission_mode: Mapped[str] = mapped_column(
@@ -40,6 +39,16 @@ class HomeworkAssignment(UUIDPKMixin, TimestampMixin, Base):
     )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Материал-файлы задания (content_type == "file"). Раньше файл был один, и
+    # задание из нескольких листов приходилось склеивать в архив.
+    content_files: Mapped[list["HomeworkAssignmentFile"]] = relationship(
+        back_populates="assignment",
+        cascade="all, delete-orphan",
+        order_by="HomeworkAssignmentFile.position",
+        # Читаются вместе с заданием, а ленивая подгрузка в async-сессии падает
+        # (MissingGreenlet).
+        lazy="selectin",
+    )
     submissions: Mapped[list["HomeworkSubmission"]] = relationship(
         back_populates="assignment",
         cascade="all, delete-orphan",
@@ -47,6 +56,20 @@ class HomeworkAssignment(UUIDPKMixin, TimestampMixin, Base):
         # сразу), а ленивая подгрузка в async-сессии падает (MissingGreenlet).
         lazy="selectin",
     )
+
+
+class HomeworkAssignmentFile(UUIDPKMixin, Base):
+    """Файл материала задания. Порядок - тот, в котором репетитор их приложил."""
+
+    __tablename__ = "homework_assignment_files"
+
+    assignment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("homework_assignments.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    file_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    assignment: Mapped["HomeworkAssignment"] = relationship(back_populates="content_files")
 
 
 class HomeworkSubmission(UUIDPKMixin, TimestampMixin, Base):

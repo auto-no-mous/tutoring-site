@@ -3,10 +3,10 @@ import { Link2, Paperclip } from "lucide-vue-next";
 import { computed } from "vue";
 
 import FileDropZone from "@/components/FileDropZone.vue";
-import { ATTACHMENT_ACCEPT, attachmentProblem } from "@/utils/attachments";
-import { emptyHomeworkMaterial, type HomeworkMaterial } from "@/utils/homework";
+import { ATTACHMENT_ACCEPT } from "@/utils/attachments";
+import { attachmentsProblem, emptyHomeworkMaterial, MAX_HOMEWORK_FILES, type HomeworkMaterial } from "@/utils/homework";
 
-// Материал задания - либо ссылка, либо файл. Раньше оба поля стояли рядом, и форма
+// Материал задания - либо ссылка, либо файлы (до MAX_HOMEWORK_FILES). Раньше оба поля стояли рядом, и форма
 // как будто разрешала заполнить оба, а сервер принимает ровно один вариант. Теперь
 // сначала выбирается вид, и на экране только его поле; второе при переключении
 // очищается, чтобы в запрос не уехало забытое значение.
@@ -15,10 +15,10 @@ const emit = defineEmits<{ "update:modelValue": [HomeworkMaterial] }>();
 
 const KINDS = [
   { value: "link", label: "Ссылка", icon: Link2 },
-  { value: "file", label: "Файл", icon: Paperclip },
+  { value: "file", label: "Файлы", icon: Paperclip },
 ] as const;
 
-const fileProblem = computed(() => (props.modelValue.file ? attachmentProblem(props.modelValue.file) : null));
+const fileProblem = computed(() => attachmentsProblem(props.modelValue.files));
 
 function setKind(kind: HomeworkMaterial["kind"]): void {
   if (kind === props.modelValue.kind) return;
@@ -56,10 +56,11 @@ function setKind(kind: HomeworkMaterial["kind"]): void {
     />
     <template v-else>
       <FileDropZone
-        :model-value="modelValue.file"
+        :model-value="modelValue.files"
         :accept="ATTACHMENT_ACCEPT"
+        :max="MAX_HOMEWORK_FILES"
         hide-type-hint
-        @update:model-value="emit('update:modelValue', { ...modelValue, file: $event })"
+        @update:model-value="emit('update:modelValue', { ...modelValue, files: $event })"
       />
       <p v-if="fileProblem" class="text-xs text-red-600 dark:text-red-400">{{ fileProblem }}</p>
     </template>

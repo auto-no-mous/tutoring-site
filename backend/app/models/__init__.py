@@ -2,7 +2,12 @@ from app.models.blog import BlogPost
 from app.models.booking import Booking, RecurringSeries
 from app.models.chat import ChatMessage, ChatThread, ChatThreadRead
 from app.models.group import Group, GroupApplication, GroupMembership, GroupOccurrence, GroupSchedule
-from app.models.homework import HomeworkAssignment, HomeworkSubmission, HomeworkSubmissionFile
+from app.models.homework import (
+    HomeworkAssignment,
+    HomeworkAssignmentFile,
+    HomeworkSubmission,
+    HomeworkSubmissionFile,
+)
 from app.models.identity import OAuthState, UserIdentity
 from app.models.lesson_type import LessonType
 from app.models.email_log import EmailLog
@@ -30,6 +35,7 @@ __all__ = [
     "GroupSchedule",
     "HomeworkAssignment",
     "HomeworkSubmission",
+    "HomeworkAssignmentFile",
     "HomeworkSubmissionFile",
     "OAuthState",
     "UserIdentity",

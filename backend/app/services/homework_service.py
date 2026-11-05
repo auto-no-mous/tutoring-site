@@ -13,7 +13,12 @@ from app.models.enums import (
     SystemNotificationEvent,
     UserRole,
 )
-from app.models.homework import HomeworkAssignment, HomeworkSubmission, HomeworkSubmissionFile
+from app.models.homework import (
+    HomeworkAssignment,
+    HomeworkAssignmentFile,
+    HomeworkSubmission,
+    HomeworkSubmissionFile,
+)
 from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.services import group_service, system_notification_service
@@ -27,7 +32,7 @@ async def create_assignment_for_student(
     title: str | None,
     content_type: str,
     content_url: str | None,
-    content_file_path: str | None,
+    content_file_paths: list[str],
     submission_mode: str,
     due_at,
 ) -> HomeworkAssignment:
@@ -41,7 +46,7 @@ async def create_assignment_for_student(
         title=title,
         content_type=content_type,
         content_url=content_url,
-        content_file_path=content_file_path,
+        content_files=_content_files(content_file_paths),
         submission_mode=submission_mode,
         due_at=due_at,
     )
@@ -69,7 +74,7 @@ async def create_assignment_for_group(
     title: str | None,
     content_type: str,
     content_url: str | None,
-    content_file_path: str | None,
+    content_file_paths: list[str],
     submission_mode: str,
     due_at,
 ) -> HomeworkAssignment:
@@ -86,7 +91,7 @@ async def create_assignment_for_group(
         title=title,
         content_type=content_type,
         content_url=content_url,
-        content_file_path=content_file_path,
+        content_files=_content_files(content_file_paths),
         submission_mode=submission_mode,
         due_at=due_at,
     )
@@ -168,7 +173,7 @@ def _to_student_homework_dict(submission: HomeworkSubmission, assignment: Homewo
         "title": assignment.title,
         "content_type": assignment.content_type,
         "content_url": assignment.content_url,
-        "content_file_path": assignment.content_file_path,
+        "content_files": [{"id": f.id, "file_path": f.file_path} for f in assignment.content_files],
         "submission_mode": assignment.submission_mode,
         "due_at": assignment.due_at,
         "status": submission.status,
@@ -297,18 +302,18 @@ async def update_assignment(
     submission_mode: str,
     content_type: str | None,
     content_url: str | None,
-    content_file_path: str | None,
+    content_file_paths: list[str],
 ) -> HomeworkAssignment:
     """`content_type` is None when the tutor didn't touch the material (edit form's
-    "Заменить материал" left unchecked) - the existing link/file is kept as-is;
-    otherwise it fully replaces content_url/content_file_path together, since exactly
-    one of the two is ever meaningful (see homework_service.validate_content)."""
+    "Заменить материал" left unchecked) - the existing link/files are kept as-is;
+    otherwise it fully replaces content_url/content_files together, since only one of
+    the two is ever meaningful (see homework_service.validate_content)."""
     assignment.title = title
     assignment.submission_mode = submission_mode
     if content_type is not None:
         assignment.content_type = content_type
         assignment.content_url = content_url
-        assignment.content_file_path = content_file_path
+        assignment.content_files = _content_files(content_file_paths)
     await db.commit()
     await db.refresh(assignment)
     return assignment
@@ -335,9 +340,10 @@ async def mark_submission_done(db: AsyncSession, submission: HomeworkSubmission,
     return submission
 
 
-# Больше одного-двух скриншотов к заданию не прикладывают; предел нужен, чтобы
-# случайный цикл загрузки не превратил сдачу в файлопомойку.
-MAX_SUBMISSION_FILES = 10
+# Предел и для материала задания, и для сдачи: задание из нескольких листов или
+# несколько скриншотов решения помещаются, а случайный цикл загрузки не превратит
+# задание в файлопомойку.
+MAX_HOMEWORK_FILES = 10
 
 
 def _homework_tab_url() -> str:
@@ -346,24 +352,40 @@ def _homework_tab_url() -> str:
     return f"{settings.frontend_base_url.rstrip('/')}/cabinet?tab=homework"
 
 
-async def submit_file(
-    db: AsyncSession, submission: HomeworkSubmission, student: User, file_path: str, comment: str | None
-) -> HomeworkSubmission:
-    """Добавляет файл к сдаче. Файлы копятся: ученик может приложить второй скриншот,
-    а ошибочный убрать отдельно (remove_submission_file) - раньше файл был один, и
-    приложенный по ошибке оставался единственным свидетельством выполнения."""
+def check_files_limit(already: int, adding: int) -> None:
+    if already + adding > MAX_HOMEWORK_FILES:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"К одному заданию можно приложить не больше {MAX_HOMEWORK_FILES} файлов",
+        )
+
+
+def _content_files(paths: list[str]) -> list[HomeworkAssignmentFile]:
+    return [HomeworkAssignmentFile(file_path=path, position=i) for i, path in enumerate(paths)]
+
+
+async def check_can_submit_files(db: AsyncSession, submission: HomeworkSubmission, student: User, adding: int) -> None:
+    """Проверки сдачи до сохранения файлов на диск: иначе отклонённая сдача оставляла
+    бы в storage файлы, на которые никто не ссылается."""
     if submission.student_id != student.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваше домашнее задание")
     assignment = await get_assignment_or_404(db, submission.assignment_id)
     if assignment.submission_mode != HomeworkSubmissionMode.FILE_UPLOAD.value:
         raise HTTPException(status.HTTP_409_CONFLICT, "Для этого задания достаточно отметки «выполнено»")
-    if len(submission.files) >= MAX_SUBMISSION_FILES:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"К одному заданию можно приложить не больше {MAX_SUBMISSION_FILES} файлов",
-        )
+    check_files_limit(len(submission.files), adding)
 
-    db.add(HomeworkSubmissionFile(submission_id=submission.id, file_path=file_path))
+
+async def submit_files(
+    db: AsyncSession, submission: HomeworkSubmission, student: User, file_paths: list[str], comment: str | None
+) -> HomeworkSubmission:
+    """Добавляет файлы к сдаче - за один раз можно приложить несколько. Файлы копятся:
+    ученик может дослать ещё скриншот, а ошибочный убрать отдельно
+    (remove_submission_file) - раньше файл был один, и приложенный по ошибке
+    оставался единственным свидетельством выполнения."""
+    await check_can_submit_files(db, submission, student, len(file_paths))
+
+    for file_path in file_paths:
+        db.add(HomeworkSubmissionFile(submission_id=submission.id, file_path=file_path))
     submission.status = HomeworkSubmissionStatus.SUBMITTED.value
     if comment:
         submission.comment = comment
@@ -424,9 +446,10 @@ async def set_submission_status(
     return submission
 
 
-def validate_content(content_url: str | None, has_file: bool) -> str:
-    if bool(content_url) == has_file:
+def validate_content(content_url: str | None, file_count: int) -> str:
+    if bool(content_url) == (file_count > 0):
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "Укажите либо ссылку, либо файл — и только один вариант"
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Укажите либо ссылку, либо файлы — и только один вариант"
         )
-    return HomeworkContentType.FILE.value if has_file else HomeworkContentType.LINK.value
+    check_files_limit(0, file_count)
+    return HomeworkContentType.FILE.value if file_count else HomeworkContentType.LINK.value

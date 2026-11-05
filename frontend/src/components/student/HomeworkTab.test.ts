@@ -5,12 +5,12 @@ import HomeworkTab from "@/components/student/HomeworkTab.vue";
 
 const myHomework = vi.fn();
 const deleteSubmissionFile = vi.fn(async (_submissionId: string, _fileId: string) => ({}));
-const uploadSubmission = vi.fn(async (_submissionId: string, _file: File) => ({}));
+const uploadSubmission = vi.fn(async (_submissionId: string, _files: File[]) => ({}));
 
 vi.mock("@/api/homework", () => ({
   myHomework: () => myHomework(),
   deleteSubmissionFile: (submissionId: string, fileId: string) => deleteSubmissionFile(submissionId, fileId),
-  uploadSubmission: (submissionId: string, file: File) => uploadSubmission(submissionId, file),
+  uploadSubmission: (submissionId: string, files: File[]) => uploadSubmission(submissionId, files),
   markDone: vi.fn(async () => ({})),
 }));
 
@@ -27,7 +27,7 @@ function homework(overrides: Record<string, unknown> = {}) {
     title: "Скриншоты",
     content_type: "link",
     content_url: "https://example.com/task",
-    content_file_path: null,
+    content_files: [],
     submission_mode: "file_upload",
     due_at: null,
     status: "submitted",
@@ -66,6 +66,39 @@ describe("student HomeworkTab", () => {
     await flushPromises();
 
     expect(wrapper.findAll("button").some((b) => b.text() === "Добавить файл")).toBe(true);
+  });
+
+  it("отправляет несколько выбранных файлов одним запросом", async () => {
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:preview"), revokeObjectURL: vi.fn() });
+    myHomework.mockResolvedValue([homework({ status: "pending", files: [] })]);
+    const wrapper = mount(HomeworkTab);
+    await flushPromises();
+
+    const input = wrapper.find('input[type="file"]');
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["a"], "one.png", { type: "image/png" }), new File(["b"], "two.png", { type: "image/png" })],
+    });
+    await input.trigger("change");
+    await wrapper.findAll("button").find((b) => b.text() === "Отправить")!.trigger("click");
+    await flushPromises();
+
+    expect(uploadSubmission).toHaveBeenCalledTimes(1);
+    expect(uploadSubmission.mock.calls[0][1].map((f) => f.name)).toEqual(["one.png", "two.png"]);
+    vi.unstubAllGlobals();
+  });
+
+  it("при десяти приложенных файлах больше добавить нельзя", async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ({
+      id: `f-${i}`,
+      file_path: `/files/homework-submissions/${i}.png`,
+      uploaded_at: "2026-09-10T10:00:00Z",
+    }));
+    myHomework.mockResolvedValue([homework({ files: ten })]);
+    const wrapper = mount(HomeworkTab);
+    await flushPromises();
+
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("больше нельзя");
   });
 
   it("проверенную работу менять нельзя", async () => {

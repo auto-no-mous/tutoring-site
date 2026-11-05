@@ -5,6 +5,7 @@ import { onMounted, ref } from "vue";
 
 import { createHomework, getStudentHomeworkForTutor, setSubmissionStatus } from "@/api/homework";
 import HomeworkFiles from "@/components/homework/HomeworkFiles.vue";
+import HomeworkMaterialLinks from "@/components/homework/HomeworkMaterialLinks.vue";
 import HomeworkMaterialPicker from "@/components/homework/HomeworkMaterialPicker.vue";
 import ShowMoreHomework from "@/components/homework/ShowMoreHomework.vue";
 import type { StudentHomework } from "@/types/homework";
@@ -134,8 +135,7 @@ onMounted(load);
               </select>
             </div>
             <div class="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
-              <a v-if="item.content_url" :href="item.content_url" target="_blank" class="underline">Материал (ссылка)</a>
-              <a v-if="item.content_file_path" :href="item.content_file_path" target="_blank" class="underline">Материал (файл)</a>
+              <HomeworkMaterialLinks :url="item.content_url" :files="item.content_files" />
               <span v-if="item.due_at">Срок: {{ formatDateTimeWithMsk(item.due_at) }}</span>
             </div>
             <div v-if="item.files.length > 0" class="mt-1">

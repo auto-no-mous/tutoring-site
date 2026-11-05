@@ -88,14 +88,14 @@ async def test_group_homework_assigned_to_all_active_members(client: AsyncClient
         "/api/v1/homework",
         headers=tutor["headers"],
         data={"title": "ДЗ №1", "submission_mode": "file_upload", "group_ids": [group_id]},
-        files={"file": ("task.pdf", file_bytes, "application/pdf")},
+        files={"files": ("task.pdf", file_bytes, "application/pdf")},
     )
     assert create_resp.status_code == 201, create_resp.text
     created = create_resp.json()
     assert len(created) == 1
     assignment = created[0]
     assert assignment["content_type"] == "file"
-    assert assignment["content_file_path"].startswith("/files/homework/")
+    assert assignment["content_files"][0]["file_path"].startswith("/files/homework/")
     assert assignment["group_name"] == "Группа A"
 
     student1_hw = (await client.get("/api/v1/homework/me", headers=student1["headers"])).json()
@@ -110,7 +110,7 @@ async def test_group_homework_assigned_to_all_active_members(client: AsyncClient
         f"/api/v1/homework/submissions/{submission_id}/upload",
         headers=student1["headers"],
         data={"comment": "готово"},
-        files={"file": ("answer.pdf", b"my answer", "application/pdf")},
+        files={"files": ("answer.pdf", b"my answer", "application/pdf")},
     )
     assert upload_resp.status_code == 200, upload_resp.text
     assert upload_resp.json()["status"] == "submitted"
@@ -147,7 +147,7 @@ async def test_wrong_submission_action_rejected(client: AsyncClient) -> None:
     upload_resp = await client.post(
         f"/api/v1/homework/submissions/{submission_id}/upload",
         headers=student["headers"],
-        files={"file": ("x.pdf", b"data", "application/pdf")},
+        files={"files": ("x.pdf", b"data", "application/pdf")},
     )
     assert upload_resp.status_code == 409
 
@@ -155,7 +155,7 @@ async def test_wrong_submission_action_rejected(client: AsyncClient) -> None:
         "/api/v1/homework",
         headers=tutor["headers"],
         data={"title": "ДЗ2", "submission_mode": "file_upload", "student_ids": [student["user"]["id"]]},
-        files={"file": ("task.pdf", b"data", "application/pdf")},
+        files={"files": ("task.pdf", b"data", "application/pdf")},
     )
     assert file_upload_resp.status_code == 201
     file_assignment_id = file_upload_resp.json()[0]["id"]
@@ -484,10 +484,10 @@ async def test_duplicate_assignment_reuses_content_for_new_recipients(client: As
             "submission_mode": "file_upload",
             "student_ids": [student1["user"]["id"]],
         },
-        files={"file": ("task.pdf", file_bytes, "application/pdf")},
+        files={"files": ("task.pdf", file_bytes, "application/pdf")},
     )
     assignment_id = create_resp.json()[0]["id"]
-    original_file_path = create_resp.json()[0]["content_file_path"]
+    original_file_path = create_resp.json()[0]["content_files"][0]["file_path"]
 
     forbidden = await client.post(
         f"/api/v1/homework/{assignment_id}/duplicate",
@@ -511,7 +511,7 @@ async def test_duplicate_assignment_reuses_content_for_new_recipients(client: As
     assert len(duplicated) == 1
     assert duplicated[0]["id"] != assignment_id
     assert duplicated[0]["title"] == "Оригинал"
-    assert duplicated[0]["content_file_path"] == original_file_path  # no re-upload needed
+    assert duplicated[0]["content_files"][0]["file_path"] == original_file_path  # no re-upload needed
     assert duplicated[0]["student_display_name"] == student2["user"]["display_name"]
 
     # The original recipient's assignment is untouched; the new recipient now has one too.
@@ -556,7 +556,7 @@ async def test_pending_counter_and_notification_link(client: AsyncClient) -> Non
     upload = await client.post(
         f"/api/v1/homework/submissions/{submission_id}/upload",
         headers=student["headers"],
-        files={"file": ("shot.png", b"png-bytes", "image/png")},
+        files={"files": ("shot.png", b"png-bytes", "image/png")},
     )
     assert upload.status_code == 200, upload.text
 
@@ -589,7 +589,7 @@ async def test_student_adds_and_removes_submission_files(client: AsyncClient) ->
         resp = await client.post(
             f"/api/v1/homework/submissions/{submission_id}/upload",
             headers=student["headers"],
-            files={"file": (name, b"png-bytes", "image/png")},
+            files={"files": (name, b"png-bytes", "image/png")},
         )
         assert resp.status_code == 200, resp.text
 
@@ -635,7 +635,7 @@ async def test_checked_submission_files_are_frozen(client: AsyncClient) -> None:
     upload = await client.post(
         f"/api/v1/homework/submissions/{submission_id}/upload",
         headers=student["headers"],
-        files={"file": ("shot.png", b"png-bytes", "image/png")},
+        files={"files": ("shot.png", b"png-bytes", "image/png")},
     )
     file_id = upload.json()["files"][0]["id"]
 
@@ -675,7 +675,7 @@ async def test_tutor_assignment_list_carries_submissions(client: AsyncClient) ->
     await client.post(
         f"/api/v1/homework/submissions/{submission_id}/upload",
         headers=student["headers"],
-        files={"file": ("shot.png", b"png-bytes", "image/png")},
+        files={"files": ("shot.png", b"png-bytes", "image/png")},
     )
 
     resp = await client.get("/api/v1/homework/tutor/me", headers=tutor["headers"])
@@ -704,16 +704,16 @@ async def test_homework_file_types_from_windows_and_clear_rejection(client: Asyn
         "/api/v1/homework",
         headers=tutor["headers"],
         data=data,
-        files={"file": ("tasks.zip", b"PK\x03\x04", "application/x-zip-compressed")},
+        files={"files": ("tasks.zip", b"PK\x03\x04", "application/x-zip-compressed")},
     )
     assert zipped.status_code == 201, zipped.text
-    assert zipped.json()[0]["content_file_path"].endswith(".zip")
+    assert zipped.json()[0]["content_files"][0]["file_path"].endswith(".zip")
 
     rar = await client.post(
         "/api/v1/homework",
         headers=tutor["headers"],
         data=data,
-        files={"file": ("tasks.rar", b"Rar!", "application/vnd.rar")},
+        files={"files": ("tasks.rar", b"Rar!", "application/vnd.rar")},
     )
     assert rar.status_code == 400
     assert rar.json()["detail"] == "Недопустимый тип файла"
@@ -729,7 +729,7 @@ async def test_libreoffice_files_are_accepted(client: AsyncClient) -> None:
 
     async def upload(name: str, content_type: str):
         return await client.post(
-            "/api/v1/homework", headers=tutor["headers"], data=data, files={"file": (name, b"PK\x03\x04", content_type)}
+            "/api/v1/homework", headers=tutor["headers"], data=data, files={"files": (name, b"PK\x03\x04", content_type)}
         )
 
     for name, content_type, ext in [
@@ -742,7 +742,7 @@ async def test_libreoffice_files_are_accepted(client: AsyncClient) -> None:
     ]:
         resp = await upload(name, content_type)
         assert resp.status_code == 201, (name, content_type, resp.text)
-        assert resp.json()[0]["content_file_path"].endswith(ext), name
+        assert resp.json()[0]["content_files"][0]["file_path"].endswith(ext), name
 
     # По расширению узнаём только разрешённое: исполняемое и разметка - нет.
     for name in ("virus.exe", "page.html", "noext"):
@@ -762,9 +762,112 @@ async def test_uploaded_files_are_served_with_their_type(client: AsyncClient) ->
         ("c.webp", "image/webp"),
     ]:
         created = await client.post(
-            "/api/v1/homework", headers=tutor["headers"], data=data, files={"file": (name, b"data", content_type)}
+            "/api/v1/homework", headers=tutor["headers"], data=data, files={"files": (name, b"data", content_type)}
         )
-        path = created.json()[0]["content_file_path"]
+        path = created.json()[0]["content_files"][0]["file_path"]
         served = await client.get(path)
         assert served.status_code == 200, path
         assert served.headers["content-type"] == content_type, name
+
+
+async def test_tutor_attaches_several_material_files(client: AsyncClient) -> None:
+    """Задание из нескольких листов - несколько файлов, а не архив."""
+    tutor = await _register(client, "hw-multi-tutor@example.com", "tutor")
+    student1 = await _register(client, "hw-multi-student1@example.com", "student")
+    student2 = await _register(client, "hw-multi-student2@example.com", "student")
+    data = {"submission_mode": "mark_done", "student_ids": [student1["user"]["id"]]}
+
+    names = ["page1.png", "page2.png", "answers.pdf"]
+    files = [
+        ("files", (name, b"data", "application/pdf" if name.endswith(".pdf") else "image/png"))
+        for name in names
+    ]
+    created = await client.post("/api/v1/homework", headers=tutor["headers"], data=data, files=files)
+    assert created.status_code == 201, created.text
+    paths = [f["file_path"] for f in created.json()[0]["content_files"]]
+    assert len(paths) == 3
+    assert paths[2].endswith(".pdf"), "порядок файлов сохраняется"
+
+    my_hw = (await client.get("/api/v1/homework/me", headers=student1["headers"])).json()
+    assert [f["file_path"] for f in my_hw[0]["content_files"]] == paths
+
+    # Копия задания получает те же файлы без повторной загрузки.
+    dup = await client.post(
+        f"/api/v1/homework/{created.json()[0]['id']}/duplicate",
+        headers=tutor["headers"],
+        data={"student_ids": [student2["user"]["id"]]},
+    )
+    assert [f["file_path"] for f in dup.json()[0]["content_files"]] == paths
+
+    # Замена материала заменяет весь набор.
+    updated = await client.patch(
+        f"/api/v1/homework/{created.json()[0]['id']}",
+        headers=tutor["headers"],
+        data={"submission_mode": "mark_done"},
+        files=[("files", ("new1.png", b"x", "image/png")), ("files", ("new2.png", b"y", "image/png"))],
+    )
+    assert updated.status_code == 200, updated.text
+    new_paths = [f["file_path"] for f in updated.json()["content_files"]]
+    assert len(new_paths) == 2
+    assert not set(new_paths) & set(paths)
+
+    # Дублю это не коснулось.
+    dup_hw = (await client.get("/api/v1/homework/me", headers=student2["headers"])).json()
+    assert [f["file_path"] for f in dup_hw[0]["content_files"]] == paths
+
+
+async def test_material_files_limit(client: AsyncClient) -> None:
+    tutor = await _register(client, "hw-limit-tutor@example.com", "tutor")
+    student = await _register(client, "hw-limit-student@example.com", "student")
+    data = {"submission_mode": "mark_done", "student_ids": [student["user"]["id"]]}
+
+    def pngs(count: int) -> list:
+        return [("files", (f"p{i}.png", b"x", "image/png")) for i in range(count)]
+
+    ok = await client.post("/api/v1/homework", headers=tutor["headers"], data=data, files=pngs(10))
+    assert ok.status_code == 201, ok.text
+    assert len(ok.json()[0]["content_files"]) == 10
+
+    too_many = await client.post("/api/v1/homework", headers=tutor["headers"], data=data, files=pngs(11))
+    assert too_many.status_code == 409
+
+    both = await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={**data, "content_url": "https://example.com/task"},
+        files=pngs(2),
+    )
+    assert both.status_code == 422
+
+
+async def test_student_uploads_several_files_at_once(client: AsyncClient) -> None:
+    tutor = await _register(client, "hw-batch-tutor@example.com", "tutor")
+    student = await _register(client, "hw-batch-student@example.com", "student")
+    await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={
+            "submission_mode": "file_upload",
+            "student_ids": [student["user"]["id"]],
+            "content_url": "https://example.com/task",
+        },
+    )
+    submission_id = (await client.get("/api/v1/homework/me", headers=student["headers"])).json()[0][
+        "submission_id"
+    ]
+    url = f"/api/v1/homework/submissions/{submission_id}/upload"
+
+    def shots(count: int, prefix: str) -> list:
+        return [("files", (f"{prefix}{i}.png", b"png", "image/png")) for i in range(count)]
+
+    resp = await client.post(url, headers=student["headers"], files=shots(3, "a"))
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["files"]) == 3
+    assert resp.json()["status"] == "submitted"
+
+    # Всего не больше десяти: 3 + 8 уже перебор, и ничего из пачки не добавляется.
+    resp = await client.post(url, headers=student["headers"], files=shots(8, "b"))
+    assert resp.status_code == 409
+    resp = await client.post(url, headers=student["headers"], files=shots(7, "c"))
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["files"]) == 10

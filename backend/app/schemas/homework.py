@@ -5,6 +5,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.common import UTCDateTime
 
 
+class HomeworkAssignmentFileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    file_path: str
+
+
 class HomeworkAssignmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -15,7 +22,8 @@ class HomeworkAssignmentOut(BaseModel):
     title: str | None
     content_type: str
     content_url: str | None
-    content_file_path: str | None
+    # Материал-файлы задания, по порядку; до 10 штук (homework_service.MAX_HOMEWORK_FILES).
+    content_files: list[HomeworkAssignmentFileOut] = Field(default_factory=list)
     submission_mode: str
     due_at: UTCDateTime | None
     created_at: UTCDateTime
@@ -71,7 +79,7 @@ class StudentHomeworkOut(BaseModel):
     title: str | None
     content_type: str
     content_url: str | None
-    content_file_path: str | None
+    content_files: list[HomeworkAssignmentFileOut] = Field(default_factory=list)
     submission_mode: str
     due_at: UTCDateTime | None
     status: str

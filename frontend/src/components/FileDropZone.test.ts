@@ -11,7 +11,7 @@ const mounted: VueWrapper[] = [];
 
 // Вставку зона слушает на документе, поэтому монтируем в настоящий body.
 function mountZone(props: Record<string, unknown> = {}) {
-  const wrapper = mount(FileDropZone, { props: { modelValue: null, ...props }, attachTo: document.body });
+  const wrapper = mount(FileDropZone, { props: { modelValue: [], ...props }, attachTo: document.body });
   mounted.push(wrapper);
   return wrapper;
 }
@@ -47,7 +47,35 @@ describe("FileDropZone", () => {
 
     await wrapper.find('[role="button"]').trigger("drop", { dataTransfer: { files: [file] } });
 
-    expect(wrapper.emitted("update:modelValue")?.[0]).toEqual([file]);
+    expect(wrapper.emitted("update:modelValue")?.[0]).toEqual([[file]]);
+  });
+
+  it("добавляет файлы к уже выбранным, а не заменяет их", async () => {
+    const first = imageFile("first.png");
+    const wrapper = mountZone({ modelValue: [first] });
+    const second = imageFile("second.png");
+    const third = imageFile("third.png");
+
+    await wrapper.find('[role="button"]').trigger("drop", { dataTransfer: { files: [second, third] } });
+
+    expect(wrapper.emitted("update:modelValue")?.[0]).toEqual([[first, second, third]]);
+  });
+
+  it("не даёт набрать больше max и говорит об этом", async () => {
+    const wrapper = mountZone({ modelValue: [imageFile("a.png")], max: 2 });
+
+    await wrapper
+      .find('[role="button"]')
+      .trigger("drop", { dataTransfer: { files: [imageFile("b.png"), imageFile("c.png")] } });
+
+    const emitted = wrapper.emitted("update:modelValue")?.[0]?.[0] as File[];
+    expect(emitted.map((f) => f.name)).toEqual(["a.png", "b.png"]);
+    expect(wrapper.text()).toContain("не больше 2 файлов");
+  });
+
+  it("выбор на диске допускает несколько файлов", () => {
+    const wrapper = mountZone();
+    expect(wrapper.find('input[type="file"]').attributes("multiple")).toBeDefined();
   });
 
   it("принимает картинку из буфера обмена", async () => {
@@ -56,7 +84,7 @@ describe("FileDropZone", () => {
     const wrapper = mountZone();
     pasteImage(wrapper.find('[role="button"]').element);
 
-    const emitted = wrapper.emitted("update:modelValue")?.[0]?.[0] as File;
+    const emitted = (wrapper.emitted("update:modelValue")?.[0]?.[0] as File[])[0];
     expect(emitted).toBeInstanceOf(File);
     expect(emitted.type).toBe("image/png");
     // Безымянному скриншоту из буфера даём осмысленное имя.
@@ -73,14 +101,17 @@ describe("FileDropZone", () => {
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
 
-  it("показывает выбранный файл и позволяет его убрать", async () => {
-    const wrapper = mountZone({ modelValue: imageFile("home.png") });
+  it("показывает выбранные файлы и позволяет убрать любой", async () => {
+    const home = imageFile("home.png");
+    const work = imageFile("work.png");
+    const wrapper = mountZone({ modelValue: [home, work] });
 
     expect(wrapper.text()).toContain("home.png");
+    expect(wrapper.text()).toContain("work.png");
     expect(wrapper.find("img").attributes("src")).toBe("blob:preview");
 
-    await wrapper.find('button[title="Убрать файл"]').trigger("click");
-    expect(wrapper.emitted("update:modelValue")?.[0]).toEqual([null]);
+    await wrapper.findAll('button[title="Убрать файл"]')[0].trigger("click");
+    expect(wrapper.emitted("update:modelValue")?.[0]).toEqual([[work]]);
   });
 
   it("ничего не принимает, когда отключён", async () => {

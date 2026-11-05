@@ -33,6 +33,17 @@ def _validate_submission_mode(submission_mode: str) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Некорректный режим сдачи задания")
 
 
+def _real_uploads(files: list[UploadFile]) -> list[UploadFile]:
+    # Пустое поле файла браузер присылает частью без имени - это не файл.
+    return [f for f in files if f.filename]
+
+
+async def _save_materials(uploads: list[UploadFile]) -> list[str]:
+    return [
+        await file_service.save_upload(f, "homework", file_service.ALLOWED_ATTACHMENT_TYPES) for f in uploads
+    ]
+
+
 async def _enrich(db: DbSession, assignments: list) -> list[HomeworkAssignmentOut]:
     """Attaches the aggregate status + recipient display name each card needs (see
     tutor/HomeworkTab.vue) - shared by every endpoint that returns assignment rows."""
@@ -81,7 +92,7 @@ async def create_homework(
     group_ids: list[str] = Form([]),
     content_url: str | None = Form(None),
     due_at: str | None = Form(None),
-    file: UploadFile | None = File(None),
+    files: list[UploadFile] = File([]),
 ) -> list[HomeworkAssignmentOut]:
     _require_tutor(current_user)
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
@@ -90,12 +101,9 @@ async def create_homework(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Укажите хотя бы одного получателя")
     _validate_submission_mode(submission_mode)
 
-    has_file = file is not None and bool(file.filename)
-    content_type = homework_service.validate_content(content_url, has_file)
-
-    content_file_path = None
-    if has_file:
-        content_file_path = await file_service.save_upload(file, "homework", file_service.ALLOWED_ATTACHMENT_TYPES)
+    uploads = _real_uploads(files)
+    content_type = homework_service.validate_content(content_url, len(uploads))
+    content_file_paths = await _save_materials(uploads)
 
     due_at_parsed = to_utc(datetime.fromisoformat(due_at)) if due_at else None
     title = title or None
@@ -104,14 +112,14 @@ async def create_homework(
     for student_id in student_ids:
         created.append(
             await homework_service.create_assignment_for_student(
-                db, profile, uuid.UUID(student_id), title, content_type, content_url, content_file_path,
+                db, profile, uuid.UUID(student_id), title, content_type, content_url, content_file_paths,
                 submission_mode, due_at_parsed,
             )
         )
     for group_id in group_ids:
         created.append(
             await homework_service.create_assignment_for_group(
-                db, profile, uuid.UUID(group_id), title, content_type, content_url, content_file_path,
+                db, profile, uuid.UUID(group_id), title, content_type, content_url, content_file_paths,
                 submission_mode, due_at_parsed,
             )
         )
@@ -127,7 +135,7 @@ async def update_homework(
     submission_mode: str = Form(...),
     title: str | None = Form(None),
     content_url: str | None = Form(None),
-    file: UploadFile | None = File(None),
+    files: list[UploadFile] = File([]),
 ) -> HomeworkAssignmentOut:
     _require_tutor(current_user)
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
@@ -137,20 +145,17 @@ async def update_homework(
 
     _validate_submission_mode(submission_mode)
 
-    has_file = file is not None and bool(file.filename)
-    replacing_content = has_file or bool(content_url)
+    uploads = _real_uploads(files)
+    replacing_content = bool(uploads) or bool(content_url)
     content_type = None
-    content_file_path = None
+    content_file_paths: list[str] = []
     if replacing_content:
-        content_type = homework_service.validate_content(content_url, has_file)
-        if has_file:
-            content_file_path = await file_service.save_upload(
-                file, "homework", file_service.ALLOWED_ATTACHMENT_TYPES
-            )
+        content_type = homework_service.validate_content(content_url, len(uploads))
+        content_file_paths = await _save_materials(uploads)
 
     assignment = await homework_service.update_assignment(
         db, assignment, title or None, submission_mode, content_type,
-        content_url if replacing_content else None, content_file_path,
+        content_url if replacing_content else None, content_file_paths,
     )
     enriched = await _enrich(db, [assignment])
     return enriched[0]
@@ -166,7 +171,7 @@ async def duplicate_homework(
 ) -> list[HomeworkAssignmentOut]:
     """Sends the same title/content/submission mode as an existing assignment to a
     newly chosen set of recipients (tutor/HomeworkTab.vue's "Скопировать" button) -
-    reuses the source's already-uploaded file/link as-is, no re-upload needed."""
+    reuses the source's already-uploaded files/link as-is, no re-upload needed."""
     _require_tutor(current_user)
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     source = await homework_service.get_assignment_or_404(db, assignment_id)
@@ -176,19 +181,20 @@ async def duplicate_homework(
     if not student_ids and not group_ids:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Укажите хотя бы одного получателя")
 
+    source_paths = [f.file_path for f in source.content_files]
     created = []
     for student_id in student_ids:
         created.append(
             await homework_service.create_assignment_for_student(
                 db, profile, uuid.UUID(student_id), source.title, source.content_type,
-                source.content_url, source.content_file_path, source.submission_mode, source.due_at,
+                source.content_url, source_paths, source.submission_mode, source.due_at,
             )
         )
     for group_id in group_ids:
         created.append(
             await homework_service.create_assignment_for_group(
                 db, profile, uuid.UUID(group_id), source.title, source.content_type,
-                source.content_url, source.content_file_path, source.submission_mode, source.due_at,
+                source.content_url, source_paths, source.submission_mode, source.due_at,
             )
         )
 
@@ -290,10 +296,19 @@ async def upload_submission(
     current_user: CurrentUser,
     db: DbSession,
     comment: str | None = Form(None),
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File(...),
 ) -> HomeworkSubmissionOut:
+    """Приложить к сдаче один или несколько файлов за раз (всего не больше
+    homework_service.MAX_HOMEWORK_FILES)."""
     _require_student(current_user)
     submission = await homework_service.get_submission_or_404(db, submission_id)
-    file_path = await file_service.save_upload(file, "homework-submissions", file_service.ALLOWED_ATTACHMENT_TYPES)
-    submission = await homework_service.submit_file(db, submission, current_user, file_path, comment)
+    uploads = _real_uploads(files)
+    if not uploads:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Выберите файл")
+    await homework_service.check_can_submit_files(db, submission, current_user, len(uploads))
+    file_paths = [
+        await file_service.save_upload(f, "homework-submissions", file_service.ALLOWED_ATTACHMENT_TYPES)
+        for f in uploads
+    ]
+    submission = await homework_service.submit_files(db, submission, current_user, file_paths, comment)
     return HomeworkSubmissionOut.model_validate(submission, from_attributes=True)

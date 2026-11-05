@@ -8,7 +8,11 @@ export interface CreateHomeworkPayload {
   group_ids: string[];
   content_url?: string;
   due_at?: string;
-  file?: File;
+  files?: File[];
+}
+
+function appendFiles(form: FormData, files: File[] | undefined): void {
+  for (const file of files ?? []) form.append("files", file);
 }
 
 function appendIds(form: FormData, key: string, ids: string[]): void {
@@ -23,7 +27,7 @@ export async function createHomework(payload: CreateHomeworkPayload) {
   appendIds(form, "group_ids", payload.group_ids);
   if (payload.content_url) form.append("content_url", payload.content_url);
   if (payload.due_at) form.append("due_at", payload.due_at);
-  if (payload.file) form.append("file", payload.file);
+  appendFiles(form, payload.files);
   const { data } = await apiClient.post<HomeworkAssignment[]>("/homework", form);
   return data;
 }
@@ -32,7 +36,7 @@ export interface UpdateHomeworkPayload {
   title?: string;
   submission_mode: "mark_done" | "file_upload";
   content_url?: string;
-  file?: File;
+  files?: File[];
 }
 
 export async function updateHomework(assignmentId: string, payload: UpdateHomeworkPayload) {
@@ -40,7 +44,7 @@ export async function updateHomework(assignmentId: string, payload: UpdateHomewo
   if (payload.title) form.append("title", payload.title);
   form.append("submission_mode", payload.submission_mode);
   if (payload.content_url) form.append("content_url", payload.content_url);
-  if (payload.file) form.append("file", payload.file);
+  appendFiles(form, payload.files);
   const { data } = await apiClient.patch<HomeworkAssignment>(`/homework/${assignmentId}`, form);
   return data;
 }
@@ -72,9 +76,9 @@ export async function markDone(submissionId: string) {
   return data;
 }
 
-export async function uploadSubmission(submissionId: string, file: File, comment?: string) {
+export async function uploadSubmission(submissionId: string, files: File[], comment?: string) {
   const form = new FormData();
-  form.append("file", file);
+  appendFiles(form, files);
   if (comment) form.append("comment", comment);
   const { data } = await apiClient.post<HomeworkSubmission>(`/homework/submissions/${submissionId}/upload`, form);
   return data;

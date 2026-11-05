@@ -33,7 +33,7 @@ function assignment(overrides: Record<string, unknown> = {}) {
     title: "Скриншоты",
     content_type: "link",
     content_url: "https://example.com/task",
-    content_file_path: null,
+    content_files: [],
     submission_mode: "file_upload",
     due_at: null,
     created_at: "2026-09-10T09:00:00Z",
@@ -149,7 +149,7 @@ describe("tutor HomeworkTab", () => {
     await wrapper.findAll("button").find((b) => b.text() === "+ ДЗ")!.trigger("click");
 
     const form = wrapper.find("form");
-    expect(form.find('[role="radio"][aria-checked="true"]').text()).toBe("Файл");
+    expect(form.find('[role="radio"][aria-checked="true"]').text()).toBe("Файлы");
     expect(form.find('input[aria-label="Ссылка на материал"]').exists()).toBe(false);
 
     const fileInput = form.find('input[type="file"]');
@@ -163,7 +163,7 @@ describe("tutor HomeworkTab", () => {
     await flushPromises();
 
     const payload = vi.mocked(createHomework).mock.calls[0][0];
-    expect(payload.file?.name).toBe("task.docx");
+    expect(payload.files?.map((f) => f.name)).toEqual(["task.docx"]);
     expect(payload).not.toHaveProperty("content_url");
     wrapper.unmount();
   });

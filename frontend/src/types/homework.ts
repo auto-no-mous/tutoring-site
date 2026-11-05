@@ -1,3 +1,8 @@
+export interface HomeworkAssignmentFile {
+  id: string;
+  file_path: string;
+}
+
 export interface HomeworkAssignment {
   id: string;
   tutor_id: string;
@@ -6,7 +11,8 @@ export interface HomeworkAssignment {
   title: string | null;
   content_type: string;
   content_url: string | null;
-  content_file_path: string | null;
+  // Материал-файлы задания, по порядку (до 10).
+  content_files: HomeworkAssignmentFile[];
   submission_mode: string;
   due_at: string | null;
   created_at: string;
@@ -44,7 +50,7 @@ export interface StudentHomework {
   title: string | null;
   content_type: string;
   content_url: string | null;
-  content_file_path: string | null;
+  content_files: HomeworkAssignmentFile[];
   submission_mode: string;
   due_at: string | null;
   status: string;
