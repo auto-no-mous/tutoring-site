@@ -178,7 +178,8 @@ function openGroups(): void {
           <div class="border-t border-slate-200 pt-4 dark:border-slate-800">
             <div class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Управление</div>
             <p v-if="isOver" class="text-sm text-slate-500">
-              Занятие уже прошло. Посещаемость отмечается во вкладке «Группы».
+              Занятие уже прошло. Посещаемость отмечается во вкладке
+              «<button type="button" class="text-brand-700 underline hover:text-brand-800 dark:text-brand-300" @click="openGroups">Группы</button>».
             </p>
             <div v-else class="@container">
               <div class="flex flex-nowrap items-center gap-2 text-sm">

@@ -458,3 +458,23 @@ describe("BookingsTab: занятия групп", () => {
     expect(wrapper.findComponent(GroupOccurrenceDetailsModal).exists()).toBe(false);
   });
 });
+
+describe("BookingsTab: горизонт расписания", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    listTutorBookings.mockResolvedValue([] as never);
+  });
+
+  it("внизу и списка, и недельной сетки сказано, что расписание - на 8 недель", async () => {
+    const list = mountTab();
+    await flushPromises();
+    expect(list.find("[data-schedule-horizon]").text()).toBe("Расписание отображается на 8 недель вперёд.");
+    list.unmount();
+
+    localStorage.setItem("tutor-bookings-layout", "week");
+    const week = mountTab();
+    await flushPromises();
+    expect(week.find("[data-schedule-horizon]").exists()).toBe(true);
+  });
+});
