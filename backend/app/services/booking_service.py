@@ -514,30 +514,74 @@ async def create_student_booking(
         await db.commit()
         await db.refresh(booking)
 
-        created = await generate_recurring_occurrences(
+        await generate_recurring_occurrences(
             db, series, initiated_by=BookedBy.STUDENT.value, anchor_date=start_msk.date()
         )
         # Читает api/v1/bookings.py, чтобы ученик увидел предупреждение сразу в ответе.
-        booking.recurring_created = await _after_series_created(db, series, created)
+        booking.recurring_created = await _after_series_created(
+            db, series, booking, requested_by_student=True
+        )
 
     return booking
 
 
-async def _after_series_created(db: AsyncSession, series: RecurringSeries, created: list[Booking]) -> int:
-    """Сколько недель удалось создать; если ни одной - сразу предупреждает репетитора.
+async def _after_series_created(
+    db: AsyncSession, series: RecurringSeries, first: Booking, requested_by_student: bool = False
+) -> int:
+    """Сколько недель, кроме первой, оказалось в серии (созданных или забранных из
+    уже существующих записей ученика).
 
-    Раньше галочка «повторять еженедельно» в такой ситуации молча создавала ровно
-    одно занятие: слот свободен на выбранную дату, а на всех следующих неделях занят
-    чужой серией. Ученик считал, что записан надолго, репетитор ничего не знал, и
-    обнаруживалось это через месяц пустого расписания.
+    Если ни одной - серии не было: занятие одно, и еженедельным оно не считается.
+    Раньше серия в таком случае оставалась жить с единственным занятием, и сайт
+    показывал его «еженедельным» и в расписании, и во вкладке «Ученики», хотя ученику
+    тут же сообщалось, что повтор не получился. А репетитор потом не мог включить
+    повтор сам: это занятие уже числилось за серией, и попытка упиралась в
+    «пересекается с этим же учеником».
     """
-    if created:
-        return len(created)
-    await _warn_series_stalled(db, series)
-    # Ночная задача продления не должна повторять то же самое завтра.
-    series.stall_notified_at = utcnow()
+    others = await db.scalar(
+        select(func.count())
+        .select_from(Booking)
+        .where(Booking.recurring_series_id == series.id, Booking.id != first.id)
+    )
+    if others:
+        return int(others)
+
+    first.recurring_series_id = None
+    series.is_active = False
+    series.stopped_at = utcnow()
     await db.commit()
+    await db.refresh(first)
+    # Репетитор назначал серию сам и видит отказ сразу в ответе. Ученику мы тоже
+    # говорим сразу, но договариваться о постоянном времени ему - с репетитором, так
+    # что тот должен узнать о просьбе.
+    if requested_by_student:
+        await _warn_series_not_started(db, series, first)
     return 0
+
+
+async def _warn_series_not_started(db: AsyncSession, series: RecurringSeries, first: Booking) -> None:
+    tutor = await db.get(TutorProfile, series.tutor_id)
+    student = await db.get(User, series.student_id)
+    if tutor is None or student is None:
+        return
+
+    weekday = WEEKDAY_NAMES_MSK[series.weekday]
+    time_str = series.start_time.strftime("%H:%M")
+    date_str = f"{ensure_aware(first.start_at).astimezone(MSK):%d.%m.%Y}"
+    body = (
+        f"{student.display_name} хотел(а) заниматься еженедельно ({weekday}, {time_str}), "
+        f"но на следующих неделях это время занято. Записано только занятие {date_str} - "
+        f"подберите с учеником постоянное время."
+    )
+    await notification_service.notify_tutor(
+        db, series.tutor_id, NotificationEvent.RECURRING_SERIES_STALLED,
+        "Еженедельные занятия не получились", body,
+    )
+    await system_notification_service.notify(
+        db, tutor.user_id, SystemNotificationEvent.RECURRING_SERIES_NOT_STARTED,
+        student_name=student.display_name, weekday=weekday, time=time_str, date=date_str,
+        students_url=f"{settings.frontend_base_url.rstrip('/')}/cabinet?tab=students",
+    )
 
 
 async def describe_conflicts(
@@ -630,36 +674,58 @@ async def _start_series_from(
     await db.commit()
     await db.refresh(booking)
 
-    created = await generate_recurring_occurrences(
+    await generate_recurring_occurrences(
         db,
         series,
         initiated_by=BookedBy.TUTOR.value,
         anchor_date=start_msk.date(),
         enforce_schedule=False,
     )
-    booking.recurring_created = await _after_series_created(db, series, created)
+    booking.recurring_created = await _after_series_created(db, series, booking)
     return booking
 
 
 async def find_same_lesson(
     db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID, start_at: dt.datetime
 ) -> Booking | None:
-    """Уже назначенное занятие с тем же учеником в то же время, ещё не входящее в серию.
+    """Уже назначенное занятие с тем же учеником в то же время, не входящее в
+    действующую серию.
 
     Нужна, чтобы включение еженедельных занятий поверх записи, которую ученик сделал
     сам, не упиралось в «время занято» и не плодило дубль: это ровно то же занятие,
-    его надо забрать в серию, а не создавать рядом второе.
+    его надо забрать в серию, а не создавать рядом второе. Занятия остановленной
+    серии забираются так же - иначе повтор, однажды выключенный, нельзя было бы
+    включить снова в то же время.
     """
     result = await db.execute(
-        select(Booking).where(
+        select(Booking)
+        .outerjoin(RecurringSeries, RecurringSeries.id == Booking.recurring_series_id)
+        .where(
             Booking.tutor_id == tutor_id,
             Booking.student_id == student_id,
             Booking.start_at == start_at,
             Booking.status == BookingStatus.SCHEDULED.value,
-            Booking.recurring_series_id.is_(None),
+            or_(Booking.recurring_series_id.is_(None), RecurringSeries.is_active.is_(False)),
         )
     )
     return result.scalars().first()
+
+
+async def _in_active_series(
+    db: AsyncSession, tutor_id: uuid.UUID, student_id: uuid.UUID, start_at: dt.datetime
+) -> bool:
+    result = await db.execute(
+        select(Booking.id)
+        .join(RecurringSeries, RecurringSeries.id == Booking.recurring_series_id)
+        .where(
+            Booking.tutor_id == tutor_id,
+            Booking.student_id == student_id,
+            Booking.start_at == start_at,
+            Booking.status == BookingStatus.SCHEDULED.value,
+            RecurringSeries.is_active.is_(True),
+        )
+    )
+    return result.first() is not None
 
 
 async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: ManualBookingCreate) -> Booking:
@@ -693,6 +759,16 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
         existing = await find_same_lesson(db, tutor.id, payload.student_id, payload.start_at)
     if existing is not None:
         return await _start_series_from(db, tutor, existing, payload)
+    if (
+        payload.student_id is not None
+        and payload.repeat_weekly
+        and await _in_active_series(db, tutor.id, payload.student_id, payload.start_at)
+    ):
+        # Иначе отказ звучал бы как «пересекается с <этим же учеником>», и было бы
+        # непонятно, что не так.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Это занятие уже еженедельное - у ученика есть повтор в это время"
+        )
 
     reserved_zones = await schedule_service.get_reserved_zones(
         db,
@@ -758,14 +834,14 @@ async def create_manual_booking(db: AsyncSession, tutor: TutorProfile, payload: 
         await db.commit()
         await db.refresh(booking)
 
-        created = await generate_recurring_occurrences(
+        await generate_recurring_occurrences(
             db,
             series,
             initiated_by=BookedBy.TUTOR.value,
             anchor_date=start_msk.date(),
             enforce_schedule=False,
         )
-        booking.recurring_created = await _after_series_created(db, series, created)
+        booking.recurring_created = await _after_series_created(db, series, booking)
 
     return booking
 

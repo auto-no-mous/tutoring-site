@@ -160,13 +160,19 @@ async function createSeries(student: TutorStudentStats): Promise<void> {
     const endIso = new Date(
       new Date(startIso).getTime() + lessonType.duration_minutes * 60000,
     ).toISOString();
-    await createManualBooking({
+    const booking = await createManualBooking({
       student_id: student.id,
       lesson_type_id: lessonType.id,
       start_at: startIso,
       end_at: endIso,
       repeat_weekly: true,
     });
+    // Первое занятие встало, а на следующих неделях время занято другими - повтора
+    // нет, и молча показать «готово» было бы неправдой.
+    if (booking.recurring_created === 0) {
+      error.value =
+        "Еженедельные занятия не назначены: на следующих неделях это время занято. Назначено только одно занятие - выберите другое время для повтора.";
+    }
     openSeriesStudentId.value = null;
     await load();
   } catch (err) {

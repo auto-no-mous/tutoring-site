@@ -6,6 +6,8 @@ import UserAvatar from "@/components/UserAvatar.vue";
 
 const getMyStudentsWithStats = vi.fn();
 const listMyWhiteboards = vi.fn();
+const getMyLessonTypes = vi.fn(async (): Promise<unknown[]> => []);
+const createManualBooking = vi.fn(async (): Promise<Record<string, unknown>> => ({}));
 
 const setStudentMeetingLink = vi.fn(async (_id: string, _url: string | null) => undefined);
 
@@ -17,12 +19,12 @@ vi.mock("@/api/tutors", () => ({
   deleteManagedStudent: vi.fn(async () => undefined),
   setStudentNote: vi.fn(async () => undefined),
   createClaimLink: vi.fn(async () => ({ url: "", expires_at: "" })),
-  getMyLessonTypes: vi.fn(async () => []),
+  getMyLessonTypes: () => getMyLessonTypes(),
 }));
 
 vi.mock("@/api/bookings", () => ({
   listTutorRecurringSeries: vi.fn(async () => []),
-  createManualBooking: vi.fn(async () => ({})),
+  createManualBooking: () => createManualBooking(),
   stopSeries: vi.fn(async () => ({})),
 }));
 
@@ -180,5 +182,23 @@ describe("StudentsBlock", () => {
     expect(wrapper.text()).toContain("Постоянная ссылка на занятие:");
     expect(wrapper.text()).toContain("Алгебра");
     expect(wrapper.text()).not.toContain("Чужая");
+  });
+
+  it("говорит репетитору, что повтор не получился", async () => {
+    // Раньше форма молча закрывалась, хотя назначено было одно занятие, а не серия.
+    getMyLessonTypes.mockResolvedValue([
+      { id: "lt-1", tutor_id: "t-1", name: "Занятие", format: "individual", duration_minutes: 60, price: 1000, is_active: true },
+    ]);
+    createManualBooking.mockResolvedValue({ id: "b-1", recurring_series_id: null, recurring_created: 0 });
+    const wrapper = mountBlock();
+    await flushPromises();
+
+    await wrapper.findAll("button").find((b) => b.text().includes("Еженедельное занятие"))!.trigger("click");
+    await flushPromises();
+    await wrapper.findAll("button").find((b) => b.text() === "Назначить")!.trigger("click");
+    await flushPromises();
+
+    expect(createManualBooking).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("Еженедельные занятия не назначены");
   });
 });

@@ -8,6 +8,7 @@ import { getAvailableDates, getDaySlots } from "@/api/tutors";
 import { useAuthStore } from "@/stores/auth";
 import type { LessonType, Slot } from "@/types/tutor";
 import MskTimeNotice from "@/components/MskTimeNotice.vue";
+import RepeatFailedModal from "@/components/RepeatFailedModal.vue";
 import { addDaysIso, formatDateTimeWithMsk, formatTime, todayIso } from "@/utils/time";
 
 const props = defineProps<{
@@ -62,6 +63,8 @@ function pickSlot(slot: Slot): void {
 }
 
 const repeatFailed = ref(false);
+// Окно предупреждения закрывается, а напоминание на экране «Вы записаны» остаётся.
+const showRepeatFailedModal = ref(false);
 
 async function confirm(): Promise<void> {
   if (!auth.isAuthenticated) return;
@@ -78,6 +81,7 @@ async function confirm(): Promise<void> {
     // неделях занято. Раньше об этом никто не узнавал - ученик считал, что записан
     // надолго, и обнаруживал пустое расписание через месяц.
     repeatFailed.value = repeatWeekly.value && booking.recurring_created === 0;
+    showRepeatFailedModal.value = repeatFailed.value;
     success.value = true;
   } catch {
     error.value = "Не удалось записаться. Возможно, время уже занято — попробуйте выбрать другое.";
@@ -93,6 +97,7 @@ function restart(): void {
   selectedSlot.value = null;
   repeatWeekly.value = false;
   repeatFailed.value = false;
+  showRepeatFailedModal.value = false;
   success.value = false;
   error.value = null;
 }
@@ -142,6 +147,11 @@ watch(() => props.tutorId, restart);
         Записано только выбранное занятие — напишите репетитору, чтобы подобрать
         постоянное время.
       </p>
+      <RepeatFailedModal
+        v-if="showRepeatFailedModal && selectedSlot"
+        :lesson-date="formatDateTimeWithMsk(selectedSlot.start_at)"
+        @close="showRepeatFailedModal = false"
+      />
       <button type="button" class="btn-outline mt-3 text-base" @click="restart">Записаться ещё раз</button>
     </div>
 

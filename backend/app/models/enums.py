@@ -144,6 +144,9 @@ class SystemNotificationEvent(StrEnum):
     # Еженедельные занятия перестали продлеваться: время занято или выпало из
     # расписания. Иначе серия умирала молча - см. booking_service.top_up_active_series.
     RECURRING_SERIES_STALLED = "recurring_series_stalled"
+    # Ученик отметил «еженедельно», но ни одной следующей недели не нашлось: записано
+    # одно занятие, а договариваться о постоянном времени - репетитору.
+    RECURRING_SERIES_NOT_STARTED = "recurring_series_not_started"
     PASSWORD_CHANGED_BY_ADMIN = "password_changed_by_admin"
 
 

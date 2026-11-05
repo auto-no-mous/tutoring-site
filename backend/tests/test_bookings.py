@@ -1325,12 +1325,17 @@ async def test_weekly_repeat_warns_immediately_when_no_week_fits(
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["recurring_created"] == 0, "повторов нет - ученику надо сказать сразу"
+    # И занятие не числится еженедельным: раньше оно оставалось в серии-однодневке и
+    # показывалось «еженедельно» и в расписании, и во вкладке «Ученики».
+    assert resp.json()["recurring_series_id"] is None
+    series = (await client.get("/api/v1/bookings/series/tutor", headers=tutor["headers"])).json()
+    assert [row["student_id"] for row in series] == [first["user"]["id"]]
 
     notifications = (
         await db_session.execute(
             select(SystemNotification).where(
                 SystemNotification.user_id == uuid.UUID(tutor["user"]["id"]),
-                SystemNotification.event_type == SystemNotificationEvent.RECURRING_SERIES_STALLED.value,
+                SystemNotification.event_type == SystemNotificationEvent.RECURRING_SERIES_NOT_STARTED.value,
             )
         )
     ).scalars().all()
@@ -1339,3 +1344,107 @@ async def test_weekly_repeat_warns_immediately_when_no_week_fits(
     # Ночная задача продления не повторяет то, что уже сказано при записи.
     stats = await booking_service.top_up_active_series(db_session)
     assert stats["stalled"] == 0
+
+
+async def _student_books(client: AsyncClient, tutor: dict, student: dict, start_at: dt.datetime, weekly: bool = False):
+    resp = await client.post(
+        "/api/v1/bookings",
+        headers=student["headers"],
+        json={
+            "tutor_id": tutor["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+            "repeat_weekly": weekly,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+async def _tutor_weekly(client: AsyncClient, tutor: dict, student: dict, start_at: dt.datetime):
+    return await client.post(
+        "/api/v1/bookings/manual",
+        headers=tutor["headers"],
+        json={
+            "student_id": student["user"]["id"],
+            "lesson_type_id": tutor["lesson_type_id"],
+            "start_at": start_at.isoformat(),
+            "end_at": (start_at + dt.timedelta(minutes=60)).isoformat(),
+            "repeat_weekly": True,
+        },
+    )
+
+
+async def test_tutor_turns_on_weekly_after_the_students_repeat_failed(client: AsyncClient) -> None:
+    """Ученик отметил «еженедельно», а следующие недели оказались заняты. Потом
+    репетитор освобождает время и включает повтор сам - раньше это упиралось в
+    «пересекается с этим же учеником»: занятие числилось за мёртвой серией."""
+    tutor = await _setup_tutor(client, "revive-tutor@example.com")
+    blocker = await _register(client, "revive-blocker@example.com", "student")
+    student = await _register(client, "revive-student@example.com", "student")
+    start_at = _next_weekday_datetime(0, 10, weeks_ahead=1)
+
+    blocker_series = await _student_books(client, tutor, blocker, start_at + dt.timedelta(weeks=1), weekly=True)
+    own = await _student_books(client, tutor, student, start_at, weekly=True)
+    assert own["recurring_created"] == 0
+    assert own["recurring_series_id"] is None
+
+    stop = await client.post(
+        f"/api/v1/bookings/series/{blocker_series['recurring_series_id']}/stop", headers=tutor["headers"]
+    )
+    assert stop.status_code == 200, stop.text
+    bookings = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    for b in bookings:
+        if b["student_id"] == blocker["user"]["id"] and b["status"] == "scheduled":
+            await client.post(f"/api/v1/bookings/{b['id']}/cancel", headers=tutor["headers"], json={})
+
+    weekly = await _tutor_weekly(client, tutor, student, start_at)
+    assert weekly.status_code == 201, weekly.text
+    assert weekly.json()["id"] == own["id"]
+    assert weekly.json()["recurring_created"] > 0
+
+
+async def test_weekly_can_be_turned_on_again_after_being_stopped(client: AsyncClient) -> None:
+    """Занятия остановленной серии остаются в расписании; включить повтор снова в то
+    же время - не пересечение, а те же занятия."""
+    tutor = await _setup_tutor(client, "again-tutor@example.com")
+    student = await _register(client, "again-student@example.com", "student")
+    start_at = _next_weekday_datetime(0, 10)
+
+    first = await _tutor_weekly(client, tutor, student, start_at)
+    assert first.status_code == 201, first.text
+    series_id = first.json()["recurring_series_id"]
+    await client.post(f"/api/v1/bookings/series/{series_id}/stop", headers=tutor["headers"])
+
+    again = await _tutor_weekly(client, tutor, student, start_at)
+    assert again.status_code == 201, again.text
+    assert again.json()["id"] == first.json()["id"]
+    assert again.json()["recurring_series_id"] not in (None, series_id)
+
+    bookings = (await client.get("/api/v1/bookings/tutor/me", headers=tutor["headers"])).json()
+    starts = [b["start_at"] for b in bookings if b["status"] == "scheduled"]
+    assert len(starts) == len(set(starts)), "недели не задваиваются"
+    active = (await client.get("/api/v1/bookings/series/tutor", headers=tutor["headers"])).json()
+    assert len(active) == 1
+
+
+async def test_weekly_refuses_the_same_student_at_another_time(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "othertime-tutor@example.com")
+    student = await _register(client, "othertime-student@example.com", "student")
+    start_at = _next_weekday_datetime(0, 10)
+    await _student_books(client, tutor, student, start_at)
+
+    weekly = await _tutor_weekly(client, tutor, student, start_at + dt.timedelta(minutes=30))
+    assert weekly.status_code == 409
+    assert "Время пересекается с" in weekly.json()["detail"]
+
+
+async def test_weekly_on_top_of_an_active_series_says_so(client: AsyncClient) -> None:
+    tutor = await _setup_tutor(client, "dup-series-tutor@example.com")
+    student = await _register(client, "dup-series-student@example.com", "student")
+    start_at = _next_weekday_datetime(0, 10)
+    assert (await _tutor_weekly(client, tutor, student, start_at)).status_code == 201
+
+    again = await _tutor_weekly(client, tutor, student, start_at)
+    assert again.status_code == 409
+    assert "уже еженедельное" in again.json()["detail"]
