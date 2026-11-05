@@ -1,16 +1,19 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getMyStudents } from "@/api/tutors";
 import BookingCard from "@/components/BookingCard.vue";
 import BookingDetailsModal from "@/components/tutor/BookingDetailsModal.vue";
 import BookingsTab from "@/components/tutor/BookingsTab.vue";
 import RescheduleModal from "@/components/RescheduleModal.vue";
+import GroupOccurrenceDetailsModal from "@/components/tutor/GroupOccurrenceDetailsModal.vue";
+import TutorGroupOccurrenceCard from "@/components/tutor/TutorGroupOccurrenceCard.vue";
 
 const createManualBooking = vi.fn();
 const listTutorBookings = vi.fn(async () => []);
 const listMyWhiteboards = vi.fn(async () => []);
+const listMyGroupOccurrences = vi.fn(async (): Promise<unknown[]> => []);
 const setBookingOutcome = vi.fn(async (_id: string, _outcome: string) => ({}));
 
 vi.mock("@/api/bookings", () => ({
@@ -27,6 +30,8 @@ vi.mock("@/api/whiteboards", () => ({
 vi.mock("@/api/groups", () => ({
   createOccurrence: vi.fn(async () => ({})),
   listMyGroups: vi.fn(async () => []),
+  listMyGroupOccurrences: () => listMyGroupOccurrences(),
+  updateOccurrence: vi.fn(async () => ({})),
 }));
 
 vi.mock("@/api/homework", () => ({
@@ -61,6 +66,8 @@ function mountTab() {
         BookingCard: true,
         BookingDetailsModal: true,
         RescheduleModal: true,
+        TutorGroupOccurrenceCard: true,
+        GroupOccurrenceDetailsModal: true,
         RouterLink: { template: "<a><slot /></a>" },
       },
     },
@@ -386,5 +393,68 @@ describe("BookingsTab: недельный вид", () => {
     const marks = wrapper.findAll("[data-note]");
     expect(marks).toHaveLength(1);
     expect(marks[0].attributes("title")).toBe("начать с дробей");
+  });
+});
+
+describe("BookingsTab: занятия групп", () => {
+  function occurrenceAt(offsetHours: number, overrides: Record<string, unknown> = {}) {
+    const start = new Date(Date.now() + offsetHours * 3600 * 1000);
+    return {
+      id: `occ-${offsetHours}`,
+      group_id: "g-1",
+      start_at: start.toISOString(),
+      end_at: new Date(start.getTime() + 90 * 60 * 1000).toISOString(),
+      status: "scheduled",
+      original_start_at: null,
+      group_name: "ЕГЭ-11",
+      meeting_link: null,
+      member_count: 4,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    listTutorBookings.mockResolvedValue([bookingAt(5)] as never);
+    listMyGroupOccurrences.mockResolvedValue([
+      occurrenceAt(2),
+      occurrenceAt(3, { id: "occ-cancelled", status: "cancelled", group_name: "Отменённая" }),
+    ]);
+  });
+
+  afterEach(() => {
+    listMyGroupOccurrences.mockResolvedValue([]);
+  });
+
+  it("показывает занятия групп в списке рядом с записями, без отменённых", async () => {
+    // Жалоба: групповые занятия не попадали в общий список занятий репетитора.
+    const wrapper = mountTab();
+    await flushPromises();
+
+    const cards = wrapper.findAllComponents(TutorGroupOccurrenceCard);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].props("occurrence").id).toBe("occ-2");
+    expect(wrapper.findComponent(BookingCard).exists()).toBe(true);
+  });
+
+  it("показывает занятия групп в недельной сетке", async () => {
+    localStorage.setItem("tutor-bookings-layout", "week");
+    const wrapper = mountTab();
+    await flushPromises();
+
+    const rows = wrapper.findAll("[data-group-occurrence]");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text()).toContain("Группа «ЕГЭ-11»");
+    expect(wrapper.text()).not.toContain("Отменённая");
+
+    await rows[0].trigger("click");
+    expect(wrapper.findComponent(BookingDetailsModal).exists()).toBe(false);
+    const details = wrapper.findComponent(GroupOccurrenceDetailsModal);
+    expect(details.props("occurrence").id).toBe("occ-2");
+
+    details.vm.$emit("close");
+    await flushPromises();
+    expect(wrapper.findComponent(GroupOccurrenceDetailsModal).exists()).toBe(false);
   });
 });

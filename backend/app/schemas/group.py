@@ -130,6 +130,15 @@ class GroupOccurrenceCreate(BaseModel):
     end_at: UTCDateTime
 
 
+class TutorGroupOccurrenceOut(GroupOccurrenceOut):
+    """Занятие группы в общем расписании репетитора: карточке нужно название группы,
+    ссылка на встречу и число участников, а не голый group_id."""
+
+    group_name: str = ""
+    meeting_link: str | None = None
+    member_count: int = 0
+
+
 class StudentGroupOccurrenceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,3 +1,5 @@
+import type { Booking } from "@/types/booking";
+
 export interface GroupScheduleSlot {
   id?: string;
   weekday: number;
@@ -67,6 +69,17 @@ export interface GroupOccurrence {
   status: string;
   original_start_at: string | null;
 }
+
+// Занятие группы в общем расписании репетитора (вкладка «Занятия»).
+export interface TutorGroupOccurrence extends GroupOccurrence {
+  group_name: string;
+  meeting_link: string | null;
+  member_count: number;
+}
+
+// Расписание репетитора - индивидуальные записи и занятия групп вперемешку; kind
+// решает, какую карточку рисовать.
+export type TutorScheduleItem = ({ kind: "booking" } & Booking) | ({ kind: "occurrence" } & TutorGroupOccurrence);
 
 export interface StudentGroupOccurrence {
   id: string;

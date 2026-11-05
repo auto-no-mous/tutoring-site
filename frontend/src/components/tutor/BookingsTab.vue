@@ -4,7 +4,7 @@ import { CalendarDays, List } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
 
 import { createManualBooking, listTutorBookings, setBookingOutcome } from "@/api/bookings";
-import { createOccurrence, listMyGroups } from "@/api/groups";
+import { createOccurrence, listMyGroupOccurrences, listMyGroups } from "@/api/groups";
 import { getMyStudentsHomeworkStatus } from "@/api/homework";
 import {
   createManagedStudent,
@@ -19,10 +19,12 @@ import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
 import RescheduleModal from "@/components/RescheduleModal.vue";
 import BookingDetailsModal from "@/components/tutor/BookingDetailsModal.vue";
 import BookingsWeekGrid from "@/components/tutor/BookingsWeekGrid.vue";
+import GroupOccurrenceDetailsModal from "@/components/tutor/GroupOccurrenceDetailsModal.vue";
+import TutorGroupOccurrenceCard from "@/components/tutor/TutorGroupOccurrenceCard.vue";
 import { useToastStore } from "@/stores/toast";
 import { apiErrorMessage } from "@/utils/apiError";
 import type { Booking } from "@/types/booking";
-import type { Group } from "@/types/group";
+import type { Group, TutorGroupOccurrence, TutorScheduleItem } from "@/types/group";
 import type { LessonType, Slot, TutorStudent } from "@/types/tutor";
 import { addDaysIso, formatDate, formatDateTimeWithMsk, formatMskTime, formatTime, mskDateTimeToUtcIso, todayIso } from "@/utils/time";
 import { groupByWeekAndDay, groupIntoCalendarWeeks, isBeforeToday } from "@/utils/scheduleGrouping";
@@ -30,6 +32,9 @@ import { groupByWeekAndDay, groupIntoCalendarWeeks, isBeforeToday } from "@/util
 const toast = useToastStore();
 
 const bookings = ref<Booking[]>([]);
+// Занятия групп живут отдельно от записей, но в расписании стоят вперемешку с ними:
+// раньше вкладка читала только записи, и групповых занятий здесь не было вовсе.
+const groupOccurrences = ref<TutorGroupOccurrence[]>([]);
 // Один запрос на всю вкладку: доски привязаны к паре репетитор-ученик, и у десятка
 // занятий с одним учеником они одни и те же.
 const whiteboards = ref<Whiteboard[]>([]);
@@ -37,6 +42,10 @@ const whiteboards = ref<Whiteboard[]>([]);
 function boardsForStudent(studentId: string | null): Whiteboard[] {
   if (!studentId) return [];
   return whiteboards.value.filter((board) => board.student_id === studentId);
+}
+
+function boardsForGroup(groupId: string): Whiteboard[] {
+  return whiteboards.value.filter((board) => board.group_id === groupId);
 }
 
 async function loadWhiteboards(): Promise<void> {
@@ -305,7 +314,18 @@ const historyAll = computed(() =>
 const history = computed(() => historyAll.value.slice(0, historyVisibleCount.value));
 const hasMoreHistory = computed(() => historyVisibleCount.value < historyAll.value.length);
 
-const weeks = computed(() => groupByWeekAndDay(upcoming.value, (b) => b.start_at, MSK));
+function withOccurrences(list: Booking[], occurrences: TutorGroupOccurrence[]): TutorScheduleItem[] {
+  return [
+    ...list.map((b) => ({ kind: "booking" as const, ...b })),
+    ...occurrences.filter((o) => o.status !== "cancelled").map((o) => ({ kind: "occurrence" as const, ...o })),
+  ].sort((a, b) => a.start_at.localeCompare(b.start_at));
+}
+
+const upcomingOccurrences = computed(() => groupOccurrences.value.filter((o) => !isBeforeToday(o.start_at, MSK)));
+
+const weeks = computed(() =>
+  groupByWeekAndDay(withOccurrences(upcoming.value, upcomingOccurrences.value), (item) => item.start_at, MSK),
+);
 
 // --- Список карточек или недельная сетка -------------------------------------------
 
@@ -320,8 +340,11 @@ watch(scheduleLayout, (layout) => localStorage.setItem(LAYOUT_STORAGE_KEY, layou
 // понедельник в среду выглядел бы как неделя без занятий.
 const calendarWeeks = computed(() =>
   groupIntoCalendarWeeks(
-    bookings.value.filter((b) => b.status === "scheduled"),
-    (b) => b.start_at,
+    withOccurrences(
+      bookings.value.filter((b) => b.status === "scheduled"),
+      groupOccurrences.value,
+    ),
+    (item) => item.start_at,
     MSK,
   ),
 );
@@ -337,6 +360,16 @@ const openedBookingId = ref<string | null>(null);
 const openedBooking = computed(
   () => bookings.value.find((b) => b.id === openedBookingId.value && b.status === "scheduled") ?? null,
 );
+
+const openedOccurrenceId = ref<string | null>(null);
+const openedOccurrence = computed(
+  () => groupOccurrences.value.find((o) => o.id === openedOccurrenceId.value && o.status !== "cancelled") ?? null,
+);
+
+function openScheduleItem(item: TutorScheduleItem): void {
+  if (item.kind === "occurrence") openedOccurrenceId.value = item.id;
+  else openedBookingId.value = item.id;
+}
 
 function openedStudentName(booking: Booking): string {
   const student = booking.student_id ? studentsById.value[booking.student_id] : undefined;
@@ -370,9 +403,10 @@ function homeworkStatusFor(booking: Booking): "none" | "pending" | "done" {
 }
 
 async function load(): Promise<void> {
-  const [bookingsData, homeworkStatusData, studentsData, groupsData, lessonTypesData, boardsData] =
+  const [bookingsData, occurrencesData, homeworkStatusData, studentsData, groupsData, lessonTypesData, boardsData] =
     await Promise.all([
       listTutorBookings(),
+      listMyGroupOccurrences(),
       getMyStudentsHomeworkStatus(),
       getMyStudents(),
       listMyGroups(),
@@ -384,6 +418,7 @@ async function load(): Promise<void> {
     ]);
   whiteboards.value = boardsData;
   bookings.value = bookingsData;
+  groupOccurrences.value = occurrencesData;
   homeworkStatusByStudent.value = homeworkStatusData;
   students.value = studentsData;
   groups.value = groupsData;
@@ -726,17 +761,19 @@ onMounted(load);
     </div>
 
     <section v-if="viewMode === 'schedule' && scheduleLayout === 'week'">
-      <BookingsWeekGrid :weeks="calendarWeeks" :students="studentsById" @open="openedBookingId = $event.id" />
+      <BookingsWeekGrid :weeks="calendarWeeks" :students="studentsById" @open="openScheduleItem" />
     </section>
 
     <section v-else-if="viewMode === 'schedule'" class="max-w-2xl">
       <BookingScheduleGroups :weeks="weeks">
-        <template #default="{ item: booking }">
+        <template #default="{ item }">
+          <TutorGroupOccurrenceCard v-if="item.kind === 'occurrence'" :occurrence="item" @changed="load" />
           <BookingCard
-            :booking="booking"
+            v-else
+            :booking="item"
             role="tutor"
-            :homework-status="homeworkStatusFor(booking)"
-            :whiteboards="boardsForStudent(booking.student_id)"
+            :homework-status="homeworkStatusFor(item)"
+            :whiteboards="boardsForStudent(item.student_id)"
             @changed="load"
             @boards-changed="loadWhiteboards"
             @reschedule-requested="openReschedule"
@@ -818,6 +855,15 @@ onMounted(load);
       @changed="load"
       @boards-changed="loadWhiteboards"
       @reschedule-requested="requestRescheduleFromDetails"
+    />
+
+    <GroupOccurrenceDetailsModal
+      v-if="openedOccurrence"
+      :occurrence="openedOccurrence"
+      :whiteboards="boardsForGroup(openedOccurrence.group_id)"
+      @close="openedOccurrenceId = null"
+      @changed="load"
+      @boards-changed="loadWhiteboards"
     />
 
     <RescheduleModal

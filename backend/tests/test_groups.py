@@ -361,6 +361,35 @@ async def test_student_occurrences_list_includes_group_context(client: AsyncClie
     assert outsider_resp.json() == []
 
 
+async def test_tutor_sees_group_occurrences_in_own_schedule(client: AsyncClient) -> None:
+    # Жалоба: групповые занятия не попадали во вкладку «Занятия» репетитора - она
+    # читала только индивидуальные записи.
+    tutor = await _setup_tutor_with_group(client, "group-tutor-schedule@example.com")
+    group_id = tutor["group"]["id"]
+    await _accept_student(client, tutor, group_id, "group-student-schedule@example.com")
+    other = await _setup_tutor_with_group(client, "group-tutor-schedule-other@example.com")
+
+    resp = await client.get("/api/v1/groups/tutor/me/occurrences", headers=tutor["headers"])
+    assert resp.status_code == 200, resp.text
+    occurrences = resp.json()
+    assert len(occurrences) > 0
+    assert {o["group_id"] for o in occurrences} == {group_id}
+    assert occurrences[0]["group_name"] == "Подготовка к ЕГЭ"
+    assert occurrences[0]["meeting_link"] == "https://meet.example.com/group"
+    assert occurrences[0]["member_count"] == 1
+    starts = [o["start_at"] for o in occurrences]
+    assert starts == sorted(starts)
+
+    other_resp = await client.get("/api/v1/groups/tutor/me/occurrences", headers=other["headers"])
+    assert group_id not in {o["group_id"] for o in other_resp.json()}
+
+    student_resp = await client.get(
+        "/api/v1/groups/tutor/me/occurrences",
+        headers=(await _register(client, "group-schedule-nosy@example.com", "student"))["headers"],
+    )
+    assert student_resp.status_code == 403
+
+
 async def test_student_marks_own_no_show(client: AsyncClient, db_session: AsyncSession) -> None:
     tutor = await _setup_tutor_with_group(client, "group-tutor10@example.com")
     group_id = tutor["group"]["id"]

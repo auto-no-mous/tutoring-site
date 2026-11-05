@@ -899,6 +899,24 @@ async def list_occurrences_for_student(db: AsyncSession, student_id: uuid.UUID) 
     return list(result.scalars().all())
 
 
+async def list_occurrences_for_tutor(
+    db: AsyncSession, tutor_id: uuid.UUID, since: dt.datetime
+) -> list[GroupOccurrence]:
+    """Занятия всех групп репетитора начиная с `since` - для общего расписания во
+    вкладке «Занятия» (tutor/BookingsTab.vue), рядом с индивидуальными записями.
+
+    Раньше там были только индивидуальные записи, и групповые занятия репетитор видел
+    лишь в карточке каждой группы по отдельности.
+    """
+    result = await db.execute(
+        select(GroupOccurrence)
+        .join(Group, Group.id == GroupOccurrence.group_id)
+        .where(Group.tutor_id == tutor_id, GroupOccurrence.start_at >= since)
+        .order_by(GroupOccurrence.start_at)
+    )
+    return list(result.scalars().all())
+
+
 async def get_own_attendance_map(db: AsyncSession, student_id: uuid.UUID, occurrence_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
     if not occurrence_ids:
         return {}

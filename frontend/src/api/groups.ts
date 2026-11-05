@@ -7,6 +7,7 @@ import type {
   GroupOccurrence,
   GroupScheduleSlot,
   StudentGroupOccurrence,
+  TutorGroupOccurrence,
 } from "@/types/group";
 
 export async function createGroup(payload: {
@@ -22,6 +23,12 @@ export async function createGroup(payload: {
 
 export async function listMyGroups() {
   const { data } = await apiClient.get<Group[]>("/groups/tutor/me");
+  return data;
+}
+
+// Занятия всех групп репетитора - для общего расписания во вкладке «Занятия».
+export async function listMyGroupOccurrences() {
+  const { data } = await apiClient.get<TutorGroupOccurrence[]>("/groups/tutor/me/occurrences");
   return data;
 }
 

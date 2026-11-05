@@ -1,3 +1,4 @@
+import datetime as dt
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
@@ -26,9 +27,11 @@ from app.schemas.group import (
     GroupScheduleSlotOut,
     GroupUpdate,
     StudentGroupOccurrenceOut,
+    TutorGroupOccurrenceOut,
 )
 from app.services import group_service, tutor_service
 from app.services.booking_service import get_student_names
+from app.utils.time import utcnow
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 public_router = APIRouter(tags=["groups"])
@@ -111,6 +114,33 @@ async def list_my_groups(current_user: CurrentUser, db: DbSession) -> list[Group
         duration = await group_service.get_lesson_type_duration(db, group.lesson_type_id)
         out.append(_to_group_out(group, count, duration))
     return out
+
+
+@router.get("/tutor/me/occurrences", response_model=list[TutorGroupOccurrenceOut])
+async def my_group_occurrences(current_user: CurrentUser, db: DbSession) -> list[TutorGroupOccurrenceOut]:
+    """Занятия всех групп репетитора для вкладки «Занятия» (tutor/BookingsTab.vue).
+
+    Отдаются за последние две недели и дальше: недельной сетке нужна текущая неделя
+    целиком, включая прошедшие дни, а история групп живёт в их карточках
+    (посещаемость).
+    """
+    _require_tutor(current_user)
+    profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
+    since = utcnow() - dt.timedelta(days=14)
+    rows = await group_service.list_occurrences_for_tutor(db, profile.id, since)
+    groups_result = await db.execute(select(Group).where(Group.id.in_({r.group_id for r in rows} or {None})))
+    groups = {g.id: g for g in groups_result.scalars().all()}
+    member_counts = {gid: await group_service.count_active_members(db, gid) for gid in groups}
+    return [
+        TutorGroupOccurrenceOut.model_validate(r, from_attributes=True).model_copy(
+            update={
+                "group_name": groups[r.group_id].name,
+                "meeting_link": groups[r.group_id].meeting_link,
+                "member_count": member_counts[r.group_id],
+            }
+        )
+        for r in rows
+    ]
 
 
 # NB: these two literal "/me" routes must be registered before the "/{group_id}"

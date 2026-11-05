@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { StickyNote } from "lucide-vue-next";
 
+import ScheduleWeekGrid from "@/components/ScheduleWeekGrid.vue";
 import type { Booking } from "@/types/booking";
+import type { TutorScheduleItem } from "@/types/group";
 import type { TutorStudent } from "@/types/tutor";
 import type { CalendarWeek } from "@/utils/scheduleGrouping";
 import { formatTime } from "@/utils/time";
 
-// Недельный вид занятий репетитора: блок на неделю, в нём семь столбцов по дням. В
-// строке только время, ученик и класс - остальное в окне занятия по клику.
-const props = defineProps<{ weeks: CalendarWeek<Booking>[]; students: Record<string, TutorStudent> }>();
-const emit = defineEmits<{ open: [Booking] }>();
+// Недельный вид занятий репетитора (каркас - ScheduleWeekGrid). В строке только
+// время, ученик и класс (или название группы) - остальное в окне занятия по клику.
+const props = defineProps<{ weeks: CalendarWeek<TutorScheduleItem>[]; students: Record<string, TutorStudent> }>();
+const emit = defineEmits<{ open: [TutorScheduleItem] }>();
 
 // «Фамилия Имя» из списка учеников; если ученика там нет (например, он ещё не
 // подтянулся), - как назвал его сервер.
@@ -26,65 +28,40 @@ function studentGrade(booking: Booking): number | null {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
-    <section v-for="week in weeks" :key="week.label" :data-week="week.label">
-      <h2 class="text-lg font-medium">{{ week.label }}</h2>
-      <!-- Неделя переносится по строкам, когда семь дней в ряд не помещаются: 7 в ряд,
-           иначе 4 + 3, на телефоне - по 2. Раньше сетка прокручивалась вбок, и на
-           телефоне неделю приходилось листать пальцем поперёк страницы. Решает ширина
-           самого блока (container query), пороги - чтобы день не был уже ~8rem:
-           столько нужно на время и «Фамилию Имя». По два дня в ряд пустые дни ниже, иначе
-           почти пустая неделя растягивалась на телефоне на два экрана. -->
-      <div class="@container mt-2">
-        <div class="grid grid-cols-2 gap-1.5 @min-[34rem]:grid-cols-4 @min-[56rem]:grid-cols-7">
-          <div
-            v-for="day in week.days"
-            :key="day.dateIso"
-            :data-day="day.dateIso"
-            class="flex min-h-16 flex-col rounded-lg border @min-[34rem]:min-h-28"
-            :class="[
-              day.isToday
-                ? 'border-brand-300 bg-brand-50/70 dark:border-brand-800 dark:bg-brand-900/30'
-                : 'border-slate-200 dark:border-slate-800',
-              day.isPast ? 'opacity-60' : '',
-            ]"
-          >
-            <div
-              class="flex items-baseline justify-between border-b px-2 py-1.5 text-xs"
-              :class="day.isToday ? 'border-brand-200 dark:border-brand-800' : 'border-slate-200 dark:border-slate-800'"
-            >
-              <span class="font-semibold" :class="day.isToday ? 'text-brand-700 dark:text-brand-300' : ''">
-                {{ day.isToday ? "Сегодня" : day.weekday }}
-              </span>
-              <span class="text-slate-400">{{ day.dateLabel }}</span>
-            </div>
-            <div class="flex flex-1 flex-col gap-1 p-1">
-              <button
-                v-for="booking in day.items"
-                :key="booking.id"
-                type="button"
-                class="flex flex-col rounded-md px-1.5 py-1 text-left text-xs transition-colors"
-                :class="
-                  booking.is_manual_block
-                    ? 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
-                    : 'bg-white shadow-sm ring-1 ring-slate-200 hover:ring-brand-400 dark:bg-slate-900 dark:ring-slate-700 dark:hover:ring-brand-600'
-                "
-                @click="emit('open', booking)"
-              >
-                <span class="flex items-center justify-between gap-1">
-                  <span class="font-semibold tabular-nums">{{ formatTime(booking.start_at) }}</span>
-                  <!-- Само примечание - в окне занятия; здесь только знак, что оно есть. -->
-                  <span v-if="booking.notes" :title="booking.notes" aria-label="Есть примечание" data-note>
-                    <StickyNote class="h-3 w-3 shrink-0 text-amber-500" />
-                  </span>
-                </span>
-                <span class="leading-tight">{{ studentName(booking) }}</span>
-                <span v-if="studentGrade(booking)" class="text-slate-400">{{ studentGrade(booking) }} кл.</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  </div>
+  <ScheduleWeekGrid :weeks="weeks">
+    <template #item="{ item }">
+      <button
+        v-if="item.kind === 'occurrence'"
+        type="button"
+        data-group-occurrence
+        class="flex flex-col rounded-md bg-sky-50 px-1.5 py-1 text-left text-xs shadow-sm ring-1 ring-sky-200 transition-colors hover:ring-brand-400 dark:bg-sky-950/40 dark:ring-sky-800 dark:hover:ring-brand-600"
+        @click="emit('open', item)"
+      >
+        <span class="font-semibold tabular-nums">{{ formatTime(item.start_at) }}</span>
+        <span class="leading-tight">Группа «{{ item.group_name }}»</span>
+        <span class="text-slate-400">участников: {{ item.member_count }}</span>
+      </button>
+      <button
+        v-else
+        type="button"
+        class="flex flex-col rounded-md px-1.5 py-1 text-left text-xs transition-colors"
+        :class="
+          item.is_manual_block
+            ? 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
+            : 'bg-white shadow-sm ring-1 ring-slate-200 hover:ring-brand-400 dark:bg-slate-900 dark:ring-slate-700 dark:hover:ring-brand-600'
+        "
+        @click="emit('open', item)"
+      >
+        <span class="flex items-center justify-between gap-1">
+          <span class="font-semibold tabular-nums">{{ formatTime(item.start_at) }}</span>
+          <!-- Само примечание - в окне занятия; здесь только знак, что оно есть. -->
+          <span v-if="item.notes" :title="item.notes" aria-label="Есть примечание" data-note>
+            <StickyNote class="h-3 w-3 shrink-0 text-amber-500" />
+          </span>
+        </span>
+        <span class="leading-tight">{{ studentName(item) }}</span>
+        <span v-if="studentGrade(item)" class="text-slate-400">{{ studentGrade(item) }} кл.</span>
+      </button>
+    </template>
+  </ScheduleWeekGrid>
 </template>
