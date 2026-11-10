@@ -5,8 +5,8 @@ import { listNotificationTemplates, updateNotificationTemplate } from "@/api/adm
 import type { NotificationTemplate } from "@/types/notification";
 
 const EVENT_LABELS: Record<string, string> = {
-  login_success: "Вход в систему",
-  login_failed: "Неудачная попытка входа",
+  login_success: "Вход в систему (Telegram и почта, не чат)",
+  login_failed: "Неудачная попытка входа (Telegram и почта, не чат)",
   welcome: "Приветствие после регистрации",
   booking_cancelled_by_student: "Ученик отменил занятие",
   booking_rescheduled_by_student: "Ученик перенёс занятие",

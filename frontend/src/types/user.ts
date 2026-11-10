@@ -1,6 +1,10 @@
 export type UserRole = "tutor" | "student" | "admin";
 export type NotificationChannel = "telegram" | "email";
 
+// Куда приходят уведомления: каналы доставки и чат «Системные уведомления» на сайте.
+// У сайта нет адреса, поэтому он не NotificationChannel, но настраивается так же.
+export type NotificationTarget = NotificationChannel | "site";
+
 // Настройки одного канала: сам канал, отдельные события и за сколько минут
 // напоминать о занятии. Остальные уведомления (сообщения в чате, заявки в группы)
 // идут в канал, пока он включён.
@@ -10,9 +14,11 @@ export interface ChannelNotificationSettings {
   schedule_change: boolean;
   reminder: boolean;
   reminder_lead_minutes: number;
+  // Входы в аккаунт - только Telegram и почта: в чат сайта они не пишутся.
+  login: boolean;
 }
 
-export type NotificationSettings = Record<NotificationChannel, ChannelNotificationSettings>;
+export type NotificationSettings = Record<NotificationTarget, ChannelNotificationSettings>;
 
 export interface User {
   id: string;

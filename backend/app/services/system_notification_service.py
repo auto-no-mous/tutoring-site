@@ -5,9 +5,10 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import SystemNotificationEvent, UserRole
+from app.models.enums import NotificationEvent, SystemNotificationEvent, UserRole
 from app.models.system_notification import NotificationTemplate, SystemNotification
 from app.models.user import User
+from app.schemas.user import NotificationSettings
 from app.utils.time import utcnow
 
 logger = logging.getLogger("app.notifications")
@@ -187,6 +188,42 @@ async def _get_template(db: AsyncSession, event: SystemNotificationEvent, role: 
         return event.value, ""
 
 
+# Какой переключатель настройки «На сайте» (NotificationSettings.site) отвечает за
+# событие. Чего здесь нет - приходит, пока чат-уведомления включены вообще.
+_SITE_SWITCHES: dict[SystemNotificationEvent, NotificationEvent] = {
+    SystemNotificationEvent.BOOKING_CANCELLED_BY_STUDENT: NotificationEvent.SCHEDULE_CHANGE,
+    SystemNotificationEvent.BOOKING_RESCHEDULED_BY_STUDENT: NotificationEvent.SCHEDULE_CHANGE,
+    SystemNotificationEvent.BOOKING_CANCELLED_BY_TUTOR: NotificationEvent.SCHEDULE_CHANGE,
+    SystemNotificationEvent.BOOKING_RESCHEDULED_BY_TUTOR: NotificationEvent.SCHEDULE_CHANGE,
+    SystemNotificationEvent.GROUP_SCHEDULE_CHANGED: NotificationEvent.SCHEDULE_CHANGE,
+    SystemNotificationEvent.UPCOMING_LESSON_REMINDER: NotificationEvent.UPCOMING_REMINDER,
+}
+
+# Входы в аккаунт в чат не пишутся вовсе - они уходят в Telegram и на почту
+# (notification_service.notify_login), шаблоны отсюда дают им текст.
+NOT_FOR_SITE = frozenset({SystemNotificationEvent.LOGIN_SUCCESS, SystemNotificationEvent.LOGIN_FAILED})
+
+
+def wants_on_site(user: User, event: SystemNotificationEvent) -> bool:
+    prefs = NotificationSettings.model_validate(user.notification_settings or {}).site
+    return prefs.wants(_SITE_SWITCHES.get(event, NotificationEvent.OTHER))
+
+
+async def render(
+    db: AsyncSession, user: User, event: SystemNotificationEvent, **params: str
+) -> tuple[str, str] | None:
+    """Заголовок и текст по шаблону (его правит админ). None - шаблон не собрался:
+    вызывающая операция от этого падать не должна."""
+    try:
+        title, body_template = await _get_template(db, event, user.role)
+        return title, _render(body_template, params)
+    except Exception:
+        logger.exception(
+            "SYSTEM NOTIFICATION: не удалось собрать уведомление event=%s user_id=%s", event.value, user.id
+        )
+        return None
+
+
 async def notify(db: AsyncSession, user_id: uuid.UUID, event: SystemNotificationEvent, **params: str) -> None:
     """Creates an in-app "Системные уведомления" notification for `user_id`. Never
     raises - like notification_service.notify, this must not break the calling
@@ -207,6 +244,8 @@ async def notify(db: AsyncSession, user_id: uuid.UUID, event: SystemNotification
             # Ученик, заведённый репетитором вручную: в аккаунт никто не входит, и
             # копить в нём непрочитанные уведомления бессмысленно. Как только он
             # заберёт аккаунт себе, уведомления начнут приходить как обычно.
+            return
+        if event in NOT_FOR_SITE or not wants_on_site(user, event):
             return
         title, body_template = await _get_template(db, event, user.role)
         body = _render(body_template, params)

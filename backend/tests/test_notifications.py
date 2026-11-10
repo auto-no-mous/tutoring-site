@@ -186,7 +186,13 @@ async def test_reminder_lead_time_is_per_user_and_independent(client: AsyncClien
     settings_resp = await client.patch(
         "/api/v1/auth/me",
         headers=student["headers"],
-        json={"notification_settings": {"email": {"reminder_lead_minutes": 15}}},
+        # У чата сайта своё «за сколько минут» - тоже 15.
+        json={
+            "notification_settings": {
+                "email": {"reminder_lead_minutes": 15},
+                "site": {"reminder_lead_minutes": 15},
+            }
+        },
     )
     assert settings_resp.status_code == 200, settings_resp.text
     assert settings_resp.json()["notification_settings"]["email"]["reminder_lead_minutes"] == 15
@@ -309,3 +315,55 @@ async def test_timezone_must_be_a_real_zone(client: AsyncClient) -> None:
     )
     assert good.status_code == 200
     assert good.json()["timezone"] == "Asia/Yekaterinburg"
+
+
+async def test_site_reminder_has_its_own_lead_time(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Напоминание в чате сайта приходит за своё время, а не за почтовое, и
+    выключается отдельно."""
+    tutor = await _register(client, "notif-site-tutor@example.com", "tutor")
+    student = await _register(client, "notif-site-student@example.com", "student")
+    tutor_id = (await client.get("/api/v1/tutors/me", headers=tutor["headers"])).json()["id"]
+    await client.patch(
+        "/api/v1/auth/me",
+        headers=student["headers"],
+        json={"notification_settings": {"email": {"reminder_lead_minutes": 15}, "site": {"reminder_lead_minutes": 60}}},
+    )
+    await client.patch(
+        "/api/v1/auth/me",
+        headers=tutor["headers"],
+        json={"notification_settings": {"site": {"enabled": True, "reminder": False}}},
+    )
+
+    start_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=60)
+    db_session.add(
+        Booking(
+            tutor_id=uuid.UUID(tutor_id),
+            student_id=uuid.UUID(student["user"]["id"]),
+            start_at=start_at,
+            end_at=start_at + dt.timedelta(hours=1),
+            status=BookingStatus.SCHEDULED.value,
+        )
+    )
+    await db_session.commit()
+
+    await send_upcoming_reminders(db_session)
+    student_site = [
+        n.event_type
+        for n in (
+            await db_session.execute(
+                select(SystemNotification).where(SystemNotification.user_id == uuid.UUID(student["user"]["id"]))
+            )
+        ).scalars()
+    ]
+    tutor_site = [
+        n.event_type
+        for n in (
+            await db_session.execute(
+                select(SystemNotification).where(SystemNotification.user_id == uuid.UUID(tutor["user"]["id"]))
+            )
+        ).scalars()
+    ]
+    # За час: в чат ученика пришло (его срок на сайте - 60), хотя почта ждёт 15 минут.
+    assert "upcoming_lesson_reminder" in student_site
+    # Репетитор напоминания в чате выключил.
+    assert "upcoming_lesson_reminder" not in tutor_site

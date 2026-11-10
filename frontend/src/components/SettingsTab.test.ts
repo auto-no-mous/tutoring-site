@@ -24,7 +24,7 @@ vi.mock("@/api/users", () => ({
 }));
 
 function channel() {
-  return { enabled: true, new_booking: true, schedule_change: true, reminder: true, reminder_lead_minutes: 60 };
+  return { enabled: true, new_booking: true, schedule_change: true, reminder: true, reminder_lead_minutes: 60, login: true };
 }
 
 function user(overrides: Partial<User> = {}): User {
@@ -42,7 +42,7 @@ function user(overrides: Partial<User> = {}): User {
     is_active: true,
     timezone: "Europe/Moscow",
     telegram_chat_id: "123",
-    notification_settings: { telegram: channel(), email: channel() },
+    notification_settings: { telegram: channel(), email: channel(), site: channel() },
     auth_providers: ["password"],
     created_at: "2026-09-01T00:00:00Z",
     ...overrides,

@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import type { ChannelNotificationSettings, NotificationChannel, NotificationSettings } from "@/types/user";
+import type {
+  ChannelNotificationSettings,
+  NotificationChannel,
+  NotificationSettings,
+  NotificationTarget,
+} from "@/types/user";
 
 // Иерархические настройки уведомлений: канал - родительский пункт, под ним - что
 // именно в него слать. Раньше был один переключатель из четырёх кнопок («почта и
@@ -13,25 +18,42 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ "update:modelValue": [NotificationSettings] }>();
 
-const CHANNELS: { value: NotificationChannel; label: string }[] = [
-  { value: "telegram", label: "Telegram" },
-  { value: "email", label: "Почта" },
+type EventKey = "new_booking" | "schedule_change" | "login";
+
+// У каждого канала - только те пункты, которые в него действительно приходят. В чат
+// сайта не пишутся ни новые записи, ни входы в аккаунт: о входе там прочитает лишь
+// тот, кто уже вошёл, - поэтому он идёт только в Telegram и на почту.
+const CHANNELS: { value: NotificationTarget; label: string; events: EventKey[]; hint?: string }[] = [
+  { value: "telegram", label: "Telegram", events: ["new_booking", "schedule_change", "login"] },
+  { value: "email", label: "Почта", events: ["new_booking", "schedule_change", "login"] },
+  {
+    value: "site",
+    label: "На сайте — «Системные уведомления» в чате",
+    events: ["schedule_change"],
+    hint: "Сюда же приходят домашние задания, новости групп и прочие события сайта. О входах в аккаунт сюда не пишем — только в Telegram и на почту.",
+  },
 ];
 
-const EVENTS: { key: "new_booking" | "schedule_change"; label: string }[] = [
-  { key: "new_booking", label: "Новые записи" },
-  { key: "schedule_change", label: "Переносы и отмены" },
-];
+const EVENT_LABELS: Record<EventKey, string> = {
+  new_booking: "Новые записи",
+  schedule_change: "Переносы и отмены",
+  login: "Входы в аккаунт",
+};
 
-function update(channel: NotificationChannel, patch: Partial<ChannelNotificationSettings>): void {
+function update(channel: NotificationTarget, patch: Partial<ChannelNotificationSettings>): void {
   emit("update:modelValue", { ...props.modelValue, [channel]: { ...props.modelValue[channel], ...patch } });
 }
 
-function isOn(channel: NotificationChannel): boolean {
-  return props.available[channel] && props.modelValue[channel].enabled;
+// Чат сайта есть у всех: адреса, которого может не быть, у него нет.
+function isAvailable(channel: NotificationTarget): boolean {
+  return channel === "site" || props.available[channel];
 }
 
-function onLeadInput(channel: NotificationChannel, event: Event): void {
+function isOn(channel: NotificationTarget): boolean {
+  return isAvailable(channel) && props.modelValue[channel].enabled;
+}
+
+function onLeadInput(channel: NotificationTarget, event: Event): void {
   const value = (event.target as HTMLInputElement).valueAsNumber;
   if (Number.isFinite(value)) update(channel, { reminder_lead_minutes: value });
 }
@@ -45,27 +67,30 @@ function onLeadInput(channel: NotificationChannel, event: Event): void {
       :data-channel="channel.value"
       class="rounded-lg border border-slate-200 p-3 dark:border-slate-800"
     >
-      <label class="flex items-center gap-2 font-medium" :class="available[channel.value] ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'">
+      <label class="flex items-center gap-2 font-medium" :class="isAvailable(channel.value) ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'">
         <input
           type="checkbox"
           class="h-4 w-4"
           :checked="isOn(channel.value)"
-          :disabled="!available[channel.value]"
+          :disabled="!isAvailable(channel.value)"
           @change="update(channel.value, { enabled: ($event.target as HTMLInputElement).checked })"
         />
         {{ channel.label }}
       </label>
-      <p v-if="!available[channel.value]" class="mt-1 pl-6 text-xs text-slate-400">{{ unavailableHint[channel.value] }}</p>
+      <p v-if="channel.value !== 'site' && !available[channel.value]" class="mt-1 pl-6 text-xs text-slate-400">
+        {{ unavailableHint[channel.value] }}
+      </p>
+      <p v-if="channel.hint" class="mt-1 pl-6 text-xs text-slate-400">{{ channel.hint }}</p>
 
       <div v-if="isOn(channel.value)" class="mt-2 flex flex-col gap-2 border-l-2 border-slate-200 pl-4 text-sm dark:border-slate-700">
-        <label v-for="event in EVENTS" :key="event.key" class="flex cursor-pointer items-center gap-2">
+        <label v-for="key in channel.events" :key="key" class="flex cursor-pointer items-center gap-2">
           <input
             type="checkbox"
             class="h-4 w-4"
-            :checked="modelValue[channel.value][event.key]"
-            @change="update(channel.value, { [event.key]: ($event.target as HTMLInputElement).checked })"
+            :checked="modelValue[channel.value][key]"
+            @change="update(channel.value, { [key]: ($event.target as HTMLInputElement).checked })"
           />
-          {{ event.label }}
+          {{ EVENT_LABELS[key] }}
         </label>
         <div class="flex flex-wrap items-center gap-2">
           <label class="flex cursor-pointer items-center gap-2">

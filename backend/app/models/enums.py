@@ -106,6 +106,10 @@ class NotificationEvent(StrEnum):
     GROUP_WITHDRAWAL = "group_withdrawal"
     RECURRING_SERIES_STALLED = "recurring_series_stalled"
     NEW_MESSAGE = "new_message"
+    # Вход в аккаунт и неудачная попытка входа. Только в Telegram и на почту: в чате
+    # сайта такое сообщение прочитает лишь тот, кто уже вошёл, - злоумышленника оно
+    # не остановит, а хозяину аккаунта ничего нового не скажет.
+    LOGIN = "login"
     OTHER = "other"
 
 

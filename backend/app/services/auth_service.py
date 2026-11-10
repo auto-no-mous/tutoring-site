@@ -23,7 +23,7 @@ from app.models.tutor import TutorProfile
 from app.models.user import RefreshToken, User
 from app.schemas.auth import LoginRequest, PasswordResetConfirm, RegisterRequest, TokenPair
 from app.schemas.user import UserSettingsUpdate
-from app.services import system_notification_service
+from app.services import notification_service, system_notification_service
 from app.services.email_service import send_password_reset_email, send_verification_email
 from app.utils.names import compose_display_name
 from app.utils.time import ensure_aware, utcnow
@@ -181,8 +181,8 @@ async def authenticate_user(db: AsyncSession, payload: LoginRequest) -> User:
         if user.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
             user.locked_until = utcnow() + LOGIN_LOCKOUT_DURATION
         await db.commit()
-        await system_notification_service.notify(
-            db, user.id, SystemNotificationEvent.LOGIN_FAILED, name=user.first_name
+        await notification_service.notify_login(
+            db, user, SystemNotificationEvent.LOGIN_FAILED, name=user.first_name
         )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверная почта или пароль")
 
@@ -193,8 +193,8 @@ async def authenticate_user(db: AsyncSession, payload: LoginRequest) -> User:
         user.failed_login_attempts = 0
         user.locked_until = None
         await db.commit()
-    await system_notification_service.notify(
-        db, user.id, SystemNotificationEvent.LOGIN_SUCCESS, name=user.first_name
+    await notification_service.notify_login(
+        db, user, SystemNotificationEvent.LOGIN_SUCCESS, name=user.first_name
     )
     return user
 

@@ -59,6 +59,20 @@ async def notify(
             await _deliver(db, user, channel, event_type, title, body, email_html=email_html, email_text=email_text)
 
 
+async def notify_login(db: AsyncSession, user: User, event: SystemNotificationEvent, **params: str) -> None:
+    """Вход в аккаунт или неудачная попытка - в Telegram и на почту, не в чат сайта.
+
+    Раньше это была запись в «Системных уведомлениях», и прочитать её мог только
+    тот, кто уже вошёл: злоумышленнику она ничего не мешает, хозяину ничего не
+    сообщает. Текст - из того же шаблона, что правит админ.
+    """
+    rendered = await system_notification_service.render(db, user, event, **params)
+    if rendered is None:
+        return
+    title, body = rendered
+    await notify(db, user.id, NotificationEvent.LOGIN, title, body)
+
+
 def notification_settings(user: User) -> NotificationSettings:
     return NotificationSettings.model_validate(user.notification_settings or {})
 
@@ -254,9 +268,8 @@ async def send_upcoming_reminders(db: AsyncSession, tolerance_minutes: float = 1
     отправка отмечается по каждому каналу отдельно (BookingReminder). Репетитор и
     ученик настраивают это каждый для себя и напоминаются независимо.
 
-    Плюс запись в «Системные уведомления» на сайте: она приходит вместе с самым ранним
-    из включённых напоминаний, а если в каналах они выключены - за
-    DEFAULT_SITE_REMINDER_MINUTES (отмечается в Booking.reminder_sent_at /
+    Плюс запись в «Системные уведомления» на сайте - со своим «за сколько минут» из
+    настройки «На сайте» (отмечается в Booking.reminder_sent_at /
     student_reminder_sent_at).
 
     The default tolerance is sized against the scheduler cadence documented in
@@ -302,10 +315,6 @@ async def send_upcoming_reminders(db: AsyncSession, tolerance_minutes: float = 1
     return sent
 
 
-# «Системные уведомления» на сайте приходят и тем, кто выключил напоминания в
-# Telegram и на почту, - так было и при прежнем переключателе «Не присылать».
-DEFAULT_SITE_REMINDER_MINUTES = 60
-
 
 async def _remind(
     db: AsyncSession,
@@ -333,12 +342,10 @@ async def _remind(
     )
 
     sent = 0
-    leads: list[int] = []
     for channel in NotificationChannel:
         channel_prefs = prefs.channel(channel)
         if not channel_prefs.wants(NotificationEvent.UPCOMING_REMINDER) or not _destination(user, channel):
             continue
-        leads.append(channel_prefs.reminder_lead_minutes)
         if channel.value in already or not _is_due(start_at, now, channel_prefs.reminder_lead_minutes, tolerance_minutes):
             continue
         reminder_text, reminder_html = _reminder_email(other_name, start_msk, for_tutor=for_tutor, local_hint=hint)
@@ -351,9 +358,15 @@ async def _remind(
         db.add(BookingReminder(booking_id=booking.id, user_id=user.id, channel=channel.value, sent_at=now))
         sent += 1
 
-    site_lead = max(leads, default=DEFAULT_SITE_REMINDER_MINUTES)
+    # У чата сайта своё «за сколько минут» (Настройки -> «На сайте»).
+    site_prefs = prefs.site
+    site_lead = site_prefs.reminder_lead_minutes
     site_sent_attr = "reminder_sent_at" if for_tutor else "student_reminder_sent_at"
-    if getattr(booking, site_sent_attr) is None and _is_due(start_at, now, site_lead, tolerance_minutes):
+    if (
+        site_prefs.wants(NotificationEvent.UPCOMING_REMINDER)
+        and getattr(booking, site_sent_attr) is None
+        and _is_due(start_at, now, site_lead, tolerance_minutes)
+    ):
         name_param = {"student_name": other_name} if for_tutor else {"tutor_name": other_name}
         await system_notification_service.notify(
             db, user.id, SystemNotificationEvent.UPCOMING_LESSON_REMINDER,

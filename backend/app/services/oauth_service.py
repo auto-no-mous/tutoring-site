@@ -43,6 +43,7 @@ from app.services import (
     auth_service,
     claim_service,
     file_service,
+    notification_service,
     oauth_providers,
     system_notification_service,
 )
@@ -196,8 +197,8 @@ async def handle_callback(
         if not user.is_active:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Аккаунт заблокирован")
         tokens = await auth_service.issue_token_pair(db, user)
-        await system_notification_service.notify(
-            db, user.id, SystemNotificationEvent.LOGIN_SUCCESS, name=user.first_name
+        await notification_service.notify_login(
+            db, user, SystemNotificationEvent.LOGIN_SUCCESS, name=user.first_name
         )
         return OAuthCallbackResponse(
             status="authenticated",

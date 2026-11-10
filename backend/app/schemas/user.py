@@ -20,6 +20,8 @@ class ChannelNotificationSettings(BaseModel):
     schedule_change: bool = True
     reminder: bool = True
     reminder_lead_minutes: int = Field(default=60, ge=1, le=MAX_REMINDER_LEAD_MINUTES)
+    # Входы в аккаунт - только для Telegram и почты (см. NotificationEvent.LOGIN).
+    login: bool = True
 
     def wants(self, event: NotificationEvent) -> bool:
         if not self.enabled:
@@ -32,6 +34,7 @@ _EVENT_SWITCHES = {
     NotificationEvent.NEW_BOOKING: "new_booking",
     NotificationEvent.SCHEDULE_CHANGE: "schedule_change",
     NotificationEvent.UPCOMING_REMINDER: "reminder",
+    NotificationEvent.LOGIN: "login",
 }
 
 
@@ -43,6 +46,10 @@ class NotificationSettings(BaseModel):
 
     telegram: ChannelNotificationSettings = Field(default_factory=ChannelNotificationSettings)
     email: ChannelNotificationSettings = Field(default_factory=ChannelNotificationSettings)
+    # «Системные уведомления» в чате сайта. Не канал доставки (NotificationChannel):
+    # адреса у него нет, это запись в базе, - но настраивается так же. new_booking и
+    # login здесь не действуют: о новых записях и входах сайт в чат не пишет.
+    site: ChannelNotificationSettings = Field(default_factory=ChannelNotificationSettings)
 
     def channel(self, channel: NotificationChannel) -> ChannelNotificationSettings:
         settings: ChannelNotificationSettings = getattr(self, channel.value)

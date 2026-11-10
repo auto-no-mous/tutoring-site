@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import hash_password
 from app.models.system_notification import SystemNotification
 from app.models.user import User
+from app.services import notification_service
 from app.utils.time import utcnow
 
 
@@ -98,28 +99,97 @@ async def test_registration_sends_welcome_notification(client: AsyncClient, db_s
     assert "welcome" in events
 
 
-async def test_login_success_and_failure_notify(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_login_goes_to_telegram_and_email_not_to_site_chat(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+) -> None:
+    """В чате сайта уведомление о входе прочитает только тот, кто уже вошёл - то есть
+    оно бесполезно. Оно уходит в Telegram и на почту."""
+    sent: list[tuple[str, str]] = []
+
+    async def fake_email(to: str, subject: str, body: str, html_body=None, **kwargs) -> bool:
+        sent.append((to, subject))
+        return True
+
+    monkeypatch.setattr(notification_service, "send_email", fake_email)
     student = await _register(client, "sysnotif-login@example.com", "student")
     user_id = student["user"]["id"]
-
-    # Registration itself doesn't log the user in via /auth/login, so no login_success
-    # notification should exist yet - only the welcome message from registration.
-    events = await _events_for_user(db_session, user_id)
-    assert "login_success" not in events
 
     ok_resp = await client.post(
         "/api/v1/auth/login", json={"email": "sysnotif-login@example.com", "password": "supersecret1"}
     )
     assert ok_resp.status_code == 200, ok_resp.text
-    events = await _events_for_user(db_session, user_id)
-    assert "login_success" in events
-
     bad_resp = await client.post(
         "/api/v1/auth/login", json={"email": "sysnotif-login@example.com", "password": "wrongpassword"}
     )
     assert bad_resp.status_code == 401
+
     events = await _events_for_user(db_session, user_id)
-    assert "login_failed" in events
+    assert "login_success" not in events
+    assert "login_failed" not in events
+    assert [subject for _, subject in sent] == ["Вход в аккаунт", "Неудачная попытка входа"]
+    assert {to for to, _ in sent} == {"sysnotif-login@example.com"}
+
+
+async def test_login_alerts_can_be_switched_off_per_channel(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+) -> None:
+    sent: list[str] = []
+
+    async def fake_email(to: str, subject: str, body: str, html_body=None, **kwargs) -> bool:
+        sent.append(subject)
+        return True
+
+    monkeypatch.setattr(notification_service, "send_email", fake_email)
+    student = await _register(client, "sysnotif-login-off@example.com", "student")
+    resp = await client.patch(
+        "/api/v1/auth/me",
+        headers=student["headers"],
+        json={"notification_settings": {"email": {"enabled": True, "login": False}}},
+    )
+    assert resp.status_code == 200, resp.text
+
+    await client.post(
+        "/api/v1/auth/login", json={"email": "sysnotif-login-off@example.com", "password": "supersecret1"}
+    )
+    assert sent == []
+
+
+async def test_site_chat_notifications_follow_the_site_settings(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Чат-уведомления настраиваются, как и каналы: целиком и по событиям."""
+    tutor = await _register(client, "sysnotif-site-tutor@example.com", "tutor")
+    student = await _register(client, "sysnotif-site-student@example.com", "student")
+    ctx = await _setup_individual_booking(client, tutor, student)
+
+    # Репетитор выключил в чате только переносы и отмены.
+    resp = await client.patch(
+        "/api/v1/auth/me",
+        headers=tutor["headers"],
+        json={"notification_settings": {"site": {"enabled": True, "schedule_change": False}}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["notification_settings"]["site"]["schedule_change"] is False
+
+    resp = await client.post(
+        f"/api/v1/bookings/{ctx['booking']['id']}/cancel", headers=student["headers"], json={}
+    )
+    assert resp.status_code == 200, resp.text
+    assert "booking_cancelled_by_student" not in await _events_for_user(db_session, tutor["user"]["id"])
+
+    # Ученик выключил чат-уведомления совсем - не приходит и то, у чего своего пункта нет.
+    await client.patch(
+        "/api/v1/auth/me",
+        headers=student["headers"],
+        json={"notification_settings": {"site": {"enabled": False}}},
+    )
+    before = await _events_for_user(db_session, student["user"]["id"])
+    await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={"submission_mode": "mark_done", "student_ids": [student["user"]["id"]], "content_url": "https://example.com/x"},
+    )
+    assert await _events_for_user(db_session, student["user"]["id"]) == before
 
 
 async def test_individual_booking_cancel_notifies_both_directions(

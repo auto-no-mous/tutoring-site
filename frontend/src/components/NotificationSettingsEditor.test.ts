@@ -5,11 +5,11 @@ import NotificationSettingsEditor from "@/components/NotificationSettingsEditor.
 import type { ChannelNotificationSettings, NotificationSettings } from "@/types/user";
 
 function channel(overrides: Partial<ChannelNotificationSettings> = {}): ChannelNotificationSettings {
-  return { enabled: true, new_booking: true, schedule_change: true, reminder: true, reminder_lead_minutes: 60, ...overrides };
+  return { enabled: true, new_booking: true, schedule_change: true, reminder: true, reminder_lead_minutes: 60, login: true, ...overrides };
 }
 
 function mountEditor(
-  settings: NotificationSettings = { telegram: channel(), email: channel() },
+  settings: NotificationSettings = { telegram: channel(), email: channel(), site: channel() },
   available = { telegram: true, email: true },
 ) {
   return mount(NotificationSettingsEditor, {
@@ -27,7 +27,7 @@ function block(wrapper: ReturnType<typeof mount>, name: string) {
 
 describe("NotificationSettingsEditor", () => {
   it("под включённым каналом показывает его пункты, под выключенным - нет", () => {
-    const wrapper = mountEditor({ telegram: channel(), email: channel({ enabled: false }) });
+    const wrapper = mountEditor({ telegram: channel(), email: channel({ enabled: false }), site: channel() });
 
     expect(block(wrapper, "telegram").text()).toContain("Новые записи");
     expect(block(wrapper, "telegram").text()).toContain("Переносы и отмены");
@@ -58,7 +58,7 @@ describe("NotificationSettingsEditor", () => {
   });
 
   it("поле минут неактивно, пока напоминание выключено", () => {
-    const wrapper = mountEditor({ telegram: channel({ reminder: false }), email: channel() });
+    const wrapper = mountEditor({ telegram: channel({ reminder: false }), email: channel(), site: channel() });
 
     expect(block(wrapper, "telegram").find('input[type="number"]').attributes("disabled")).toBeDefined();
     expect(block(wrapper, "email").find('input[type="number"]').attributes("disabled")).toBeUndefined();
@@ -72,5 +72,31 @@ describe("NotificationSettingsEditor", () => {
     expect((parent.element as HTMLInputElement).checked).toBe(false);
     expect(block(wrapper, "telegram").text()).toContain("Telegram не подключён");
     expect(block(wrapper, "telegram").text()).not.toContain("Новые записи");
+  });
+
+  it("чат сайта настраивается всегда, но без новых записей и входов", () => {
+    const wrapper = mountEditor(undefined, { telegram: false, email: false });
+
+    const site = block(wrapper, "site");
+    expect(site.find('input[type="checkbox"]').attributes("disabled")).toBeUndefined();
+    expect(site.text()).toContain("Переносы и отмены");
+    expect(site.text()).toContain("Напоминание о занятии за");
+    expect(site.text()).not.toContain("Новые записи");
+    expect(site.text()).not.toContain("Входы в аккаунт");
+  });
+
+  it("входы в аккаунт выключаются отдельно в Telegram и на почте", async () => {
+    const wrapper = mountEditor();
+    expect(block(wrapper, "telegram").text()).toContain("Входы в аккаунт");
+
+    const login = block(wrapper, "email")
+      .findAll("label")
+      .find((l) => l.text() === "Входы в аккаунт")!
+      .find("input");
+    await login.setValue(false);
+
+    const emitted = wrapper.emitted("update:modelValue")!.at(-1)![0] as NotificationSettings;
+    expect(emitted.email.login).toBe(false);
+    expect(emitted.telegram.login).toBe(true);
   });
 });
