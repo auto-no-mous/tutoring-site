@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import BookingCard from "@/components/BookingCard.vue";
 import GroupOccurrenceCard from "@/components/GroupOccurrenceCard.vue";
 import BookingsTab from "@/components/student/BookingsTab.vue";
+import NewBookingModal from "@/components/student/NewBookingModal.vue";
 import ScheduleItemModal from "@/components/student/ScheduleItemModal.vue";
 
 const listMyBookings = vi.fn(async (): Promise<unknown[]> => []);
@@ -61,7 +62,7 @@ function occurrence(offsetHours: number, overrides: Record<string, unknown> = {}
 function mountTab() {
   setActivePinia(createPinia());
   return mount(BookingsTab, {
-    global: { stubs: { BookingCard: true, GroupOccurrenceCard: true, ScheduleItemModal: { props: ["startAt", "endAt", "isGroup"], template: "<div><slot /></div>" }, RescheduleModal: true } },
+    global: { stubs: { BookingCard: true, GroupOccurrenceCard: true, ScheduleItemModal: { props: ["startAt", "endAt", "isGroup"], template: "<div><slot /></div>" }, RescheduleModal: true, NewBookingModal: true } },
   });
 }
 
@@ -115,5 +116,32 @@ describe("student BookingsTab: недельный вид", () => {
     const bookingRow = wrapper.findAll("[data-day] button").find((b) => b.text().includes("Математика"))!;
     await bookingRow.trigger("click");
     expect(wrapper.findComponent(BookingCard).props("booking").id).toBe("bk-2");
+  });
+});
+
+describe("student BookingsTab: запись из кабинета", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listMyBookings.mockResolvedValue([booking(-24 * 3)]);
+    myOccurrences.mockResolvedValue([]);
+  });
+
+  it("кнопка в одной строке с переключателем вида открывает окно записи с занятиями ученика", async () => {
+    const wrapper = mountTab();
+    await flushPromises();
+
+    const toggle = wrapper.find('[aria-label="Вид расписания"]');
+    const button = toggle.element.parentElement!.querySelector("button")!;
+    expect(button.textContent).toContain("Добавить запись на занятие");
+
+    button.click();
+    await flushPromises();
+    const modal = wrapper.findComponent(NewBookingModal);
+    expect(modal.props("bookings")).toHaveLength(1);
+
+    listMyBookings.mockResolvedValue([booking(-24 * 3), booking(48)]);
+    modal.vm.$emit("booked");
+    await flushPromises();
+    expect(listMyBookings).toHaveBeenCalledTimes(2);
   });
 });

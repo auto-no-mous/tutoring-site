@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarDays, List } from "lucide-vue-next";
+import { CalendarDays, CalendarPlus, List } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
 
 import { listMyBookings } from "@/api/bookings";
@@ -10,6 +10,7 @@ import BookingScheduleGroups from "@/components/BookingScheduleGroups.vue";
 import GroupOccurrenceCard from "@/components/GroupOccurrenceCard.vue";
 import RescheduleModal from "@/components/RescheduleModal.vue";
 import ScheduleWeekGrid from "@/components/ScheduleWeekGrid.vue";
+import NewBookingModal from "@/components/student/NewBookingModal.vue";
 import ScheduleItemModal from "@/components/student/ScheduleItemModal.vue";
 import { useToastStore } from "@/stores/toast";
 import type { Booking } from "@/types/booking";
@@ -25,6 +26,8 @@ const occurrences = ref<StudentGroupOccurrence[]>([]);
 // вкладку, а карточки разбирают список сами.
 const whiteboards = ref<Whiteboard[]>([]);
 const reschedulingBooking = ref<Booking | null>(null);
+// Запись к своему репетитору прямо отсюда, а не через поиск на главной.
+const showNewBooking = ref(false);
 
 // Дни группируются по московскому календарю, как и само время занятий (раздел 6):
 // по местному календарю занятие в 23:00 МСК уехало бы под заголовок следующего дня.
@@ -122,29 +125,38 @@ onMounted(load);
 
 <template>
   <div class="flex flex-col gap-6" :class="scheduleLayout === 'list' ? 'max-w-2xl' : ''">
-    <div
-      class="inline-flex self-end rounded-md border border-slate-300 p-0.5 text-sm dark:border-slate-700"
-      role="group"
-      aria-label="Вид расписания"
-    >
+    <div class="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        class="inline-flex items-center gap-1.5 rounded px-2.5 py-1"
-        :class="scheduleLayout === 'list' ? 'bg-brand-500 text-white' : 'text-slate-500'"
-        :aria-pressed="scheduleLayout === 'list'"
-        @click="scheduleLayout = 'list'"
+        class="inline-flex items-center gap-1.5 rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600"
+        @click="showNewBooking = true"
       >
-        <List class="h-4 w-4" />Список
+        <CalendarPlus class="h-4 w-4" />Добавить запись на занятие
       </button>
-      <button
-        type="button"
-        class="inline-flex items-center gap-1.5 rounded px-2.5 py-1"
-        :class="scheduleLayout === 'week' ? 'bg-brand-500 text-white' : 'text-slate-500'"
-        :aria-pressed="scheduleLayout === 'week'"
-        @click="scheduleLayout = 'week'"
+      <div
+        class="ml-auto inline-flex rounded-md border border-slate-300 p-0.5 text-sm dark:border-slate-700"
+        role="group"
+        aria-label="Вид расписания"
       >
-        <CalendarDays class="h-4 w-4" />Неделя
-      </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded px-2.5 py-1"
+          :class="scheduleLayout === 'list' ? 'bg-brand-500 text-white' : 'text-slate-500'"
+          :aria-pressed="scheduleLayout === 'list'"
+          @click="scheduleLayout = 'list'"
+        >
+          <List class="h-4 w-4" />Список
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded px-2.5 py-1"
+          :class="scheduleLayout === 'week' ? 'bg-brand-500 text-white' : 'text-slate-500'"
+          :aria-pressed="scheduleLayout === 'week'"
+          @click="scheduleLayout = 'week'"
+        >
+          <CalendarDays class="h-4 w-4" />Неделя
+        </button>
+      </div>
     </div>
 
     <section v-if="scheduleLayout === 'week'">
@@ -226,6 +238,8 @@ onMounted(load);
         @changed="load"
       />
     </ScheduleItemModal>
+
+    <NewBookingModal v-if="showNewBooking" :bookings="bookings" @close="showNewBooking = false" @booked="load" />
 
     <RescheduleModal
       v-if="reschedulingBooking"

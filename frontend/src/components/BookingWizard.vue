@@ -17,6 +17,10 @@ const props = defineProps<{
   lessonTypes: LessonType[];
 }>();
 
+// booked - запись создана: окно записи из кабинета ученика (NewBookingModal) по нему
+// обновляет расписание под собой.
+const emit = defineEmits<{ booked: [] }>();
+
 const auth = useAuthStore();
 
 const step = ref<1 | 2 | 3 | 4>(1);
@@ -83,6 +87,7 @@ async function confirm(): Promise<void> {
     repeatFailed.value = repeatWeekly.value && booking.recurring_created === 0;
     showRepeatFailedModal.value = repeatFailed.value;
     success.value = true;
+    emit("booked");
   } catch {
     error.value = "Не удалось записаться. Возможно, время уже занято — попробуйте выбрать другое.";
   } finally {
