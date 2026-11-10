@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool, StaticPool
 
 from app.db.base import Base
-from app.db.session import get_db
+from app.db.session import get_db, use_unicode_lower_on_sqlite
 from app.main import app
 from app import models  # noqa: F401
 
@@ -39,6 +39,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
+        use_unicode_lower_on_sqlite(engine)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 

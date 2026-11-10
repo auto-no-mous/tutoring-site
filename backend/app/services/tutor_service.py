@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import LessonFormat
@@ -82,11 +82,33 @@ async def set_photo(db: AsyncSession, profile: TutorProfile, photo_url: str) -> 
     return profile
 
 
+def _fold(text: str) -> str:
+    # «ё» и «е» в именах пишут как придётся: «Петр» должен находить «Пётр».
+    return text.lower().replace("ё", "е")
+
+
+def _folded(column):  # type: ignore[no-untyped-def]
+    return func.replace(func.lower(func.coalesce(column, "")), "ё", "е")
+
+
+def _name_terms(name_query: str | None) -> list[str]:
+    """Слова поиска по имени, готовые для LIKE: % и _ в них - буквальные символы."""
+    if not name_query:
+        return []
+    terms = []
+    for word in name_query.split():
+        word = _fold(word).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        terms.append(word)
+    # Больше пяти слов в ФИО не бывает - лишние только раздували бы запрос.
+    return terms[:5]
+
+
 async def search_catalog(
     db: AsyncSession,
     subject_id: uuid.UUID | None = None,
     price_min: float | None = None,
     price_max: float | None = None,
+    name_query: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[dict], int]:
@@ -121,6 +143,17 @@ async def search_catalog(
         query = query.where(price_agg.c.hourly_price >= price_min)
     if price_max is not None:
         query = query.where(price_agg.c.hourly_price <= price_max)
+    for term in _name_terms(name_query):
+        # Каждое слово должно найтись хоть в одной части имени: «анна иван» находит
+        # Анну Ивановну, в каком бы порядке и регистре их ни ввели.
+        pattern = f"%{term}%"
+        query = query.where(
+            or_(
+                _folded(User.first_name).like(pattern, escape="\\"),
+                _folded(User.last_name).like(pattern, escape="\\"),
+                _folded(User.patronymic).like(pattern, escape="\\"),
+            )
+        )
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
 

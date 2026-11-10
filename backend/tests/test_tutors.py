@@ -569,3 +569,54 @@ async def test_profile_video_is_validated_and_exposed_as_embed(client: AsyncClie
     assert cleared.json()["video_url"] is None
     public_after = (await client.get(f"/api/v1/tutors/{tutor_id}")).json()
     assert public_after["video_url"] is None and public_after["video_embed_url"] is None
+
+
+async def _named_tutor(client: AsyncClient, email: str, first: str, last: str, patronymic: str | None, price: int) -> str:
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "supersecret1",
+            "first_name": first,
+            "last_name": last,
+            "patronymic": patronymic,
+            "role": "tutor",
+            "pd_consent": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    headers = {"Authorization": f"Bearer {resp.json()['tokens']['access_token']}"}
+    await client.post(
+        "/api/v1/tutors/me/lesson-types",
+        headers=headers,
+        json={"name": "Занятие", "format": "individual", "duration_minutes": 60, "price": price},
+    )
+    return (await client.get("/api/v1/tutors/me", headers=headers)).json()["id"]
+
+
+async def _found(client: AsyncClient, **params) -> set[str]:
+    resp = await client.get("/api/v1/tutors", params=params)
+    assert resp.status_code == 200, resp.text
+    return {item["id"] for item in resp.json()["items"]}
+
+
+async def test_catalog_search_by_part_of_the_name(client: AsyncClient) -> None:
+    anna = await _named_tutor(client, "search-anna@example.com", "Анна", "Иванова", "Сергеевна", 1000)
+    petr = await _named_tutor(client, "search-petr@example.com", "Пётр", "Смирнов", "Иванович", 2500)
+
+    # Часть имени, любой регистр.
+    assert await _found(client, q="анн") == {anna}
+    # Фамилия, отчество - тоже.
+    assert await _found(client, q="СМИР") == {petr}
+    assert await _found(client, q="сергеев") == {anna}
+    # «Иван» есть и в фамилии Анны, и в отчестве Петра.
+    assert await _found(client, q="иван") == {anna, petr}
+    # Несколько слов - все должны найтись, в любом порядке.
+    assert await _found(client, q="иван пётр") == {petr}
+    # «е» вместо «ё».
+    assert await _found(client, q="петр") == {petr}
+    # Складывается с фильтром цены.
+    assert await _found(client, q="иван", price_min=2000) == {petr}
+    # Символы LIKE ищутся буквально, а не как шаблон.
+    assert await _found(client, q="%") == set()
+    assert await _found(client, q="нет-такого") == set()

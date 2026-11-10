@@ -70,7 +70,7 @@ describe("CatalogView: фильтр цены", () => {
     await flushPromises();
     await wrapper.findAll("button").find((b) => b.text().includes("Фильтры"))!.trigger("click");
 
-    await wrapper.find('select[aria-label="Цена за час"]').setValue("1000-1400");
+    await wrapper.find('select[aria-label="Цена за час"]').setValue("1000-1499");
     await flushPromises();
 
     const params = getCatalog.mock.calls.at(-1)![0];
@@ -79,6 +79,33 @@ describe("CatalogView: фильтр цены", () => {
     expect(wrapper.text()).toContain("Репетитор a");
     expect(wrapper.text()).toContain("Репетитор b");
     expect(wrapper.text()).not.toContain("Репетиторы не найдены");
+  });
+
+  it("кнопка называется «Фильтры и поиск», поиск по имени - в её строке и складывается с ценой", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountCatalog();
+    await flushPromises();
+    const toggle = wrapper.findAll("button").find((b) => b.text().includes("Фильтры и поиск"))!;
+    expect(wrapper.find('input[aria-label="Поиск по имени"]').exists()).toBe(false);
+    await toggle.trigger("click");
+
+    const input = wrapper.find('input[aria-label="Поиск по имени"]');
+    expect(input.element.parentElement!.parentElement).toBe(toggle.element.parentElement);
+
+    await wrapper.find('select[aria-label="Цена за час"]').setValue("500-999");
+    await flushPromises();
+    const callsBefore = getCatalog.mock.calls.length;
+    await input.setValue("ива");
+    await input.setValue("иван");
+    // Пока печатают - запросов нет, после паузы - один.
+    expect(getCatalog.mock.calls.length).toBe(callsBefore);
+    vi.advanceTimersByTime(300);
+    await flushPromises();
+    expect(getCatalog.mock.calls.length).toBe(callsBefore + 1);
+    const params = getCatalog.mock.calls.at(-1)![0];
+    expect(params.q).toBe("иван");
+    expect(params.price_min).toBe(500);
+    vi.useRealTimers();
   });
 
   it("одно поле с пятью диапазонами, крайние - открытые", async () => {
@@ -90,8 +117,8 @@ describe("CatalogView: фильтр цены", () => {
     expect(select.findAll("option").map((o) => o.text())).toEqual([
       "Любая цена",
       "менее 500 ₽",
-      "500 – 900 ₽",
-      "1000 – 1400 ₽",
+      "500 – 999 ₽",
+      "1000 – 1499 ₽",
       "1500 – 2000 ₽",
       "более 2000 ₽",
     ]);

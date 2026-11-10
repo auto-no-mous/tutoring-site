@@ -1,7 +1,7 @@
 import datetime as dt
 import uuid
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.enums import LessonFormat, UserRole
@@ -93,13 +93,15 @@ async def catalog(
     subject_id: uuid.UUID | None = None,
     price_min: float | None = None,
     price_max: float | None = None,
+    q: str | None = Query(None, max_length=100),
     page: int = 1,
     page_size: int = 20,
 ) -> TutorCatalogPageOut:
     if page < 1 or not (1 <= page_size <= 100):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Некорректные параметры страницы")
     items, total = await tutor_service.search_catalog(
-        db, subject_id=subject_id, price_min=price_min, price_max=price_max, page=page, page_size=page_size
+        db, subject_id=subject_id, price_min=price_min, price_max=price_max, name_query=q,
+        page=page, page_size=page_size,
     )
     return TutorCatalogPageOut(
         items=[TutorCatalogItem(**item) for item in items], total=total, page=page, page_size=page_size

@@ -24,6 +24,8 @@ export async function getCatalog(params: {
   subject_id?: string;
   price_min?: number;
   price_max?: number;
+  // Часть имени, отчества или фамилии.
+  q?: string;
   page?: number;
   page_size?: number;
 }) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, SlidersHorizontal, Star } from "lucide-vue-next";
+import { ChevronDown, Search, SlidersHorizontal, Star } from "lucide-vue-next";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
@@ -20,12 +20,12 @@ const router = useRouter();
 const PAGE_SIZE = 20;
 // Одно поле цены с готовыми диапазонами вместо пары «от»/«до»: пару легко собрать
 // противоречивой, а диапазоны понятны с первого взгляда. Цена - за час (сервер
-// пересчитывает занятия любой длины). Подписи круглые, а границы идут встык, чтобы
-// цена вроде 950 или 1450 ₽/час не выпадала между диапазонами.
+// пересчитывает занятия любой длины). Диапазоны идут встык, чтобы цена вроде 950 или
+// 1450 ₽/час не выпадала между ними.
 const PRICE_RANGES = [
   { key: "lt500", label: "менее 500 ₽", max: 499.99 },
-  { key: "500-900", label: "500 – 900 ₽", min: 500, max: 999.99 },
-  { key: "1000-1400", label: "1000 – 1400 ₽", min: 1000, max: 1499.99 },
+  { key: "500-999", label: "500 – 999 ₽", min: 500, max: 999.99 },
+  { key: "1000-1499", label: "1000 – 1499 ₽", min: 1000, max: 1499.99 },
   { key: "1500-2000", label: "1500 – 2000 ₽", min: 1500, max: 2000 },
   { key: "gt2000", label: "более 2000 ₽", min: 2000.01 },
 ] as const satisfies readonly { key: string; label: string; min?: number; max?: number }[];
@@ -36,6 +36,18 @@ const page = ref(0);
 const subjects = ref<CatalogSubject[]>([]);
 const subjectId = ref("");
 const priceRange = ref("");
+// Поиск по части имени, отчества или фамилии - вместе с предметом и ценой.
+const nameQuery = ref("");
+// В запрос уходит то, что ввели, с паузой: иначе каждый набранный символ - новый
+// запрос и мигание списка.
+const appliedNameQuery = ref("");
+let nameQueryTimer: number | undefined;
+watch(nameQuery, (value) => {
+  window.clearTimeout(nameQueryTimer);
+  nameQueryTimer = window.setTimeout(() => {
+    appliedNameQuery.value = value.trim();
+  }, 300);
+});
 const isLoading = ref(false);
 const isLoadingMore = ref(false);
 const sentinel = ref<HTMLElement | null>(null);
@@ -62,6 +74,7 @@ async function fetchPage(): Promise<void> {
     subject_id: subjectId.value || undefined,
     price_min: range && "min" in range ? range.min : undefined,
     price_max: range && "max" in range ? range.max : undefined,
+    q: appliedNameQuery.value || undefined,
     page: page.value + 1,
     page_size: PAGE_SIZE,
   });
@@ -100,7 +113,7 @@ async function search(): Promise<void> {
 
 // Results update the moment a filter changes - no separate "Найти" button. Not
 // `immediate`, so this doesn't double up with the explicit search() in onMounted.
-watch([subjectId, priceRange], search);
+watch([subjectId, priceRange, appliedNameQuery], search);
 
 function scrollToCatalog(): void {
   const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -135,6 +148,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.clearTimeout(nameQueryTimer);
   observer?.disconnect();
 });
 </script>
@@ -156,15 +170,29 @@ onBeforeUnmount(() => {
       </p>
 
       <div class="mt-6">
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white/70 px-3.5 py-2 text-base font-medium transition-colors hover:border-brand-400 hover:text-brand-700 dark:border-slate-700 dark:bg-transparent dark:hover:border-brand-500 dark:hover:text-brand-300"
-          @click="showFilters = !showFilters"
-        >
-          <SlidersHorizontal class="h-4 w-4" />
-          Фильтры
-          <ChevronDown class="h-4 w-4 transition-transform duration-300" :class="{ 'rotate-180': showFilters }" />
-        </button>
+        <!-- Поиск по имени - в строке с кнопкой, предмет и цена - под ней. -->
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white/70 px-3.5 py-2 text-base font-medium transition-colors hover:border-brand-400 hover:text-brand-700 dark:border-slate-700 dark:bg-transparent dark:hover:border-brand-500 dark:hover:text-brand-300"
+            :aria-expanded="showFilters"
+            @click="showFilters = !showFilters"
+          >
+            <SlidersHorizontal class="h-4 w-4" />
+            Фильтры и поиск
+            <ChevronDown class="h-4 w-4 transition-transform duration-300" :class="{ 'rotate-180': showFilters }" />
+          </button>
+          <div v-if="showFilters" class="relative min-w-56 flex-1">
+            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              v-model="nameQuery"
+              type="search"
+              placeholder="Поиск по имени, отчеству или фамилии"
+              aria-label="Поиск по имени"
+              class="filter-select w-full pl-9!"
+            />
+          </div>
+        </div>
         <Transition name="collapse">
           <div v-if="showFilters">
             <div class="collapse-inner">
