@@ -18,19 +18,24 @@ import type { TutorCatalogItem } from "@/types/tutor";
 const router = useRouter();
 
 const PAGE_SIZE = 20;
-const PRICE_STEPS = [500, 750, 1000, 1500, 2000, 2500, 3000];
-// "Цена от": каждый пункт, плюс верхний открытый порог.
-const MIN_OPTIONS = [...PRICE_STEPS.map((v) => ({ label: `${v} ₽`, value: v })), { label: "более 3000 ₽", value: 3000.01 }];
-// "Цена до": нижний открытый порог, плюс каждый пункт.
-const MAX_OPTIONS = [{ label: "менее 500 ₽", value: 499.99 }, ...PRICE_STEPS.map((v) => ({ label: `${v} ₽`, value: v }))];
+// Одно поле цены с готовыми диапазонами вместо пары «от»/«до»: пару легко собрать
+// противоречивой, а диапазоны понятны с первого взгляда. Цена - за час (сервер
+// пересчитывает занятия любой длины). Подписи круглые, а границы идут встык, чтобы
+// цена вроде 950 или 1450 ₽/час не выпадала между диапазонами.
+const PRICE_RANGES = [
+  { key: "lt500", label: "менее 500 ₽", max: 499.99 },
+  { key: "500-900", label: "500 – 900 ₽", min: 500, max: 999.99 },
+  { key: "1000-1400", label: "1000 – 1400 ₽", min: 1000, max: 1499.99 },
+  { key: "1500-2000", label: "1500 – 2000 ₽", min: 1500, max: 2000 },
+  { key: "gt2000", label: "более 2000 ₽", min: 2000.01 },
+] as const satisfies readonly { key: string; label: string; min?: number; max?: number }[];
 
 const tutors = ref<TutorCatalogItem[]>([]);
 const total = ref(0);
 const page = ref(0);
 const subjects = ref<CatalogSubject[]>([]);
 const subjectId = ref("");
-const priceMin = ref("");
-const priceMax = ref("");
+const priceRange = ref("");
 const isLoading = ref(false);
 const isLoadingMore = ref(false);
 const sentinel = ref<HTMLElement | null>(null);
@@ -46,32 +51,48 @@ function hasMore(): boolean {
   return page.value === 0 || tutors.value.length < total.value;
 }
 
+// Номер текущего поиска: ответ на запрос со старыми фильтрами, пришедший после
+// смены фильтра, отбрасывается, а не дописывается к новому списку.
+let generation = 0;
+
+async function fetchPage(): Promise<void> {
+  const current = generation;
+  const range = PRICE_RANGES.find((r) => r.key === priceRange.value);
+  const result = await getCatalog({
+    subject_id: subjectId.value || undefined,
+    price_min: range && "min" in range ? range.min : undefined,
+    price_max: range && "max" in range ? range.max : undefined,
+    page: page.value + 1,
+    page_size: PAGE_SIZE,
+  });
+  if (current !== generation) return;
+  tutors.value.push(...result.items);
+  total.value = result.total;
+  page.value = result.page;
+}
+
 async function loadMore(): Promise<void> {
   if (isLoading.value || isLoadingMore.value || !hasMore()) return;
   isLoadingMore.value = true;
   try {
-    const result = await getCatalog({
-      subject_id: subjectId.value || undefined,
-      price_min: priceMin.value ? Number(priceMin.value) : undefined,
-      price_max: priceMax.value ? Number(priceMax.value) : undefined,
-      page: page.value + 1,
-      page_size: PAGE_SIZE,
-    });
-    tutors.value.push(...result.items);
-    total.value = result.total;
-    page.value = result.page;
+    await fetchPage();
   } finally {
     isLoadingMore.value = false;
   }
 }
 
+// Новый поиск загружает первую страницу сам, а не через loadMore: тот при
+// isLoading сразу выходит, и раньше смена любого фильтра очищала список и больше
+// ничего не грузила - «Репетиторы не найдены», хотя подходящие были. Первая загрузка
+// работала лишь потому, что её подхватывал наблюдатель прокрутки.
 async function search(): Promise<void> {
+  generation += 1;
   isLoading.value = true;
   tutors.value = [];
   total.value = 0;
   page.value = 0;
   try {
-    await loadMore();
+    await fetchPage();
   } finally {
     isLoading.value = false;
   }
@@ -79,7 +100,7 @@ async function search(): Promise<void> {
 
 // Results update the moment a filter changes - no separate "Найти" button. Not
 // `immediate`, so this doesn't double up with the explicit search() in onMounted.
-watch([subjectId, priceMin, priceMax], search);
+watch([subjectId, priceRange], search);
 
 function scrollToCatalog(): void {
   const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -152,13 +173,9 @@ onBeforeUnmount(() => {
                   <option value="">Все предметы</option>
                   <option v-for="subject in subjects" :key="subject.id" :value="subject.id">{{ subject.name }}</option>
                 </select>
-                <select v-model="priceMin" class="filter-select w-40">
-                  <option value="">Цена от</option>
-                  <option v-for="opt in MIN_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                </select>
-                <select v-model="priceMax" class="filter-select w-40">
-                  <option value="">Цена до</option>
-                  <option v-for="opt in MAX_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                <select v-model="priceRange" class="filter-select w-48" aria-label="Цена за час">
+                  <option value="">Любая цена</option>
+                  <option v-for="range in PRICE_RANGES" :key="range.key" :value="range.key">{{ range.label }}</option>
                 </select>
               </div>
             </div>
