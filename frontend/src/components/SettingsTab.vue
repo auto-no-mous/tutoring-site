@@ -12,7 +12,9 @@ import { listMyRecurringSeries, stopSeries } from "@/api/bookings";
 import { getMyProfile, updateMyProfile } from "@/api/tutors";
 import {
   deleteMyPhoto,
+  disconnectVk,
   getTelegramLinkToken,
+  getVkLink,
   resendVerificationEmail,
   updateMySettings,
   uploadMyPhoto,
@@ -215,6 +217,49 @@ async function checkTelegramLinked(): Promise<void> {
   }
 }
 
+// --- ВКонтакте: привязка как у Telegram, через диалог с сообществом -------------
+
+const vkLink = ref<{ code: string; link: string } | null>(null);
+const vkLinkError = ref("");
+const isLinkingVk = ref(false);
+const isCheckingVk = ref(false);
+
+async function connectVk(): Promise<void> {
+  isLinkingVk.value = true;
+  vkLinkError.value = "";
+  try {
+    const { code, link } = await getVkLink();
+    if (!link) {
+      vkLinkError.value = "ВКонтакте пока не настроен на сервере — обратитесь к администратору.";
+      return;
+    }
+    vkLink.value = { code, link };
+    window.open(link, "_blank");
+  } finally {
+    isLinkingVk.value = false;
+  }
+}
+
+async function checkVkLinked(): Promise<void> {
+  isCheckingVk.value = true;
+  try {
+    await auth.fetchCurrentUser();
+    if (auth.user?.vk_connected) {
+      vkLink.value = null;
+      // Как и с Telegram: сервер сам включил канал - забираем это в форму.
+      if (notificationSettings.value) {
+        notificationSettings.value.vk.enabled = auth.user.notification_settings.vk.enabled;
+      }
+    }
+  } finally {
+    isCheckingVk.value = false;
+  }
+}
+
+async function onDisconnectVk(): Promise<void> {
+  auth.user = await disconnectVk();
+}
+
 async function disconnectTelegram(): Promise<void> {
   const updated = await updateMySettings({ telegram_chat_id: null });
   auth.user = updated;
@@ -357,6 +402,37 @@ onMounted(load);
         </div>
       </div>
 
+      <div class="flex flex-col gap-1 text-sm" data-vk-link>
+        ВКонтакте (для уведомлений)
+        <div v-if="auth.user?.vk_connected" class="flex items-center gap-2">
+          <span class="text-green-600 dark:text-green-400">Подключён</span>
+          <button type="button" class="text-xs text-slate-500 underline" @click="onDisconnectVk">Отключить</button>
+        </div>
+        <div v-else class="flex flex-col gap-1">
+          <button
+            type="button"
+            :disabled="isLinkingVk"
+            class="w-fit rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-700"
+            @click="connectVk"
+          >
+            Подключить ВКонтакте
+          </button>
+          <div v-if="vkLink" class="flex flex-col gap-1 text-xs">
+            <span class="text-slate-400">
+              В открывшемся диалоге с сообществом нажмите «Начать», затем вернитесь сюда. Если бот не ответил,
+              отправьте ему код <b class="font-mono text-slate-600 dark:text-slate-300">{{ vkLink.code }}</b>.
+            </span>
+            <span class="flex items-center gap-2">
+              <a :href="vkLink.link" target="_blank" class="text-slate-500 underline">Открыть диалог ещё раз</a>
+              <button type="button" :disabled="isCheckingVk" class="text-slate-500 underline disabled:opacity-50" @click="checkVkLinked">
+                Проверить
+              </button>
+            </span>
+          </div>
+          <span v-if="vkLinkError" class="text-xs text-red-600 dark:text-red-400">{{ vkLinkError }}</span>
+        </div>
+      </div>
+
       <div v-if="oauthProviders.length" class="flex flex-col gap-2 text-sm">
         <span>Способы входа</span>
         <div class="flex items-center gap-2">
@@ -399,10 +475,15 @@ onMounted(load);
         <span>Уведомления</span>
         <NotificationSettingsEditor
           v-model="notificationSettings"
-          :available="{ telegram: Boolean(auth.user?.telegram_chat_id), email: Boolean(auth.user?.email) }"
+          :available="{
+            telegram: Boolean(auth.user?.telegram_chat_id),
+            email: Boolean(auth.user?.email),
+            vk: Boolean(auth.user?.vk_connected),
+          }"
           :unavailable-hint="{
             telegram: 'Telegram не подключён — кнопка «Подключить Telegram» выше.',
             email: 'Почта не указана — впишите её в поле «Почта» выше и сохраните.',
+            vk: 'ВКонтакте не подключён — кнопка «Подключить ВКонтакте» выше.',
           }"
         />
         <p class="text-xs text-slate-500">

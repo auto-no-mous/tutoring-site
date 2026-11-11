@@ -1,5 +1,5 @@
 export type UserRole = "tutor" | "student" | "admin";
-export type NotificationChannel = "telegram" | "email";
+export type NotificationChannel = "telegram" | "email" | "vk";
 
 // Куда приходят уведомления: каналы доставки и чат «Системные уведомления» на сайте.
 // У сайта нет адреса, поэтому он не NotificationChannel, но настраивается так же.
@@ -35,6 +35,8 @@ export interface User {
   is_active: boolean;
   timezone: string;
   telegram_chat_id: string | null;
+  // Подключён ли ВКонтакте (сам адрес сервер не отдаёт).
+  vk_connected: boolean;
   notification_settings: NotificationSettings;
   // Чем можно войти в аккаунт: "password" и/или провайдеры ("vk", "yandex").
   auth_providers: string[];

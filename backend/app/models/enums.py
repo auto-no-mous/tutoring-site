@@ -96,6 +96,7 @@ class ChatThreadType(StrEnum):
 class NotificationChannel(StrEnum):
     TELEGRAM = "telegram"
     EMAIL = "email"
+    VK = "vk"
 
 
 class NotificationEvent(StrEnum):

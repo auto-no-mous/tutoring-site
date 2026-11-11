@@ -46,6 +46,7 @@ class NotificationSettings(BaseModel):
 
     telegram: ChannelNotificationSettings = Field(default_factory=ChannelNotificationSettings)
     email: ChannelNotificationSettings = Field(default_factory=ChannelNotificationSettings)
+    vk: ChannelNotificationSettings = Field(default_factory=ChannelNotificationSettings)
     # «Системные уведомления» в чате сайта. Не канал доставки (NotificationChannel):
     # адреса у него нет, это запись в базе, - но настраивается так же. new_booking и
     # login здесь не действуют: о новых записях и входах сайт в чат не пишет.
@@ -72,6 +73,9 @@ class UserOut(BaseModel):
     is_active: bool
     timezone: str
     telegram_chat_id: str | None
+    # Подключён ли ВКонтакте. Сам адрес наружу не отдаём: в отличие от Telegram,
+    # вписать его вручную нельзя - только привязка через сообщество.
+    vk_connected: bool = False
     notification_settings: NotificationSettings
     # Чем можно войти в аккаунт: "password" и/или провайдеры (vk, yandex) - см.
     # User.auth_providers. Раздел "Способы входа" в настройках строится по нему.

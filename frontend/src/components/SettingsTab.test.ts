@@ -15,9 +15,14 @@ vi.mock("@/api/auth", () => ({
 }));
 vi.mock("@/api/bookings", () => ({ listMyRecurringSeries: vi.fn(async () => []), stopSeries: vi.fn() }));
 vi.mock("@/api/tutors", () => ({ getMyProfile: vi.fn(async () => null), updateMyProfile: vi.fn() }));
+const getVkLink = vi.fn(async () => ({ code: "ABCD2345", link: "https://vk.me/mytutorru?ref=ABCD2345" }));
+const disconnectVk = vi.fn(async () => user({ vk_connected: false }));
+
 vi.mock("@/api/users", () => ({
   deleteMyPhoto: vi.fn(),
+  disconnectVk: () => disconnectVk(),
   getTelegramLinkToken: vi.fn(),
+  getVkLink: () => getVkLink(),
   resendVerificationEmail: vi.fn(),
   updateMySettings: (payload: Record<string, unknown>) => updateMySettings(payload),
   uploadMyPhoto: vi.fn(),
@@ -42,7 +47,8 @@ function user(overrides: Partial<User> = {}): User {
     is_active: true,
     timezone: "Europe/Moscow",
     telegram_chat_id: "123",
-    notification_settings: { telegram: channel(), email: channel(), site: channel() },
+    vk_connected: false,
+    notification_settings: { telegram: channel(), email: channel(), vk: channel(), site: channel() },
     auth_providers: ["password"],
     created_at: "2026-09-01T00:00:00Z",
     ...overrides,
@@ -83,5 +89,34 @@ describe("SettingsTab", () => {
     const sent = updateMySettings.mock.calls[0][0] as { notification_settings: User["notification_settings"] };
     expect(sent.notification_settings.email.enabled).toBe(false);
     expect(sent.notification_settings.telegram.enabled).toBe(true);
+  });
+
+  it("подключает ВКонтакте: открывает диалог с сообществом и показывает код на случай, если ссылка его не донесла", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    useAuthStore().user = user();
+    const wrapper = mount(SettingsTab);
+    await flushPromises();
+
+    const block = wrapper.find("[data-vk-link]");
+    await block.findAll("button").find((b) => b.text() === "Подключить ВКонтакте")!.trigger("click");
+    await flushPromises();
+
+    expect(open).toHaveBeenCalledWith("https://vk.me/mytutorru?ref=ABCD2345", "_blank");
+    expect(wrapper.find("[data-vk-link]").text()).toContain("ABCD2345");
+    open.mockRestore();
+  });
+
+  it("подключённый ВКонтакте можно отключить", async () => {
+    useAuthStore().user = user({ vk_connected: true });
+    const wrapper = mount(SettingsTab);
+    await flushPromises();
+
+    const block = wrapper.find("[data-vk-link]");
+    expect(block.text()).toContain("Подключён");
+    await block.findAll("button").find((b) => b.text() === "Отключить")!.trigger("click");
+    await flushPromises();
+
+    expect(disconnectVk).toHaveBeenCalled();
+    expect(wrapper.find("[data-vk-link]").text()).toContain("Подключить ВКонтакте");
   });
 });

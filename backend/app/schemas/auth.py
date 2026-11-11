@@ -61,6 +61,12 @@ class RegisterResponse(BaseModel):
     tokens: TokenPair
 
 
+class VkLinkOut(BaseModel):
+    code: str
+    # Ссылка на диалог с сообществом; None - ВКонтакте на сервере не настроен.
+    link: str | None
+
+
 class TelegramLinkTokenOut(BaseModel):
     token: str
     # None when the bot's @username isn't configured in settings yet.

@@ -107,6 +107,14 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     telegram_link_token: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
     telegram_link_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # ВКонтакте: кому из пользователей ВК сообщество сайта пишет уведомления, и код
+    # для привязки («Подключить ВКонтакте»), устроенный как у Telegram - см.
+    # app.services.vk_service. Писать в личку сообщество может, только если человек
+    # сам начал с ним диалог, поэтому привязка и идёт через «Начать» в диалоге.
+    vk_peer_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    vk_link_token: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
+    vk_link_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     tutor_profile: Mapped["TutorProfile | None"] = relationship(
         back_populates="user",
         uselist=False,
@@ -128,6 +136,10 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     def is_managed(self) -> bool:
         """Аккаунт заведён репетитором и пока никем не забран."""
         return self.managed_by_tutor_id is not None
+
+    @property
+    def vk_connected(self) -> bool:
+        return self.vk_peer_id is not None
 
     @property
     def auth_providers(self) -> list[str]:

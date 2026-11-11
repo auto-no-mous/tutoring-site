@@ -25,6 +25,7 @@ from app.services.email_service import send_email
 from app.services.email_templates import render_email
 from app.services.schedule_service import MSK
 from app.services.telegram_service import send_telegram_message
+from app.services.vk_service import send_vk_message
 from app.utils.time import ensure_aware, utcnow
 
 
@@ -78,7 +79,11 @@ def notification_settings(user: User) -> NotificationSettings:
 
 
 def _destination(user: User, channel: NotificationChannel) -> str | None:
-    return user.telegram_chat_id if channel == NotificationChannel.TELEGRAM else user.email
+    if channel == NotificationChannel.TELEGRAM:
+        return user.telegram_chat_id
+    if channel == NotificationChannel.VK:
+        return user.vk_peer_id
+    return user.email
 
 
 async def _deliver(
@@ -240,6 +245,8 @@ async def _dispatch(
     try:
         if channel == NotificationChannel.TELEGRAM:
             await send_telegram_message(destination, f"{title}\n\n{body}")
+        elif channel == NotificationChannel.VK:
+            await send_vk_message(destination, f"{title}\n\n{body}")
         else:
             # kind/user_id - чтобы письмо было видно в журнале почты админки с
             # привязкой к пользователю (см. app.services.email_log_service).

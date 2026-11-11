@@ -22,15 +22,16 @@ type EventKey = "new_booking" | "schedule_change" | "login";
 
 // У каждого канала - только те пункты, которые в него действительно приходят. В чат
 // сайта не пишутся ни новые записи, ни входы в аккаунт: о входе там прочитает лишь
-// тот, кто уже вошёл, - поэтому он идёт только в Telegram и на почту.
+// тот, кто уже вошёл, - поэтому он идёт только в мессенджеры и на почту.
 const CHANNELS: { value: NotificationTarget; label: string; events: EventKey[]; hint?: string }[] = [
   { value: "telegram", label: "Telegram", events: ["new_booking", "schedule_change", "login"] },
   { value: "email", label: "Почта", events: ["new_booking", "schedule_change", "login"] },
+  { value: "vk", label: "ВКонтакте", events: ["new_booking", "schedule_change", "login"] },
   {
     value: "site",
     label: "На сайте — «Системные уведомления» в чате",
     events: ["schedule_change"],
-    hint: "Сюда же приходят домашние задания, новости групп и прочие события сайта. О входах в аккаунт сюда не пишем — только в Telegram и на почту.",
+    hint: "Сюда же приходят домашние задания, новости групп и прочие события сайта. О входах в аккаунт сюда не пишем — только в мессенджеры и на почту.",
   },
 ];
 

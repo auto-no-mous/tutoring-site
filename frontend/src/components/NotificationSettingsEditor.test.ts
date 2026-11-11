@@ -9,14 +9,14 @@ function channel(overrides: Partial<ChannelNotificationSettings> = {}): ChannelN
 }
 
 function mountEditor(
-  settings: NotificationSettings = { telegram: channel(), email: channel(), site: channel() },
-  available = { telegram: true, email: true },
+  settings: NotificationSettings = { telegram: channel(), email: channel(), vk: channel(), site: channel() },
+  available = { telegram: true, email: true, vk: true },
 ) {
   return mount(NotificationSettingsEditor, {
     props: {
       modelValue: settings,
       available,
-      unavailableHint: { telegram: "Telegram не подключён", email: "Почта не указана" },
+      unavailableHint: { telegram: "Telegram не подключён", email: "Почта не указана", vk: "ВКонтакте не подключён" },
     },
   });
 }
@@ -27,7 +27,7 @@ function block(wrapper: ReturnType<typeof mount>, name: string) {
 
 describe("NotificationSettingsEditor", () => {
   it("под включённым каналом показывает его пункты, под выключенным - нет", () => {
-    const wrapper = mountEditor({ telegram: channel(), email: channel({ enabled: false }), site: channel() });
+    const wrapper = mountEditor({ telegram: channel(), email: channel({ enabled: false }), vk: channel(), site: channel() });
 
     expect(block(wrapper, "telegram").text()).toContain("Новые записи");
     expect(block(wrapper, "telegram").text()).toContain("Переносы и отмены");
@@ -58,14 +58,14 @@ describe("NotificationSettingsEditor", () => {
   });
 
   it("поле минут неактивно, пока напоминание выключено", () => {
-    const wrapper = mountEditor({ telegram: channel({ reminder: false }), email: channel(), site: channel() });
+    const wrapper = mountEditor({ telegram: channel({ reminder: false }), email: channel(), vk: channel(), site: channel() });
 
     expect(block(wrapper, "telegram").find('input[type="number"]').attributes("disabled")).toBeDefined();
     expect(block(wrapper, "email").find('input[type="number"]').attributes("disabled")).toBeUndefined();
   });
 
   it("канал, в который некуда слать, выключен и объясняет почему", () => {
-    const wrapper = mountEditor(undefined, { telegram: false, email: true });
+    const wrapper = mountEditor(undefined, { telegram: false, email: true, vk: true });
 
     const parent = block(wrapper, "telegram").find('input[type="checkbox"]');
     expect(parent.attributes("disabled")).toBeDefined();
@@ -75,7 +75,7 @@ describe("NotificationSettingsEditor", () => {
   });
 
   it("чат сайта настраивается всегда, но без новых записей и входов", () => {
-    const wrapper = mountEditor(undefined, { telegram: false, email: false });
+    const wrapper = mountEditor(undefined, { telegram: false, email: false, vk: false });
 
     const site = block(wrapper, "site");
     expect(site.find('input[type="checkbox"]').attributes("disabled")).toBeUndefined();

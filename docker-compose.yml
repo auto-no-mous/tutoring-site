@@ -73,6 +73,25 @@ services:
       - backend_storage:/app/storage
     command: ["python", "-m", "app.scripts.run_telegram_bot"]
 
+  # Бот сообщества ВКонтакте - привязка «Подключить ВКонтакте» (Long Poll, см.
+  # app.scripts.run_vk_bot). Тот же профиль bot; без настроек ВК в backend/.env он
+  # просто ждёт, а не падает.
+  vk_bot:
+    build: ./backend
+    restart: unless-stopped
+    profiles: ["bot"]
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mytutor}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mytutor}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # storage - ради общей блокировки миграций в docker-entrypoint.sh.
+    volumes:
+      - backend_storage:/app/storage
+    command: ["python", "-m", "app.scripts.run_vk_bot"]
+
 volumes:
   backend_storage:
   postgres_data:

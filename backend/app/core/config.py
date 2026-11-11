@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     telegram_api_url: str | None = None
     telegram_api_ca_file: str | None = None
 
+    # Уведомления во ВКонтакте - личными сообщениями от сообщества сайта (см.
+    # app.services.vk_service). Ключ доступа сообщества нужен с правами «Сообщения» и
+    # «Управление сообществом»: без второго ВК не даёт боту Long Poll, и привязка
+    # («Подключить ВКонтакте» -> «Начать» в диалоге с сообществом) не дойдёт до сайта.
+    vk_enabled: bool = False
+    vk_group_token: str | None = None
+    vk_group_id: int | None = None
+    # Короткое имя сообщества (vk.com/<screen_name>) - для ссылки vk.me/<screen_name>.
+    vk_group_screen_name: str | None = None
+
     # Вход через VK ID - OAuth 2.1 с обязательным PKCE (см. app.services.oauth_providers).
     # Секрет приложения не нужен: код обменивается на токен по code_verifier. Прежний
     # протокол oauth.vk.com, которому требовался VK_CLIENT_SECRET, отключён VK 30.09.2025.

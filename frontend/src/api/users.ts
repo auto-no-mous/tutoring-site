@@ -52,6 +52,22 @@ export interface TelegramLinkToken {
   deep_link: string | null;
 }
 
+export interface VkLink {
+  // Код привязки: уходит в ВК через ссылку, а если не дошёл - его отправляют боту.
+  code: string;
+  link: string | null;
+}
+
+export async function getVkLink() {
+  const { data } = await apiClient.post<VkLink>("/auth/me/vk-link");
+  return data;
+}
+
+export async function disconnectVk() {
+  const { data } = await apiClient.delete<User>("/auth/me/vk");
+  return data;
+}
+
 export async function getTelegramLinkToken() {
   const { data } = await apiClient.post<TelegramLinkToken>("/auth/me/telegram-link-token");
   return data;

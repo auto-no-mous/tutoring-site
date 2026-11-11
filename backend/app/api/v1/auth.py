@@ -13,6 +13,7 @@ from app.schemas.auth import (
     RegisterResponse,
     TelegramLinkTokenOut,
     TokenPair,
+    VkLinkOut,
 )
 from app.schemas.oauth import (
     OAuthCallbackRequest,
@@ -24,7 +25,7 @@ from app.schemas.oauth import (
 )
 from app.schemas.student import ClaimPreviewOut, ClaimResponse, ClaimWithPasswordRequest
 from app.schemas.user import UserOut, UserSettingsUpdate
-from app.services import auth_service, claim_service, file_service, oauth_service, telegram_service
+from app.services import auth_service, claim_service, file_service, oauth_service, telegram_service, vk_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -64,6 +65,19 @@ async def verify_email(payload: EmailVerifyRequest, db: DbSession) -> UserOut:
 @limiter.limit("5/hour")
 async def resend_verification_email(request: Request, current_user: CurrentUser) -> None:
     await auth_service.resend_verification_email(current_user)
+
+
+@router.post("/me/vk-link", response_model=VkLinkOut)
+async def create_vk_link(current_user: CurrentUser, db: DbSession) -> VkLinkOut:
+    """Код и ссылка для «Подключить ВКонтакте» (см. app.services.vk_service)."""
+    code = await vk_service.create_link_code(db, current_user)
+    return VkLinkOut(code=code, link=vk_service.build_link_url(code))
+
+
+@router.delete("/me/vk", response_model=UserOut)
+async def disconnect_vk(current_user: CurrentUser, db: DbSession) -> UserOut:
+    user = await vk_service.unlink(db, current_user)
+    return UserOut.model_validate(user)
 
 
 @router.post("/me/telegram-link-token", response_model=TelegramLinkTokenOut)
