@@ -173,6 +173,7 @@ async def test_update_my_settings(client: AsyncClient) -> None:
         "reminder": True,
         "reminder_lead_minutes": 15,
         "login": True,
+        "homework": True,
     }
     assert body["notification_settings"]["email"]["enabled"] is False
 

@@ -111,6 +111,9 @@ class NotificationEvent(StrEnum):
     # сайта такое сообщение прочитает лишь тот, кто уже вошёл, - злоумышленника оно
     # не остановит, а хозяину аккаунта ничего нового не скажет.
     LOGIN = "login"
+    # Домашние задания: ученику - что задали новое, репетитору - что ученик сдал
+    # работу или отметил задание выполненным.
+    HOMEWORK = "homework"
     OTHER = "other"
 
 
@@ -145,6 +148,8 @@ class SystemNotificationEvent(StrEnum):
     GROUP_APPLICATION_ACCEPTED = "group_application_accepted"
     GROUP_APPLICATION_REJECTED = "group_application_rejected"
     HOMEWORK_ASSIGNED = "homework_assigned"
+    # Ученик прислал работу или отметил задание выполненным - репетитору.
+    HOMEWORK_SUBMITTED = "homework_submitted"
     UPCOMING_LESSON_REMINDER = "upcoming_lesson_reminder"
     # Еженедельные занятия перестали продлеваться: время занято или выпало из
     # расписания. Иначе серия умирала молча - см. booking_service.top_up_active_series.

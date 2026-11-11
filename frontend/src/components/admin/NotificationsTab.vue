@@ -19,6 +19,7 @@ const EVENT_LABELS: Record<string, string> = {
   group_application_accepted: "Заявка в группу принята",
   group_application_rejected: "Заявка в группу отклонена",
   homework_assigned: "Новое домашнее задание",
+  homework_submitted: "Ученик сдал домашнее задание",
   recurring_series_stalled: "Еженедельные занятия не продлеваются",
   recurring_series_not_started: "Еженедельная запись ученика не получилась",
 };

@@ -16,6 +16,8 @@ export interface ChannelNotificationSettings {
   reminder_lead_minutes: number;
   // Входы в аккаунт - только Telegram и почта: в чат сайта они не пишутся.
   login: boolean;
+  // Ученику - новые задания, репетитору - сданные работы.
+  homework: boolean;
 }
 
 export type NotificationSettings = Record<NotificationTarget, ChannelNotificationSettings>;

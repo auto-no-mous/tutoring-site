@@ -1,4 +1,11 @@
+import uuid
+
+import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.system_notification import SystemNotification
 
 
 async def _register(client: AsyncClient, email: str, role: str) -> dict:
@@ -871,3 +878,105 @@ async def test_student_uploads_several_files_at_once(client: AsyncClient) -> Non
     resp = await client.post(url, headers=student["headers"], files=shots(7, "c"))
     assert resp.status_code == 200, resp.text
     assert len(resp.json()["files"]) == 10
+
+
+@pytest.fixture
+def emails(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    from app.services import notification_service
+
+    sent: list[tuple[str, str]] = []
+
+    async def fake_email(to: str, subject: str, body: str, html_body=None, **kwargs) -> bool:
+        sent.append((to, subject))
+        return True
+
+    monkeypatch.setattr(notification_service, "send_email", fake_email)
+    return sent
+
+
+async def _site_events(db_session: AsyncSession, user_id: str) -> list[str]:
+    result = await db_session.execute(
+        select(SystemNotification.event_type).where(SystemNotification.user_id == uuid.UUID(user_id))
+    )
+    return list(result.scalars().all())
+
+
+async def test_homework_notifications_reach_every_channel_both_ways(
+    client: AsyncClient, db_session: AsyncSession, emails: list
+) -> None:
+    tutor = await _register(client, "hw-notify-tutor@example.com", "tutor")
+    student = await _register(client, "hw-notify-student@example.com", "student")
+
+    await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={
+            "title": "Дроби",
+            "submission_mode": "file_upload",
+            "student_ids": [student["user"]["id"]],
+            "content_url": "https://example.com/task",
+        },
+    )
+    # Ученику - и в чат сайта, и на почту.
+    assert "homework_assigned" in await _site_events(db_session, student["user"]["id"])
+    assert ("hw-notify-student@example.com", "Новое домашнее задание") in emails
+
+    submission_id = (await client.get("/api/v1/homework/me", headers=student["headers"])).json()[0]["submission_id"]
+    url = f"/api/v1/homework/submissions/{submission_id}/upload"
+    await client.post(url, headers=student["headers"], files={"files": ("a.png", b"x", "image/png")})
+
+    # Репетитору - что работа сдана.
+    assert (await _site_events(db_session, tutor["user"]["id"])).count("homework_submitted") == 1
+    tutor_mail = [subject for to, subject in emails if to == "hw-notify-tutor@example.com"]
+    assert tutor_mail == ["Домашнее задание сдано"]
+
+    # Досланный к сданной работе скриншот - не новая сдача.
+    await client.post(url, headers=student["headers"], files={"files": ("b.png", b"y", "image/png")})
+    assert (await _site_events(db_session, tutor["user"]["id"])).count("homework_submitted") == 1
+
+
+async def test_marking_homework_done_notifies_the_tutor_once(
+    client: AsyncClient, db_session: AsyncSession, emails: list
+) -> None:
+    tutor = await _register(client, "hw-done-notify-tutor@example.com", "tutor")
+    student = await _register(client, "hw-done-notify-student@example.com", "student")
+    await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={"submission_mode": "mark_done", "student_ids": [student["user"]["id"]], "content_url": "https://e.com"},
+    )
+    submission_id = (await client.get("/api/v1/homework/me", headers=student["headers"])).json()[0]["submission_id"]
+
+    for _ in range(2):
+        await client.post(f"/api/v1/homework/submissions/{submission_id}/done", headers=student["headers"])
+
+    result = await db_session.execute(
+        select(SystemNotification.body).where(
+            SystemNotification.user_id == uuid.UUID(tutor["user"]["id"]),
+            SystemNotification.event_type == "homework_submitted",
+        )
+    )
+    bodies = list(result.scalars().all())
+    assert len(bodies) == 1
+    assert "отметил(а) выполненным" in bodies[0]
+
+
+async def test_homework_notifications_can_be_switched_off(
+    client: AsyncClient, db_session: AsyncSession, emails: list
+) -> None:
+    tutor = await _register(client, "hw-off-tutor@example.com", "tutor")
+    student = await _register(client, "hw-off-student@example.com", "student")
+    resp = await client.patch(
+        "/api/v1/auth/me",
+        headers=student["headers"],
+        json={"notification_settings": {"email": {"homework": False}, "site": {"homework": False}}},
+    )
+    assert resp.status_code == 200, resp.text
+
+    await client.post(
+        "/api/v1/homework",
+        headers=tutor["headers"],
+        data={"submission_mode": "mark_done", "student_ids": [student["user"]["id"]], "content_url": "https://e.com"},
+    )
+    assert "homework_assigned" not in await _site_events(db_session, student["user"]["id"])
+    assert all(to != "hw-off-student@example.com" for to, _ in emails)

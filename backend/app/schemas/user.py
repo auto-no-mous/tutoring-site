@@ -20,8 +20,9 @@ class ChannelNotificationSettings(BaseModel):
     schedule_change: bool = True
     reminder: bool = True
     reminder_lead_minutes: int = Field(default=60, ge=1, le=MAX_REMINDER_LEAD_MINUTES)
-    # Входы в аккаунт - только для Telegram и почты (см. NotificationEvent.LOGIN).
+    # Входы в аккаунт - только для мессенджеров и почты (см. NotificationEvent.LOGIN).
     login: bool = True
+    homework: bool = True
 
     def wants(self, event: NotificationEvent) -> bool:
         if not self.enabled:
@@ -35,6 +36,7 @@ _EVENT_SWITCHES = {
     NotificationEvent.SCHEDULE_CHANGE: "schedule_change",
     NotificationEvent.UPCOMING_REMINDER: "reminder",
     NotificationEvent.LOGIN: "login",
+    NotificationEvent.HOMEWORK: "homework",
 }
 
 

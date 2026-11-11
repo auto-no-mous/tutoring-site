@@ -10,6 +10,7 @@ from app.models.enums import (
     HomeworkContentType,
     HomeworkSubmissionMode,
     HomeworkSubmissionStatus,
+    NotificationEvent,
     SystemNotificationEvent,
     UserRole,
 )
@@ -21,7 +22,7 @@ from app.models.homework import (
 )
 from app.models.tutor import TutorProfile
 from app.models.user import User
-from app.services import group_service, system_notification_service
+from app.services import group_service, notification_service
 from app.utils.time import utcnow
 
 
@@ -57,13 +58,7 @@ async def create_assignment_for_student(
     await db.commit()
     await db.refresh(assignment)
 
-    await system_notification_service.notify(
-        db,
-        student_id,
-        SystemNotificationEvent.HOMEWORK_ASSIGNED,
-        homework_title=title or "Без названия",
-        homework_url=_homework_tab_url(),
-    )
+    await _notify_assigned(db, student_id, title)
     return assignment
 
 
@@ -105,14 +100,39 @@ async def create_assignment_for_group(
     await db.refresh(assignment)
 
     for member in members:
-        await system_notification_service.notify(
-            db,
-            member.student_id,
-            SystemNotificationEvent.HOMEWORK_ASSIGNED,
-            homework_title=title or "Без названия",
-            homework_url=_homework_tab_url(),
-        )
+        await _notify_assigned(db, member.student_id, title)
     return assignment
+
+
+async def _notify_assigned(db: AsyncSession, student_id: uuid.UUID, title: str | None) -> None:
+    await notification_service.notify_everywhere(
+        db,
+        student_id,
+        SystemNotificationEvent.HOMEWORK_ASSIGNED,
+        NotificationEvent.HOMEWORK,
+        homework_title=title or "Без названия",
+        homework_url=_homework_tab_url(),
+    )
+
+
+async def _notify_submitted(
+    db: AsyncSession, assignment: HomeworkAssignment, student: User, action: str
+) -> None:
+    """Репетитору: ученик сдал работу. Раньше об этом не сообщалось нигде - сданное
+    находилось, только если зайти во вкладку «ДЗ»."""
+    tutor = await db.get(TutorProfile, assignment.tutor_id)
+    if tutor is None:
+        return
+    await notification_service.notify_everywhere(
+        db,
+        tutor.user_id,
+        SystemNotificationEvent.HOMEWORK_SUBMITTED,
+        NotificationEvent.HOMEWORK,
+        student_name=student.display_name,
+        action=action,
+        homework_title=assignment.title or "Без названия",
+        homework_url=_homework_tab_url(),
+    )
 
 
 async def get_assignment_or_404(db: AsyncSession, assignment_id: uuid.UUID) -> HomeworkAssignment:
@@ -333,10 +353,13 @@ async def mark_submission_done(db: AsyncSession, submission: HomeworkSubmission,
     if assignment.submission_mode != HomeworkSubmissionMode.MARK_DONE.value:
         raise HTTPException(status.HTTP_409_CONFLICT, "Для этого задания требуется отправить файл")
 
+    already_done = submission.status == HomeworkSubmissionStatus.DONE.value
     submission.status = HomeworkSubmissionStatus.DONE.value
     submission.submitted_at = utcnow()
     await db.commit()
     await db.refresh(submission)
+    if not already_done:
+        await _notify_submitted(db, assignment, student, "отметил(а) выполненным задание")
     return submission
 
 
@@ -383,6 +406,9 @@ async def submit_files(
     (remove_submission_file) - раньше файл был один, и приложенный по ошибке
     оставался единственным свидетельством выполнения."""
     await check_can_submit_files(db, submission, student, len(file_paths))
+    # Сообщаем, когда работа ушла на проверку. Досланный к уже сданному скриншот -
+    # не новая сдача: иначе каждое добавление файла было бы отдельным уведомлением.
+    newly_submitted = submission.status != HomeworkSubmissionStatus.SUBMITTED.value
 
     for file_path in file_paths:
         db.add(HomeworkSubmissionFile(submission_id=submission.id, file_path=file_path))
@@ -392,6 +418,9 @@ async def submit_files(
     submission.submitted_at = utcnow()
     await db.commit()
     await db.refresh(submission)
+    if newly_submitted:
+        assignment = await get_assignment_or_404(db, submission.assignment_id)
+        await _notify_submitted(db, assignment, student, "прислал(а) работу по заданию")
     return submission
 
 

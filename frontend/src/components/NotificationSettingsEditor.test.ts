@@ -5,7 +5,7 @@ import NotificationSettingsEditor from "@/components/NotificationSettingsEditor.
 import type { ChannelNotificationSettings, NotificationSettings } from "@/types/user";
 
 function channel(overrides: Partial<ChannelNotificationSettings> = {}): ChannelNotificationSettings {
-  return { enabled: true, new_booking: true, schedule_change: true, reminder: true, reminder_lead_minutes: 60, login: true, ...overrides };
+  return { enabled: true, new_booking: true, schedule_change: true, reminder: true, reminder_lead_minutes: 60, login: true, homework: true, ...overrides };
 }
 
 function mountEditor(
@@ -64,14 +64,39 @@ describe("NotificationSettingsEditor", () => {
     expect(block(wrapper, "email").find('input[type="number"]').attributes("disabled")).toBeUndefined();
   });
 
-  it("канал, в который некуда слать, выключен и объясняет почему", () => {
+  it("канал, в который некуда слать, выключен, а его пункты видны, но неактивны", () => {
     const wrapper = mountEditor(undefined, { telegram: false, email: true, vk: true });
 
     const parent = block(wrapper, "telegram").find('input[type="checkbox"]');
     expect(parent.attributes("disabled")).toBeDefined();
     expect((parent.element as HTMLInputElement).checked).toBe(false);
     expect(block(wrapper, "telegram").text()).toContain("Telegram не подключён");
-    expect(block(wrapper, "telegram").text()).not.toContain("Новые записи");
+    expect(block(wrapper, "telegram").text()).toContain("Новые записи");
+    expect(block(wrapper, "telegram").find("fieldset").attributes("disabled")).toBeDefined();
+  });
+
+  it("кнопка подключения - прямо в блоке канала, вместо подсказки", () => {
+    const wrapper = mount(NotificationSettingsEditor, {
+      props: {
+        modelValue: { telegram: channel(), email: channel(), vk: channel(), site: channel() },
+        available: { telegram: true, email: true, vk: false },
+        unavailableHint: { telegram: "", email: "", vk: "ВКонтакте не подключён" },
+      },
+      slots: { "connection-vk": "<button>Подключить ВКонтакте</button>" },
+    });
+
+    const vk = block(wrapper, "vk");
+    expect(vk.text()).toContain("Подключить ВКонтакте");
+    expect(vk.text()).not.toContain("ВКонтакте не подключён");
+  });
+
+  it("домашние задания настраиваются в каждом канале, включая чат сайта", () => {
+    const wrapper = mountEditor();
+    for (const name of ["telegram", "email", "vk", "site"]) {
+      expect(block(wrapper, name).text()).toContain("Домашние задания");
+    }
+    // Подсказку под чатом сайта убрали - она повторяла очевидное.
+    expect(block(wrapper, "site").text()).not.toContain("Сюда же приходят");
   });
 
   it("чат сайта настраивается всегда, но без новых записей и входов", () => {

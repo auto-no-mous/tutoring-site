@@ -74,6 +74,26 @@ async def notify_login(db: AsyncSession, user: User, event: SystemNotificationEv
     await notify(db, user.id, NotificationEvent.LOGIN, title, body)
 
 
+async def notify_everywhere(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    system_event: SystemNotificationEvent,
+    event: NotificationEvent,
+    **params: str,
+) -> None:
+    """Одно событие и в чат сайта, и в Telegram, ВК, на почту - кому что включено.
+    Текст везде один: из шаблона, который правит админ."""
+    await system_notification_service.notify(db, user_id, system_event, **params)
+    user = await db.get(User, user_id)
+    if user is None or user.managed_by_tutor_id is not None:
+        return
+    rendered = await system_notification_service.render(db, user, system_event, **params)
+    if rendered is None:
+        return
+    title, body = rendered
+    await notify(db, user.id, event, title, body)
+
+
 def notification_settings(user: User) -> NotificationSettings:
     return NotificationSettings.model_validate(user.notification_settings or {})
 

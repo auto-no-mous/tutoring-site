@@ -113,6 +113,10 @@ DEFAULT_TEMPLATES: dict[tuple[SystemNotificationEvent, UserRole], tuple[str, str
         "Репетитор задал новое домашнее задание: «{homework_title}». Открыть и сдать "
         "его можно во вкладке «ДЗ»: {homework_url}",
     ),
+    (SystemNotificationEvent.HOMEWORK_SUBMITTED, UserRole.TUTOR): (
+        "Домашнее задание сдано",
+        "{student_name} {action} «{homework_title}». Посмотреть можно во вкладке «ДЗ»: {homework_url}",
+    ),
     (SystemNotificationEvent.UPCOMING_LESSON_REMINDER, UserRole.TUTOR): (
         "Скоро занятие",
         "Через {lead_minutes} мин ({time}) у вас занятие с {student_name}.",
@@ -197,6 +201,8 @@ _SITE_SWITCHES: dict[SystemNotificationEvent, NotificationEvent] = {
     SystemNotificationEvent.BOOKING_RESCHEDULED_BY_TUTOR: NotificationEvent.SCHEDULE_CHANGE,
     SystemNotificationEvent.GROUP_SCHEDULE_CHANGED: NotificationEvent.SCHEDULE_CHANGE,
     SystemNotificationEvent.UPCOMING_LESSON_REMINDER: NotificationEvent.UPCOMING_REMINDER,
+    SystemNotificationEvent.HOMEWORK_ASSIGNED: NotificationEvent.HOMEWORK,
+    SystemNotificationEvent.HOMEWORK_SUBMITTED: NotificationEvent.HOMEWORK,
 }
 
 # Входы в аккаунт в чат не пишутся вовсе - они уходят в Telegram и на почту
