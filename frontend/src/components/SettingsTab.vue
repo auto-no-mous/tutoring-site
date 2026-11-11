@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref, toRaw } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, toRaw } from "vue";
 
 import {
   listOAuthProviders,
@@ -53,7 +53,6 @@ const isResending = ref(false);
 const telegramDeepLink = ref<string | null>(null);
 const telegramLinkError = ref("");
 const isLinkingTelegram = ref(false);
-const isCheckingTelegram = ref(false);
 
 const tutorProfile = ref<TutorProfile | null>(null);
 const policySavedMessage = ref("");
@@ -193,27 +192,9 @@ async function connectTelegram(): Promise<void> {
     }
     telegramDeepLink.value = deep_link;
     window.open(deep_link, "_blank");
+    waitForLink();
   } finally {
     isLinkingTelegram.value = false;
-  }
-}
-
-async function checkTelegramLinked(): Promise<void> {
-  isCheckingTelegram.value = true;
-  try {
-    await auth.fetchCurrentUser();
-    if (auth.user?.telegram_chat_id) {
-      telegramDeepLink.value = null;
-      // При привязке сервер сам включает канал Telegram (backend
-      // telegram_service.link_chat_by_token) - забираем это значение в форму, иначе
-      // она продолжила бы показывать канал выключенным и затёрла бы его при
-      // следующем сохранении.
-      if (notificationSettings.value) {
-        notificationSettings.value.telegram.enabled = auth.user.notification_settings.telegram.enabled;
-      }
-    }
-  } finally {
-    isCheckingTelegram.value = false;
   }
 }
 
@@ -222,7 +203,6 @@ async function checkTelegramLinked(): Promise<void> {
 const vkLink = ref<{ code: string; link: string } | null>(null);
 const vkLinkError = ref("");
 const isLinkingVk = ref(false);
-const isCheckingVk = ref(false);
 
 async function connectVk(): Promise<void> {
   isLinkingVk.value = true;
@@ -235,26 +215,76 @@ async function connectVk(): Promise<void> {
     }
     vkLink.value = { code, link };
     window.open(link, "_blank");
+    waitForLink();
   } finally {
     isLinkingVk.value = false;
   }
 }
 
-async function checkVkLinked(): Promise<void> {
-  isCheckingVk.value = true;
-  try {
-    await auth.fetchCurrentUser();
-    if (auth.user?.vk_connected) {
-      vkLink.value = null;
-      // Как и с Telegram: сервер сам включил канал - забираем это в форму.
-      if (notificationSettings.value) {
-        notificationSettings.value.vk.enabled = auth.user.notification_settings.vk.enabled;
-      }
-    }
-  } finally {
-    isCheckingVk.value = false;
-  }
+// --- Ждём, пока бот привяжет аккаунт --------------------------------------------
+//
+// Привязка заканчивается в мессенджере, а не здесь: человек жмёт «Начать» у бота, и
+// сайт об этом сам не узнаёт. Раньше нужно было нажать «Проверить» или обновить
+// страницу, и кнопка «Подключить» висела, хотя всё уже работало. Теперь, пока ссылка
+// открыта, страница сама спрашивает сервер раз в несколько секунд и сразу при
+// возвращении на вкладку.
+
+const LINK_POLL_MS = 3000;
+// Дольше пяти минут не ждём: код привязки живёт 15, но столько на вкладке не сидят.
+const LINK_POLL_LIMIT = 100;
+let linkPollTimer: number | undefined;
+let linkPollTicks = 0;
+
+function isWaitingForLink(): boolean {
+  return Boolean(telegramDeepLink.value || vkLink.value);
 }
+
+async function checkLinks(): Promise<void> {
+  if (!isWaitingForLink()) return;
+  await auth.fetchCurrentUser();
+  const user = auth.user;
+  if (!user) return;
+  // При привязке сервер сам включает канал (telegram_service.link_chat_by_token,
+  // vk_service.link_peer_by_code) - забираем это в форму, иначе она показывала бы
+  // канал выключенным и затёрла бы его при следующем сохранении.
+  if (telegramDeepLink.value && user.telegram_chat_id) {
+    telegramDeepLink.value = null;
+    if (notificationSettings.value) notificationSettings.value.telegram.enabled = user.notification_settings.telegram.enabled;
+  }
+  if (vkLink.value && user.vk_connected) {
+    vkLink.value = null;
+    if (notificationSettings.value) notificationSettings.value.vk.enabled = user.notification_settings.vk.enabled;
+  }
+  if (!isWaitingForLink()) stopWaitingForLink();
+}
+
+function stopWaitingForLink(): void {
+  window.clearInterval(linkPollTimer);
+  linkPollTimer = undefined;
+}
+
+function waitForLink(): void {
+  stopWaitingForLink();
+  linkPollTicks = 0;
+  linkPollTimer = window.setInterval(() => {
+    linkPollTicks += 1;
+    if (linkPollTicks > LINK_POLL_LIMIT) {
+      stopWaitingForLink();
+      return;
+    }
+    void checkLinks();
+  }, LINK_POLL_MS);
+}
+
+function onWindowFocus(): void {
+  void checkLinks();
+}
+
+onMounted(() => window.addEventListener("focus", onWindowFocus));
+onBeforeUnmount(() => {
+  window.removeEventListener("focus", onWindowFocus);
+  stopWaitingForLink();
+});
 
 async function onDisconnectVk(): Promise<void> {
   auth.user = await disconnectVk();
@@ -377,62 +407,6 @@ onMounted(load);
         <span class="text-xs text-slate-400">Определяется автоматически, можно скорректировать вручную.</span>
       </label>
 
-      <div class="flex flex-col gap-1 text-sm">
-        Telegram (для уведомлений)
-        <div v-if="auth.user?.telegram_chat_id" class="flex items-center gap-2">
-          <span class="text-green-600 dark:text-green-400">Подключён</span>
-          <button type="button" class="text-xs text-slate-500 underline" @click="disconnectTelegram">Отключить</button>
-        </div>
-        <div v-else class="flex flex-col gap-1">
-          <button
-            type="button"
-            :disabled="isLinkingTelegram"
-            class="w-fit rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-700"
-            @click="connectTelegram"
-          >
-            Подключить Telegram
-          </button>
-          <div v-if="telegramDeepLink" class="flex items-center gap-2 text-xs">
-            <span class="text-slate-400">Откройте бота, нажмите «Запустить», затем вернитесь сюда.</span>
-            <button type="button" :disabled="isCheckingTelegram" class="text-slate-500 underline disabled:opacity-50" @click="checkTelegramLinked">
-              Проверить
-            </button>
-          </div>
-          <span v-if="telegramLinkError" class="text-xs text-red-600 dark:text-red-400">{{ telegramLinkError }}</span>
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-1 text-sm" data-vk-link>
-        ВКонтакте (для уведомлений)
-        <div v-if="auth.user?.vk_connected" class="flex items-center gap-2">
-          <span class="text-green-600 dark:text-green-400">Подключён</span>
-          <button type="button" class="text-xs text-slate-500 underline" @click="onDisconnectVk">Отключить</button>
-        </div>
-        <div v-else class="flex flex-col gap-1">
-          <button
-            type="button"
-            :disabled="isLinkingVk"
-            class="w-fit rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-700"
-            @click="connectVk"
-          >
-            Подключить ВКонтакте
-          </button>
-          <div v-if="vkLink" class="flex flex-col gap-1 text-xs">
-            <span class="text-slate-400">
-              В открывшемся диалоге с сообществом нажмите «Начать», затем вернитесь сюда. Если бот не ответил,
-              отправьте ему код <b class="font-mono text-slate-600 dark:text-slate-300">{{ vkLink.code }}</b>.
-            </span>
-            <span class="flex items-center gap-2">
-              <a :href="vkLink.link" target="_blank" class="text-slate-500 underline">Открыть диалог ещё раз</a>
-              <button type="button" :disabled="isCheckingVk" class="text-slate-500 underline disabled:opacity-50" @click="checkVkLinked">
-                Проверить
-              </button>
-            </span>
-          </div>
-          <span v-if="vkLinkError" class="text-xs text-red-600 dark:text-red-400">{{ vkLinkError }}</span>
-        </div>
-      </div>
-
       <div v-if="oauthProviders.length" class="flex flex-col gap-2 text-sm">
         <span>Способы входа</span>
         <div class="flex items-center gap-2">
@@ -483,9 +457,51 @@ onMounted(load);
           :unavailable-hint="{
             telegram: 'Telegram не подключён — кнопка «Подключить Telegram» выше.',
             email: 'Почта не указана — впишите её в поле «Почта» выше и сохраните.',
-            vk: 'ВКонтакте не подключён — кнопка «Подключить ВКонтакте» выше.',
+            vk: 'ВКонтакте не подключён.',
           }"
-        />
+        >
+          <template #connection-telegram>
+            <span v-if="auth.user?.telegram_chat_id" class="flex items-center gap-2 text-xs">
+              <span class="text-green-600 dark:text-green-400">Подключён</span>
+              <button type="button" class="text-slate-500 underline" @click="disconnectTelegram">Отключить</button>
+            </span>
+            <button
+              v-else
+              type="button"
+              :disabled="isLinkingTelegram"
+              class="rounded-md bg-brand-500 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+              @click="connectTelegram"
+            >
+              Подключить Telegram
+            </button>
+            <p v-if="!auth.user?.telegram_chat_id && telegramDeepLink" class="basis-full text-xs text-slate-400" data-link-pending>
+              Откройте бота и нажмите «Запустить» — эта страница сама заметит подключение.
+            </p>
+            <p v-if="telegramLinkError" class="basis-full text-xs text-red-600 dark:text-red-400">{{ telegramLinkError }}</p>
+          </template>
+          <template #connection-vk>
+            <span v-if="auth.user?.vk_connected" class="flex items-center gap-2 text-xs" data-vk-link>
+              <span class="text-green-600 dark:text-green-400">Подключён</span>
+              <button type="button" class="text-slate-500 underline" @click="onDisconnectVk">Отключить</button>
+            </span>
+            <button
+              v-else
+              type="button"
+              :disabled="isLinkingVk"
+              class="rounded-md bg-brand-500 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+              data-vk-link
+              @click="connectVk"
+            >
+              Подключить ВКонтакте
+            </button>
+            <p v-if="!auth.user?.vk_connected && vkLink" class="basis-full text-xs text-slate-400" data-link-pending>
+              В диалоге с сообществом нажмите «Начать» — эта страница сама заметит подключение. Если бот не ответил,
+              отправьте ему код <b class="font-mono text-slate-600 dark:text-slate-300">{{ vkLink.code }}</b>
+              (<a :href="vkLink.link" target="_blank" class="underline">открыть диалог ещё раз</a>).
+            </p>
+            <p v-if="vkLinkError" class="basis-full text-xs text-red-600 dark:text-red-400">{{ vkLinkError }}</p>
+          </template>
+        </NotificationSettingsEditor>
         <p class="text-xs text-slate-500">
           <template v-if="auth.user?.role === 'tutor'">
             Сообщения в чате и заявки в группы приходят в каждый включённый канал.

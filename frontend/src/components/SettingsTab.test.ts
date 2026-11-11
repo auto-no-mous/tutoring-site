@@ -29,7 +29,7 @@ vi.mock("@/api/users", () => ({
 }));
 
 function channel() {
-  return { enabled: true, new_booking: true, schedule_change: true, reminder: true, reminder_lead_minutes: 60, login: true };
+  return { enabled: true, new_booking: true, schedule_change: true, reminder: true, reminder_lead_minutes: 60, login: true, homework: true };
 }
 
 function user(overrides: Partial<User> = {}): User {
@@ -97,13 +97,57 @@ describe("SettingsTab", () => {
     const wrapper = mount(SettingsTab);
     await flushPromises();
 
-    const block = wrapper.find("[data-vk-link]");
-    await block.findAll("button").find((b) => b.text() === "Подключить ВКонтакте")!.trigger("click");
+    // Кнопка - в блоке ВКонтакте настроек уведомлений, а не отдельно над ними.
+    const vk = wrapper.find('[data-channel="vk"]');
+    await vk.findAll("button").find((b) => b.text() === "Подключить ВКонтакте")!.trigger("click");
     await flushPromises();
 
     expect(open).toHaveBeenCalledWith("https://vk.me/mytutorru?ref=ABCD2345", "_blank");
-    expect(wrapper.find("[data-vk-link]").text()).toContain("ABCD2345");
+    expect(wrapper.find('[data-channel="vk"]').text()).toContain("ABCD2345");
     open.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("сама замечает, что бот привязал аккаунт, без обновления страницы", async () => {
+    vi.useFakeTimers();
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const auth = useAuthStore();
+    auth.user = user();
+    let linked = false;
+    const fetchCurrentUser = vi.spyOn(auth, "fetchCurrentUser").mockImplementation(async () => {
+      auth.user = user({
+        vk_connected: linked,
+        notification_settings: { telegram: channel(), email: channel(), vk: { ...channel(), enabled: linked }, site: channel() },
+      });
+    });
+    const wrapper = mount(SettingsTab);
+    await flushPromises();
+
+    await wrapper.find('[data-channel="vk"]').findAll("button").find((b) => b.text() === "Подключить ВКонтакте")!.trigger("click");
+    await flushPromises();
+
+    // Бот ещё не привязал - кнопка на месте.
+    vi.advanceTimersByTime(3000);
+    await flushPromises();
+    expect(wrapper.find('[data-channel="vk"]').text()).toContain("Подключить ВКонтакте");
+
+    // Человек нажал «Начать» в ВК - через несколько секунд блок переключается сам.
+    linked = true;
+    vi.advanceTimersByTime(3000);
+    await flushPromises();
+    const vk = wrapper.find('[data-channel="vk"]');
+    expect(vk.text()).toContain("Подключён");
+    expect(vk.find("fieldset").attributes("disabled")).toBeUndefined();
+
+    // И больше не опрашивает.
+    const calls = fetchCurrentUser.mock.calls.length;
+    vi.advanceTimersByTime(30000);
+    await flushPromises();
+    expect(fetchCurrentUser.mock.calls.length).toBe(calls);
+
+    wrapper.unmount();
+    open.mockRestore();
+    vi.useRealTimers();
   });
 
   it("подключённый ВКонтакте можно отключить", async () => {
@@ -111,12 +155,12 @@ describe("SettingsTab", () => {
     const wrapper = mount(SettingsTab);
     await flushPromises();
 
-    const block = wrapper.find("[data-vk-link]");
-    expect(block.text()).toContain("Подключён");
-    await block.findAll("button").find((b) => b.text() === "Отключить")!.trigger("click");
+    const vk = () => wrapper.find('[data-channel="vk"]');
+    expect(vk().text()).toContain("Подключён");
+    await vk().findAll("button").find((b) => b.text() === "Отключить")!.trigger("click");
     await flushPromises();
 
     expect(disconnectVk).toHaveBeenCalled();
-    expect(wrapper.find("[data-vk-link]").text()).toContain("Подключить ВКонтакте");
+    expect(vk().text()).toContain("Подключить ВКонтакте");
   });
 });

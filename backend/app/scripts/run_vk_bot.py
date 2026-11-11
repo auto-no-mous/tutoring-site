@@ -100,6 +100,9 @@ async def idle() -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    # httpx пишет строку на каждый запрос, а Long Poll - это запрос раз в 25 секунд:
+    # тысячи одинаковых строк в сутки. Сбои бот логирует сам.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     if not vk_service.is_configured():
         print("VK bot: ВКонтакте не настроен (VK_ENABLED, VK_GROUP_TOKEN, VK_GROUP_ID в backend/.env) - жду.")
         asyncio.run(idle())
