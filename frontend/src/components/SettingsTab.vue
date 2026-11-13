@@ -12,6 +12,7 @@ import { listMyRecurringSeries, stopSeries } from "@/api/bookings";
 import { getMyProfile, updateMyProfile } from "@/api/tutors";
 import {
   deleteMyPhoto,
+  disconnectTelegram as disconnectTelegramApi,
   disconnectVk,
   getTelegramLinkToken,
   getVkLink,
@@ -291,7 +292,7 @@ async function onDisconnectVk(): Promise<void> {
 }
 
 async function disconnectTelegram(): Promise<void> {
-  const updated = await updateMySettings({ telegram_chat_id: null });
+  const updated = await disconnectTelegramApi();
   auth.user = updated;
 }
 

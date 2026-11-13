@@ -17,9 +17,11 @@ vi.mock("@/api/bookings", () => ({ listMyRecurringSeries: vi.fn(async () => []),
 vi.mock("@/api/tutors", () => ({ getMyProfile: vi.fn(async () => null), updateMyProfile: vi.fn() }));
 const getVkLink = vi.fn(async () => ({ code: "ABCD2345", link: "https://vk.me/mytutorru?ref=ABCD2345" }));
 const disconnectVk = vi.fn(async () => user({ vk_connected: false }));
+const disconnectTelegram = vi.fn(async () => user({ telegram_chat_id: null }));
 
 vi.mock("@/api/users", () => ({
   deleteMyPhoto: vi.fn(),
+  disconnectTelegram: () => disconnectTelegram(),
   disconnectVk: () => disconnectVk(),
   getTelegramLinkToken: vi.fn(),
   getVkLink: () => getVkLink(),
@@ -48,6 +50,7 @@ function user(overrides: Partial<User> = {}): User {
     timezone: "Europe/Moscow",
     telegram_chat_id: "123",
     vk_connected: false,
+    answers_support: false,
     notification_settings: { telegram: channel(), email: channel(), vk: channel(), site: channel() },
     auth_providers: ["password"],
     created_at: "2026-09-01T00:00:00Z",
@@ -162,5 +165,19 @@ describe("SettingsTab", () => {
 
     expect(disconnectVk).toHaveBeenCalled();
     expect(vk().text()).toContain("Подключить ВКонтакте");
+  });
+
+  it("Telegram отключается отдельным запросом, а не правкой настроек", async () => {
+    useAuthStore().user = user();
+    const wrapper = mount(SettingsTab);
+    await flushPromises();
+
+    const tg = () => wrapper.find('[data-channel="telegram"]');
+    await tg().findAll("button").find((b) => b.text() === "Отключить")!.trigger("click");
+    await flushPromises();
+
+    expect(disconnectTelegram).toHaveBeenCalled();
+    expect(updateMySettings).not.toHaveBeenCalled();
+    expect(tg().text()).toContain("Подключить Telegram");
   });
 });

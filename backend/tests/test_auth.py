@@ -1,4 +1,5 @@
 import datetime as dt
+import uuid
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -153,6 +154,7 @@ async def test_update_my_settings(client: AsyncClient) -> None:
             "last_name": "Name",
             "patronymic": "Ivanovich",
             "timezone": "Europe/Samara",
+            # Чат Telegram так не задать: его ставит только бот при привязке.
             "telegram_chat_id": "123456789",
             # Присылают частично - недостающее сохраняется умолчаниями.
             "notification_settings": {
@@ -165,7 +167,7 @@ async def test_update_my_settings(client: AsyncClient) -> None:
     body = patch_resp.json()
     assert body["display_name"] == "Name Updated Ivanovich"
     assert body["timezone"] == "Europe/Samara"
-    assert body["telegram_chat_id"] == "123456789"
+    assert body["telegram_chat_id"] is None
     assert body["notification_settings"]["telegram"] == {
         "enabled": True,
         "new_booking": True,
@@ -516,3 +518,25 @@ async def test_account_photo_rejects_non_image(client: AsyncClient) -> None:
         files={"file": ("payload.html", b"<script>alert(1)</script>", "text/html")},
     )
     assert resp.status_code == 400
+
+
+async def test_telegram_is_disconnected_by_its_own_endpoint(client: AsyncClient, db_session: AsyncSession) -> None:
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "tg-off@example.com",
+            "password": "supersecret1",
+            "first_name": "Иван",
+            "last_name": "Иванов",
+            "role": "student",
+            "pd_consent": True,
+        },
+    )
+    headers = {"Authorization": f"Bearer {resp.json()['tokens']['access_token']}"}
+    user = await db_session.get(User, uuid.UUID(resp.json()["user"]["id"]))
+    user.telegram_chat_id = "555"
+    await db_session.commit()
+
+    off = await client.delete("/api/v1/auth/me/telegram", headers=headers)
+    assert off.status_code == 200, off.text
+    assert off.json()["telegram_chat_id"] is None

@@ -80,6 +80,12 @@ async def disconnect_vk(current_user: CurrentUser, db: DbSession) -> UserOut:
     return UserOut.model_validate(user)
 
 
+@router.delete("/me/telegram", response_model=UserOut)
+async def disconnect_telegram(current_user: CurrentUser, db: DbSession) -> UserOut:
+    user = await telegram_service.unlink(db, current_user)
+    return UserOut.model_validate(user)
+
+
 @router.post("/me/telegram-link-token", response_model=TelegramLinkTokenOut)
 async def create_telegram_link_token(current_user: CurrentUser, db: DbSession) -> TelegramLinkTokenOut:
     token = await telegram_service.create_link_token(db, current_user)

@@ -91,6 +91,15 @@ def build_link_url(token: str) -> str | None:
     return f"https://t.me/{settings.telegram_bot_username}?start={token}"
 
 
+async def unlink(db: AsyncSession, user: User) -> User:
+    user.telegram_chat_id = None
+    user.telegram_link_token = None
+    user.telegram_link_token_expires_at = None
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
 async def link_chat_by_token(db: AsyncSession, token: str, chat_id: str) -> User | None:
     """Consumes a link token from the bot's /start handler. Returns the newly-linked
     user, or None if the token is unknown/expired (the bot replies accordingly)."""

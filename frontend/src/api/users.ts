@@ -8,7 +8,6 @@ export interface UserSettingsUpdate {
   grade?: number | null;
   email?: string;
   timezone?: string;
-  telegram_chat_id?: string | null;
   notification_settings?: NotificationSettings;
 }
 
@@ -60,6 +59,11 @@ export interface VkLink {
 
 export async function getVkLink() {
   const { data } = await apiClient.post<VkLink>("/auth/me/vk-link");
+  return data;
+}
+
+export async function disconnectTelegram() {
+  const { data } = await apiClient.delete<User>("/auth/me/telegram");
   return data;
 }
 

@@ -75,6 +75,9 @@ class UserOut(BaseModel):
     is_active: bool
     timezone: str
     telegram_chat_id: str | None
+    # Отвечает ли на обращения в поддержку (админ или назначен админом) - тогда в
+    # чате видны обращения пользователей.
+    answers_support: bool = False
     # Подключён ли ВКонтакте. Сам адрес наружу не отдаём: в отличие от Telegram,
     # вписать его вручную нельзя - только привязка через сообщество.
     vk_connected: bool = False
@@ -98,6 +101,8 @@ class UserSettingsUpdate(BaseModel):
     # Проверяется по списку IANA: раньше поле было свободным текстом, и в базе
     # оседали значения вроде "Chelyabinsk", от которых нельзя посчитать смещение.
     timezone: IANATimezone | None = None
-    telegram_chat_id: str | None = None
+    # Чата Telegram здесь нет: его ставит только бот при привязке, а снимает
+    # DELETE /auth/me/telegram. Раньше номер можно было вписать любой - и бот слал бы
+    # уведомления в чужой чат.
     # Заменяется целиком: что прислали, то и сохраняем (недостающее - умолчания).
     notification_settings: NotificationSettings | None = None
