@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.schemas.common import IANATimezone, UTCDateTime
 from app.schemas.tutor import TutorProfileUpdate
@@ -22,6 +22,20 @@ class AdminStudentUpdate(BaseModel):
     grade: int | None = Field(default=None, ge=1, le=11)
     timezone: IANATimezone | None = None
     is_active: bool | None = None
+
+
+class SupportStaffAdd(BaseModel):
+    # Кого назначить в поддержку - по почте его аккаунта.
+    email: EmailStr
+
+
+class SupportStaffOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    display_name: str
+    email: str | None
+    role: str
 
 
 class AdminPasswordReset(BaseModel):

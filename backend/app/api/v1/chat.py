@@ -28,6 +28,12 @@ def _require_student(user: CurrentUser) -> None:
 
 
 async def _display_title(db: DbSession, thread, current_user: User) -> str:
+    if thread.type == ChatThreadType.SUPPORT.value:
+        # Автору - просто «Поддержка», отвечающим - кто обратился.
+        if thread.student_id == current_user.id:
+            return "Поддержка"
+        author = await db.get(User, thread.student_id) if thread.student_id else None
+        return f"Поддержка: {author.display_name}" if author else "Поддержка"
     if thread.type == ChatThreadType.GROUP.value:
         # group_id is None once the group has been deleted - the thread stays as an
         # archive and falls back to the name snapshotted at that moment
@@ -54,13 +60,7 @@ def _preview(message) -> str:
 
 @router.get("/threads", response_model=list[ChatThreadOut])
 async def list_threads(current_user: CurrentUser, db: DbSession) -> list[ChatThreadOut]:
-    if current_user.role == UserRole.TUTOR:
-        profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
-        threads = await chat_service.list_threads_for_tutor(db, profile.id)
-    elif current_user.role == UserRole.STUDENT:
-        threads = await chat_service.list_threads_for_student(db, current_user.id)
-    else:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недоступно для этой роли")
+    threads = await chat_service.list_threads_for_user(db, current_user)
 
     thread_ids = [t.id for t in threads]
     # Sequential, not asyncio.gather: AsyncSession isn't safe for concurrent queries.
@@ -118,6 +118,14 @@ async def open_thread_with_tutor(tutor_id: uuid.UUID, current_user: CurrentUser,
     _require_student(current_user)
     await tutor_service.get_profile_by_id(db, tutor_id)
     thread = await chat_service.get_or_create_individual_thread(db, tutor_id, current_user.id)
+    title = await _display_title(db, thread, current_user)
+    return ChatThreadOut.model_validate(thread, from_attributes=True).model_copy(update={"display_title": title})
+
+
+@router.post("/threads/support", response_model=ChatThreadOut)
+async def open_support_thread(current_user: CurrentUser, db: DbSession) -> ChatThreadOut:
+    """Своё обращение в поддержку - создаётся при первом открытии."""
+    thread = await chat_service.get_or_create_support_thread(db, current_user)
     title = await _display_title(db, thread, current_user)
     return ChatThreadOut.model_validate(thread, from_attributes=True).model_copy(update={"display_title": title})
 

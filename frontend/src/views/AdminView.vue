@@ -8,6 +8,7 @@ import MailTab from "@/components/admin/MailTab.vue";
 import NotificationsTab from "@/components/admin/NotificationsTab.vue";
 import StudentsTab from "@/components/admin/StudentsTab.vue";
 import SubjectsTab from "@/components/admin/SubjectsTab.vue";
+import SupportTab from "@/components/admin/SupportTab.vue";
 import TutorsTab from "@/components/admin/TutorsTab.vue";
 
 const tabs = [
@@ -19,6 +20,7 @@ const tabs = [
   { key: "blog", label: "Блог" },
   { key: "notifications", label: "Уведомления" },
   { key: "mail", label: "Почта" },
+  { key: "support", label: "Поддержка" },
 ];
 
 const activeTab = ref(tabs[0].key);
@@ -51,6 +53,7 @@ const activeTab = ref(tabs[0].key);
       <BlogTab v-else-if="activeTab === 'blog'" />
       <NotificationsTab v-else-if="activeTab === 'notifications'" />
       <MailTab v-else-if="activeTab === 'mail'" />
+      <SupportTab v-else-if="activeTab === 'support'" />
     </div>
   </div>
 </template>

@@ -295,3 +295,26 @@ export async function uploadBlogImage(file: File) {
   const { data } = await apiClient.post<{ url: string }>("/admin/blog/images", form);
   return data.url;
 }
+
+// --- Поддержка: кто отвечает на обращения -------------------------------------------
+
+export interface SupportStaffMember {
+  id: string;
+  display_name: string;
+  email: string | null;
+  role: string;
+}
+
+export async function listSupportStaff() {
+  const { data } = await apiClient.get<SupportStaffMember[]>("/admin/support/staff");
+  return data;
+}
+
+export async function addSupportStaff(email: string) {
+  const { data } = await apiClient.post<SupportStaffMember>("/admin/support/staff", { email });
+  return data;
+}
+
+export async function removeSupportStaff(userId: string) {
+  await apiClient.delete(`/admin/support/staff/${userId}`);
+}

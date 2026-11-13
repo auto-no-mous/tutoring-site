@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 
-import { listMessageableStudents, listMessages, listThreads, openThreadWithStudent, sendMessage } from "@/api/chat";
+import {
+  listMessageableStudents,
+  listMessages,
+  listThreads,
+  openSupportThread,
+  openThreadWithStudent,
+  sendMessage,
+} from "@/api/chat";
 import { listSystemNotifications, markSystemNotificationsRead } from "@/api/notifications";
 import { useAuthStore } from "@/stores/auth";
 import { useNotificationsStore } from "@/stores/notifications";
@@ -15,9 +22,14 @@ import { formatDayLabel, formatLocalClock, formatThreadTimestamp } from "@/utils
 // link straight into a specific thread instead of always landing on the first one -
 // see CabinetView.vue, which resolves this from the ?thread= query param. "system" is
 // a reserved id for the pseudo-thread below, not a real ChatThread.
-const props = defineProps<{ initialThreadId?: string | null }>();
+// supportOnly - только обращения в поддержку (вкладка «Поддержка» в админке): без
+// системных уведомлений и своего обращения.
+const props = defineProps<{ initialThreadId?: string | null; supportOnly?: boolean }>();
 
 const SYSTEM_THREAD_ID = "system";
+// Зарезервированный id для ссылки на своё обращение (?thread=support): самого
+// обращения может ещё не быть - оно создаётся при первом открытии.
+const SUPPORT_THREAD_ID = "support";
 
 const auth = useAuthStore();
 const notifications = useNotificationsStore();
@@ -95,7 +107,30 @@ const systemMessageGroups = computed<SystemNotificationGroup[]>(() => {
   return groups;
 });
 
+// Своё обращение в поддержку закреплено отдельным пунктом под системными
+// уведомлениями - у тех, кто сам не отвечает в поддержке. Отвечающие видят все
+// обращения обычным списком.
+const canWriteToSupport = computed(() => !props.supportOnly && !auth.user?.answers_support);
+const ownSupportThread = computed(() =>
+  canWriteToSupport.value
+    ? (threads.value.find((t) => t.type === "support" && t.student_id === auth.user?.id) ?? null)
+    : null,
+);
+const listedThreads = computed(() => threads.value.filter((t) => t.id !== ownSupportThread.value?.id));
+const isSupportActive = computed(() => activeThread.value?.type === "support" && canWriteToSupport.value);
+
+async function openSupport(): Promise<void> {
+  if (ownSupportThread.value) {
+    await openThread(ownSupportThread.value);
+    return;
+  }
+  const created = await openSupportThread();
+  threads.value = [...threads.value, created];
+  await openThread(created);
+}
+
 function threadInitial(thread: ChatThread): string {
+  if (thread.type === "support") return "🛟";
   return (thread.display_title || "?").charAt(0).toUpperCase();
 }
 
@@ -144,7 +179,7 @@ async function loadThreads(): Promise<void> {
   // Read-only refresh for the sidebar preview/badge - marking notifications as read
   // only happens while the pseudo-thread is actually open (see loadSystemNotifications,
   // only called from openSystemThread/startMessagePolling below).
-  if (!isSystemThreadActive.value) {
+  if (!isSystemThreadActive.value && !props.supportOnly) {
     systemNotifications.value = await listSystemNotifications();
   }
   if (activeThread.value || isSystemThreadActive.value) {
@@ -156,8 +191,12 @@ async function loadThreads(): Promise<void> {
     }
     return;
   }
-  if (props.initialThreadId === SYSTEM_THREAD_ID) {
+  if (props.initialThreadId === SYSTEM_THREAD_ID && !props.supportOnly) {
     await openSystemThread();
+    return;
+  }
+  if (props.initialThreadId === SUPPORT_THREAD_ID && canWriteToSupport.value) {
+    await openSupport();
     return;
   }
   const target = props.initialThreadId ? data.find((t) => t.id === props.initialThreadId) : null;
@@ -165,7 +204,7 @@ async function loadThreads(): Promise<void> {
     await openThread(target);
   } else if (data.length > 0) {
     await openThread(data[0]);
-  } else {
+  } else if (!props.supportOnly) {
     await openSystemThread();
   }
 }
@@ -283,7 +322,7 @@ defineExpose({ loadThreads });
 <template>
   <div class="flex h-[32rem] gap-4 rounded-lg border border-slate-200 dark:border-slate-800">
     <aside class="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-slate-200 dark:border-slate-800">
-      <div v-if="auth.user?.role === 'tutor'" class="border-b border-slate-200 p-2 dark:border-slate-800">
+      <div v-if="auth.user?.role === 'tutor' && !supportOnly" class="border-b border-slate-200 p-2 dark:border-slate-800">
         <button
           type="button"
           class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700"
@@ -308,6 +347,7 @@ defineExpose({ loadThreads });
         </div>
       </div>
       <button
+        v-if="!supportOnly"
         type="button"
         class="flex w-full items-center gap-2.5 border-b border-slate-200 px-3 py-2.5 text-left hover:bg-slate-100 dark:border-slate-800 dark:hover:bg-slate-800"
         :class="isSystemThreadActive ? 'bg-slate-100 dark:bg-slate-800' : ''"
@@ -335,9 +375,40 @@ defineExpose({ loadThreads });
           </span>
         </span>
       </button>
-      <p v-if="threads.length === 0" class="p-3 text-xs text-slate-400">Чатов пока нет.</p>
       <button
-        v-for="thread in threads"
+        v-if="canWriteToSupport"
+        type="button"
+        data-support-entry
+        class="flex w-full items-center gap-2.5 border-b border-slate-200 px-3 py-2.5 text-left hover:bg-slate-100 dark:border-slate-800 dark:hover:bg-slate-800"
+        :class="isSupportActive ? 'bg-slate-100 dark:bg-slate-800' : ''"
+        @click="openSupport"
+      >
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sm dark:bg-sky-900">🛟</span>
+        <span class="min-w-0 flex-1">
+          <span
+            class="block truncate text-sm"
+            :class="(ownSupportThread?.unread_count ?? 0) > 0 ? 'font-semibold' : 'font-medium'"
+          >
+            Поддержка
+          </span>
+          <span class="flex items-center justify-between gap-1">
+            <span class="truncate text-xs text-slate-500">
+              {{ ownSupportThread?.last_message_preview ?? "Вопрос или проблема с сайтом? Напишите" }}
+            </span>
+            <span
+              v-if="(ownSupportThread?.unread_count ?? 0) > 0"
+              class="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-500 px-1 text-[10px] font-medium text-white"
+            >
+              {{ ownSupportThread?.unread_count }}
+            </span>
+          </span>
+        </span>
+      </button>
+      <p v-if="listedThreads.length === 0" class="p-3 text-xs text-slate-400">
+        {{ supportOnly ? "Обращений пока нет." : "Чатов пока нет." }}
+      </p>
+      <button
+        v-for="thread in listedThreads"
         :key="thread.id"
         type="button"
         class="flex w-full items-center gap-2.5 px-3 py-2.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -350,7 +421,7 @@ defineExpose({ loadThreads });
         <span class="min-w-0 flex-1">
           <span class="flex items-center justify-between gap-1">
             <span class="truncate text-sm" :class="thread.unread_count > 0 ? 'font-semibold' : 'font-medium'">
-              {{ thread.display_title || (thread.type === "group" ? "Группа" : "Личный чат") }}
+              {{ thread.display_title || (thread.type === "group" ? "Группа" : thread.type === "support" ? "Поддержка" : "Личный чат") }}
             </span>
             <span v-if="thread.last_message_at" class="shrink-0 text-[10px] text-slate-400">
               {{ formatThreadTimestamp(thread.last_message_at) }}
@@ -425,10 +496,14 @@ defineExpose({ loadThreads });
       </template>
       <template v-else-if="activeThread">
         <div class="border-b border-slate-200 pb-2 text-sm font-medium dark:border-slate-800">
-          {{ activeThread.display_title || (activeThread.type === "group" ? "Группа" : "Личный чат") }}
+          {{ activeThread.display_title || (activeThread.type === "group" ? "Группа" : activeThread.type === "support" ? "Поддержка" : "Личный чат") }}
         </div>
 
         <div ref="messagesEl" class="mt-2 flex-1 overflow-y-auto">
+          <p v-if="isSupportActive && messages.length === 0" class="m-auto max-w-sm p-4 text-center text-sm text-slate-400" data-support-hint>
+            Опишите вопрос или проблему — при необходимости приложите скриншот. Ответ придёт сюда же, и мы пришлём
+            уведомление.
+          </p>
           <template v-for="group in messageGroups" :key="group.dayLabel + group.messages[0].id">
             <div class="my-2 flex justify-center">
               <span class="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">
@@ -442,7 +517,7 @@ defineExpose({ loadThreads });
               :class="message.sender_id === auth.user?.id ? 'items-end' : 'items-start'"
             >
               <span
-                v-if="activeThread.type === 'group' && message.sender_id !== auth.user?.id"
+                v-if="(activeThread.type === 'group' || activeThread.type === 'support') && message.sender_id !== auth.user?.id"
                 class="mb-0.5 px-1 text-[11px] font-medium text-slate-500"
               >
                 {{ message.sender_display_name }}

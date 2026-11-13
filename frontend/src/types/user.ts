@@ -37,6 +37,8 @@ export interface User {
   is_active: boolean;
   timezone: string;
   telegram_chat_id: string | null;
+  // Отвечает на обращения в поддержку (админ или назначен админом).
+  answers_support: boolean;
   // Подключён ли ВКонтакте (сам адрес сервер не отдаёт).
   vk_connected: boolean;
   notification_settings: NotificationSettings;

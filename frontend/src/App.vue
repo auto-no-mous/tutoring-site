@@ -91,6 +91,9 @@ onBeforeUnmount(() => notifications.stopPolling());
         <RouterLink to="/blog" class="transition-colors hover:text-brand-600">Блог</RouterLink>
         <RouterLink to="/legal/privacy" class="transition-colors hover:text-brand-600">Политика конфиденциальности</RouterLink>
         <RouterLink to="/legal/agreement" class="transition-colors hover:text-brand-600">Пользовательское соглашение</RouterLink>
+        <!-- Связь с нами - и для тех, кто не может войти. Вошедшим удобнее чат
+             «Поддержка» в кабинете: там видна вся переписка. -->
+        <a href="mailto:info@my-tutor.ru" class="transition-colors hover:text-brand-600">Связаться с нами: info@my-tutor.ru</a>
         <span class="ml-auto text-slate-400">© my-tutor.ru</span>
       </div>
     </footer>

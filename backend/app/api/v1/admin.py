@@ -2,6 +2,7 @@ import datetime as dt
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_roles
 from app.models.enums import UserRole
@@ -16,6 +17,8 @@ from app.schemas.admin import (
     AdminPasswordReset,
     AdminStudentUpdate,
     AdminTutorUpdate,
+    SupportStaffAdd,
+    SupportStaffOut,
 )
 from app.schemas.blog import BlogPostAdminOut, BlogPostCreate, BlogPostUpdate
 from app.schemas.booking import BookingOut, BookingPageOut, BookingTutorUpdate, ManualBookingCreate
@@ -164,6 +167,35 @@ async def reset_user_password(user_id: uuid.UUID, payload: AdminPasswordReset, d
     ручка покрывает обе вкладки админки. Подробности - admin_service."""
     user = await admin_service.get_user_or_404(db, user_id)
     await admin_service.reset_user_password(db, user, payload.new_password)
+
+
+# --- Поддержка: кто отвечает на обращения ------------------------------------------
+
+
+@router.get("/support/staff", response_model=list[SupportStaffOut])
+async def list_support_staff(db: DbSession) -> list[SupportStaffOut]:
+    """Кроме админов (они отвечают всегда) - назначенные в поддержку."""
+    result = await db.execute(select(User).where(User.is_support.is_(True)).order_by(User.display_name))
+    return [SupportStaffOut.model_validate(u) for u in result.scalars().all()]
+
+
+@router.post("/support/staff", response_model=SupportStaffOut)
+async def add_support_staff(payload: SupportStaffAdd, db: DbSession) -> SupportStaffOut:
+    result = await db.execute(select(User).where(func.lower(User.email) == payload.email.lower()))
+    user = result.scalars().first()
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь с такой почтой не найден")
+    user.is_support = True
+    await db.commit()
+    await db.refresh(user)
+    return SupportStaffOut.model_validate(user)
+
+
+@router.delete("/support/staff/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_support_staff(user_id: uuid.UUID, db: DbSession) -> None:
+    user = await admin_service.get_user_or_404(db, user_id)
+    user.is_support = False
+    await db.commit()
 
 
 # --- Bookings (individual lessons) -----------------------------------------------

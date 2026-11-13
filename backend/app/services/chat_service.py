@@ -1,9 +1,10 @@
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.chat import ChatMessage, ChatThread, ChatThreadRead
 from app.models.enums import ChatThreadType, GroupMembershipStatus, NotificationEvent
 from app.models.group import GroupMembership
@@ -60,6 +61,59 @@ async def archive_group_thread(db: AsyncSession, group_id: uuid.UUID, group_name
     return thread
 
 
+async def get_or_create_support_thread(db: AsyncSession, user: User) -> ChatThread:
+    """Обращение пользователя в поддержку - одно на человека, как личный чат."""
+    result = await db.execute(
+        select(ChatThread).where(ChatThread.type == ChatThreadType.SUPPORT.value, ChatThread.student_id == user.id)
+    )
+    thread = result.scalars().first()
+    if thread is not None:
+        return thread
+    thread = ChatThread(type=ChatThreadType.SUPPORT.value, tutor_id=None, student_id=user.id)
+    db.add(thread)
+    await db.commit()
+    await db.refresh(thread)
+    return thread
+
+
+async def find_support_thread(db: AsyncSession, user_id: uuid.UUID) -> ChatThread | None:
+    result = await db.execute(
+        select(ChatThread).where(ChatThread.type == ChatThreadType.SUPPORT.value, ChatThread.student_id == user_id)
+    )
+    return result.scalars().first()
+
+
+async def list_support_threads(db: AsyncSession) -> list[ChatThread]:
+    """Все обращения - для тех, кто отвечает в поддержке."""
+    result = await db.execute(select(ChatThread).where(ChatThread.type == ChatThreadType.SUPPORT.value))
+    return list(result.scalars().all())
+
+
+async def list_support_staff(db: AsyncSession) -> list[User]:
+    result = await db.execute(
+        select(User).where(or_(User.role == "admin", User.is_support.is_(True)), User.is_active.is_(True))
+    )
+    return list(result.scalars().all())
+
+
+async def list_threads_for_user(db: AsyncSession, user: User) -> list[ChatThread]:
+    """Все чаты, которые человек видит: свои личные и групповые, своё обращение в
+    поддержку и - если он отвечает в поддержке - обращения остальных."""
+    threads: list[ChatThread] = []
+    if user.role == "tutor":
+        profile = await tutor_service.get_profile_by_user_id(db, user.id)
+        threads = await list_threads_for_tutor(db, profile.id)
+    elif user.role == "student":
+        threads = await list_threads_for_student(db, user.id)
+    if user.answers_support:
+        threads += await list_support_threads(db)
+    else:
+        own = await find_support_thread(db, user.id)
+        if own is not None:
+            threads.append(own)
+    return threads
+
+
 async def get_thread_or_404(db: AsyncSession, thread_id: uuid.UUID) -> ChatThread:
     thread = await db.get(ChatThread, thread_id)
     if thread is None:
@@ -89,6 +143,8 @@ async def _is_active_member(db: AsyncSession, group_id: uuid.UUID, student_id: u
 
 
 async def can_access_thread(db: AsyncSession, thread: ChatThread, user: User) -> bool:
+    if thread.type == ChatThreadType.SUPPORT.value:
+        return thread.student_id == user.id or user.answers_support
     if user.role == "tutor":
         profile = await tutor_service.get_profile_by_user_id(db, user.id)
         return thread.tutor_id == profile.id
@@ -158,6 +214,10 @@ async def send_message(db: AsyncSession, thread: ChatThread, sender: User, conte
     await db.commit()
     await db.refresh(message)
 
+    if thread.type == ChatThreadType.SUPPORT.value:
+        await _notify_support_message(db, thread, sender, content)
+        return message
+
     # Notifications are tutor-facing (section 2.7); a message from the tutor themselves
     # doesn't need to notify the tutor.
     if sender.role == "student":
@@ -169,6 +229,29 @@ async def send_message(db: AsyncSession, thread: ChatThread, sender: User, conte
             f"{sender.display_name}: {content}" if content else f"{sender.display_name} отправил(а) файл.",
         )
     return message
+
+
+async def _notify_support_message(db: AsyncSession, thread: ChatThread, sender: User, content: str | None) -> None:
+    """Обращение - всем, кто отвечает в поддержке (кроме написавшего); ответ
+    поддержки - автору обращения. Без этого обращение лежало бы непрочитанным, пока
+    кто-нибудь случайно не заглянет в чат."""
+    text = content if content else "файл"
+    base = settings.frontend_base_url.rstrip("/")
+    if thread.student_id == sender.id:
+        for staff in await list_support_staff(db):
+            if staff.id == sender.id:
+                continue
+            # Админ отвечает из админки, назначенные - из чата своего кабинета.
+            link = f"{base}/admin" if staff.role == "admin" else f"{base}/cabinet?tab=chat&thread={thread.id}"
+            await notification_service.notify(
+                db, staff.id, NotificationEvent.NEW_MESSAGE,
+                "Новое обращение в поддержку", f"{sender.display_name}: {text}\n\nОтветить: {link}",
+            )
+    elif thread.student_id is not None:
+        await notification_service.notify(
+            db, thread.student_id, NotificationEvent.NEW_MESSAGE,
+            "Ответ поддержки my-tutor.ru", f"{text}\n\nОтветить: {base}/cabinet?tab=chat&thread=support",
+        )
 
 
 async def list_messages(db: AsyncSession, thread_id: uuid.UUID) -> list[ChatMessage]:
@@ -224,13 +307,7 @@ async def get_total_unread_for_user(db: AsyncSession, user: User) -> int:
     """Sum of unread counts across every thread the user can see - powers the
     combined chat+system badge (see api/v1/notifications.py, components/UserMenu.vue,
     CabinetView.vue's "Чат" tab)."""
-    if user.role == "tutor":
-        profile = await tutor_service.get_profile_by_user_id(db, user.id)
-        threads = await list_threads_for_tutor(db, profile.id)
-    elif user.role == "student":
-        threads = await list_threads_for_student(db, user.id)
-    else:
-        return 0
+    threads = await list_threads_for_user(db, user)
     counts = await get_unread_counts(db, [t.id for t in threads], user.id)
     return sum(counts.values())
 

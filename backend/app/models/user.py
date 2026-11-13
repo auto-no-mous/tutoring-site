@@ -53,6 +53,10 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     # VK/Яндекс аватар провайдера кладётся сразу в оба места.
     photo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Отвечает на обращения в поддержку (чат «Поддержка»). Админы отвечают всегда, а
+    # этот флаг админ ставит другим - например, своему аккаунту репетитора, чтобы не
+    # заходить ради ответов в админку.
+    is_support: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # Section 6: student's timezone, auto-detected with manual override. Stored as an
     # IANA timezone name (e.g. "Europe/Moscow"). Not meaningful for tutors, whose cabinet
@@ -136,6 +140,10 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     def is_managed(self) -> bool:
         """Аккаунт заведён репетитором и пока никем не забран."""
         return self.managed_by_tutor_id is not None
+
+    @property
+    def answers_support(self) -> bool:
+        return self.role == "admin" or bool(self.is_support)
 
     @property
     def vk_connected(self) -> bool:

@@ -91,6 +91,9 @@ class HomeworkSubmissionStatus(StrEnum):
 class ChatThreadType(StrEnum):
     INDIVIDUAL = "individual"
     GROUP = "group"
+    # Обращение пользователя в поддержку сайта: автор - student_id (любая роль),
+    # отвечают администраторы и те, кого админ назначил в поддержку (User.is_support).
+    SUPPORT = "support"
 
 
 class NotificationChannel(StrEnum):

@@ -1,7 +1,8 @@
 export interface ChatThread {
   id: string;
-  type: "individual" | "group";
-  tutor_id: string;
+  // support - обращение в поддержку сайта: автор - student_id (ученик или репетитор).
+  type: "individual" | "group" | "support";
+  tutor_id: string | null;
   student_id: string | null;
   group_id: string | null;
   display_title: string;

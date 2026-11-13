@@ -10,7 +10,7 @@ class ChatThreadOut(BaseModel):
 
     id: uuid.UUID
     type: str
-    tutor_id: uuid.UUID
+    tutor_id: uuid.UUID | None
     student_id: uuid.UUID | None
     group_id: uuid.UUID | None
     display_title: str = ""

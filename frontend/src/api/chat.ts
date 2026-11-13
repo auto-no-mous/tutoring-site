@@ -24,6 +24,12 @@ export async function openThreadWithTutor(tutorId: string) {
   return data;
 }
 
+// Своё обращение в поддержку - создаётся при первом открытии.
+export async function openSupportThread() {
+  const { data } = await apiClient.post<ChatThread>("/chat/threads/support");
+  return data;
+}
+
 export async function getGroupThread(groupId: string) {
   const { data } = await apiClient.get<ChatThread>(`/chat/threads/group/${groupId}`);
   return data;

@@ -23,10 +23,13 @@ class ChatThread(UUIDPKMixin, TimestampMixin, Base):
     )
 
     type: Mapped[str] = mapped_column(String(16), default=ChatThreadType.INDIVIDUAL.value)
-    tutor_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("tutor_profiles.id", ondelete="CASCADE"), index=True
+    # Null только у обращений в поддержку: там второй стороной выступает не
+    # репетитор, а поддержка сайта целиком.
+    tutor_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("tutor_profiles.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    # Set for individual threads; null for group threads.
+    # Set for individual threads (the student) and support threads (whoever wrote
+    # in - student or tutor); null for group threads.
     student_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
