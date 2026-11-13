@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.chat import ChatMessage, ChatThread, ChatThreadRead
 from app.models.enums import ChatThreadType, GroupMembershipStatus, NotificationEvent
-from app.models.group import GroupMembership
+from app.models.booking import Booking
+from app.models.group import Group, GroupMembership
+from app.models.tutor import TutorProfile
 from app.models.user import User
 from app.services import notification_service, tutor_service
 from app.services.booking_service import list_students_for_tutor
@@ -204,6 +206,39 @@ async def list_messageable_students_for_tutor(db: AsyncSession, tutor_id: uuid.U
     already_threaded_ids = {row[0] for row in thread_result.all()}
 
     return [row for row in booked if row["id"] not in already_threaded_ids]
+
+
+async def list_messageable_tutors_for_student(db: AsyncSession, student_id: uuid.UUID) -> list[dict]:
+    """Репетиторы для «Новый чат» у ученика: к кому он записывался на занятия или в
+    группу, но личного чата с кем ещё нет. Раньше у ученика такой кнопки не было -
+    написать новому репетитору можно было только со страницы его анкеты."""
+    booked = await db.execute(
+        select(Booking.tutor_id).where(Booking.student_id == student_id, Booking.is_manual_block.is_(False)).distinct()
+    )
+    in_groups = await db.execute(
+        select(Group.tutor_id)
+        .join(GroupMembership, GroupMembership.group_id == Group.id)
+        .where(GroupMembership.student_id == student_id)
+        .distinct()
+    )
+    tutor_ids = {row[0] for row in booked.all()} | {row[0] for row in in_groups.all()}
+
+    threaded = await db.execute(
+        select(ChatThread.tutor_id).where(
+            ChatThread.type == ChatThreadType.INDIVIDUAL.value, ChatThread.student_id == student_id
+        )
+    )
+    tutor_ids -= {row[0] for row in threaded.all()}
+    if not tutor_ids:
+        return []
+
+    rows = await db.execute(
+        select(TutorProfile.id, User.display_name)
+        .join(User, User.id == TutorProfile.user_id)
+        .where(TutorProfile.id.in_(tutor_ids), User.is_active.is_(True))
+        .order_by(User.display_name)
+    )
+    return [{"id": tutor_id, "display_name": name} for tutor_id, name in rows.all()]
 
 
 async def send_message(db: AsyncSession, thread: ChatThread, sender: User, content: str | None, file_path: str | None) -> ChatMessage:

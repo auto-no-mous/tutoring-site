@@ -3,10 +3,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 
 import {
   listMessageableStudents,
+  listMessageableTutors,
   listMessages,
   listThreads,
   openSupportThread,
   openThreadWithStudent,
+  openThreadWithTutor,
   sendMessage,
 } from "@/api/chat";
 import { listSystemNotifications, markSystemNotificationsRead } from "@/api/notifications";
@@ -36,6 +38,16 @@ const notifications = useNotificationsStore();
 const threads = ref<ChatThread[]>([]);
 const activeThread = ref<ChatThread | null>(null);
 const messages = ref<ChatMessage[]>([]);
+// Отправленные, но ещё не подтверждённые сервером сообщения: показываем сразу, не
+// дожидаясь ответа - иначе отправка ощущалась с задержкой.
+const pendingMessages = ref<ChatMessage[]>([]);
+const shownMessages = computed(() => [...messages.value, ...pendingMessages.value]);
+let pendingCounter = 0;
+// Номер последнего запроса сообщений. Опрос идёт по таймеру, и его ответ мог прийти
+// позже отправки или переключения на другой чат: тогда он затирал свежий список -
+// только что отправленное сообщение то пропадало, то задваивалось. Устаревшие ответы
+// отбрасываются.
+let messagesRequestSeq = 0;
 const draft = ref("");
 const file = ref<File | null>(null);
 const isSending = ref(false);
@@ -51,11 +63,19 @@ const isSystemThreadActive = ref(false);
 const systemNotifications = ref<SystemNotification[]>([]);
 const systemUnreadCount = computed(() => systemNotifications.value.filter((n) => !n.read_at).length);
 
-// Tutor-only "start a new chat" picker (there's no equivalent for students - they
-// reach a tutor via the "Написать сообщение" button on the tutor's public profile).
+// «Новый чат»: репетитор выбирает ученика, ученик - репетитора, к которому
+// записывался (раньше у ученика кнопки не было, и новому репетитору можно было
+// написать только со страницы его анкеты). В списке - только те, с кем чата ещё нет.
+interface NewChatContact {
+  id: string;
+  label: string;
+}
+const canStartChats = computed(
+  () => !props.supportOnly && (auth.user?.role === "tutor" || auth.user?.role === "student"),
+);
 const showNewChatPicker = ref(false);
-const messageableStudents = ref<TutorStudent[]>([]);
-const isLoadingMessageableStudents = ref(false);
+const newChatContacts = ref<NewChatContact[]>([]);
+const isLoadingContacts = ref(false);
 
 // Polling, not a websocket - keeps the backend simple while still feeling live. The
 // thread list ticks slower since it only needs to surface new threads/unread counts;
@@ -74,7 +94,7 @@ interface MessageGroup {
 // separator, like every other chat app - makes long histories scannable.
 const messageGroups = computed<MessageGroup[]>(() => {
   const groups: MessageGroup[] = [];
-  for (const message of messages.value) {
+  for (const message of shownMessages.value) {
     const label = formatDayLabel(message.created_at);
     const last = groups[groups.length - 1];
     if (last && last.dayLabel === label) {
@@ -145,18 +165,23 @@ function studentLabel(student: TutorStudent): string {
 
 async function toggleNewChatPicker(): Promise<void> {
   showNewChatPicker.value = !showNewChatPicker.value;
-  if (!showNewChatPicker.value || messageableStudents.value.length > 0) return;
-  isLoadingMessageableStudents.value = true;
+  if (!showNewChatPicker.value) return;
+  // Список - заново при каждом открытии: с кем-то чат мог появиться с прошлого раза.
+  isLoadingContacts.value = true;
   try {
-    messageableStudents.value = await listMessageableStudents();
+    newChatContacts.value =
+      auth.user?.role === "tutor"
+        ? (await listMessageableStudents()).map((s) => ({ id: s.id, label: studentLabel(s) }))
+        : (await listMessageableTutors()).map((t) => ({ id: t.id, label: t.display_name }));
   } finally {
-    isLoadingMessageableStudents.value = false;
+    isLoadingContacts.value = false;
   }
 }
 
-async function startChatWith(student: TutorStudent): Promise<void> {
+async function startChatWith(contact: NewChatContact): Promise<void> {
   showNewChatPicker.value = false;
-  const thread = await openThreadWithStudent(student.id);
+  const thread =
+    auth.user?.role === "tutor" ? await openThreadWithStudent(contact.id) : await openThreadWithTutor(contact.id);
   await loadThreads();
   const target = threads.value.find((t) => t.id === thread.id) ?? thread;
   await openThread(target);
@@ -211,9 +236,21 @@ async function loadThreads(): Promise<void> {
 
 async function loadMessages(): Promise<void> {
   if (!activeThread.value) return;
+  const threadId = activeThread.value.id;
+  const seq = ++messagesRequestSeq;
   const wasNearBottom = isNearBottom();
   const hadMessages = messages.value.length;
-  const data = await listMessages(activeThread.value.id);
+  const data = await listMessages(threadId);
+  if (seq !== messagesRequestSeq || activeThread.value?.id !== threadId) return;
+  // Опрос мог принести уже сохранённое сообщение раньше, чем пришёл ответ на саму
+  // отправку: черновик «отправляется…» тогда убираем, иначе оно висело бы дважды.
+  const known = new Set(messages.value.map((m) => m.id));
+  const arrivedOwn = data.filter((m) => !known.has(m.id) && m.sender_id === auth.user?.id);
+  if (arrivedOwn.length > 0) {
+    pendingMessages.value = pendingMessages.value.filter(
+      (p) => !arrivedOwn.some((m) => (m.content ?? "") === (p.content ?? "")),
+    );
+  }
   const grew = data.length > hadMessages;
   messages.value = data;
   if (activeThread.value) activeThread.value.unread_count = 0;
@@ -269,6 +306,7 @@ async function openThread(thread: ChatThread): Promise<void> {
   activeThread.value = thread;
   isSystemThreadActive.value = false;
   messages.value = [];
+  pendingMessages.value = [];
   await loadMessages();
   startMessagePolling();
 }
@@ -285,21 +323,44 @@ function clearFile(): void {
 
 async function send(): Promise<void> {
   if (!activeThread.value || (!draft.value.trim() && !file.value)) return;
+  const threadId = activeThread.value.id;
+  const text = draft.value.trim();
+  const attachment = file.value;
   isSending.value = true;
   sendError.value = "";
+
+  const pending: ChatMessage = {
+    id: `pending-${++pendingCounter}`,
+    thread_id: threadId,
+    sender_id: auth.user?.id ?? "",
+    sender_display_name: auth.user?.display_name ?? "",
+    content: text || (attachment ? `📎 ${attachment.name}` : null),
+    file_path: null,
+    created_at: new Date().toISOString(),
+  };
+  pendingMessages.value = [...pendingMessages.value, pending];
+  draft.value = "";
+  clearFile();
+  await nextTick();
+  scrollToBottom();
+
   try {
-    const message = await sendMessage(activeThread.value.id, draft.value.trim() || undefined, file.value ?? undefined);
-    messages.value.push(message);
-    draft.value = "";
-    clearFile();
-    await nextTick();
-    scrollToBottom();
-    // Refresh the thread list right away so this thread's preview/order updates
-    // immediately instead of waiting for the next poll tick.
-    await loadThreads();
+    const message = await sendMessage(threadId, text || undefined, attachment ?? undefined);
+    // Опрос, начатый до этого момента, принесёт список без нового сообщения.
+    messagesRequestSeq += 1;
+    if (activeThread.value?.id === threadId && !messages.value.some((m) => m.id === message.id)) {
+      messages.value = [...messages.value, message];
+    }
+    // Превью и порядок чатов слева - сразу, а не к следующему опросу. Не ждём:
+    // поле ввода уже свободно.
+    void loadThreads();
   } catch {
     sendError.value = "Не удалось отправить сообщение.";
+    // Возвращаем набранное, чтобы не пришлось писать заново.
+    draft.value = text;
+    file.value = attachment;
   } finally {
+    pendingMessages.value = pendingMessages.value.filter((m) => m.id !== pending.id);
     isSending.value = false;
   }
 }
@@ -322,7 +383,7 @@ defineExpose({ loadThreads });
 <template>
   <div class="flex h-[32rem] gap-4 rounded-lg border border-slate-200 dark:border-slate-800">
     <aside class="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-slate-200 dark:border-slate-800">
-      <div v-if="auth.user?.role === 'tutor' && !supportOnly" class="border-b border-slate-200 p-2 dark:border-slate-800">
+      <div v-if="canStartChats" class="border-b border-slate-200 p-2 dark:border-slate-800">
         <button
           type="button"
           class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700"
@@ -331,18 +392,19 @@ defineExpose({ loadThreads });
           {{ showNewChatPicker ? "Отмена" : "+ Новый чат" }}
         </button>
         <div v-if="showNewChatPicker" class="mt-2">
-          <p v-if="isLoadingMessageableStudents" class="text-xs text-slate-400">Загрузка…</p>
-          <p v-else-if="messageableStudents.length === 0" class="text-xs text-slate-400">
-            Нет новых контактов.
+          <p v-if="isLoadingContacts" class="text-xs text-slate-400">Загрузка…</p>
+          <p v-else-if="newChatContacts.length === 0" class="text-xs text-slate-400">
+            {{ auth.user?.role === "student" ? "Со всеми вашими репетиторами чат уже есть." : "Нет новых контактов." }}
           </p>
           <button
-            v-for="student in messageableStudents"
-            :key="student.id"
+            v-for="contact in newChatContacts"
+            :key="contact.id"
             type="button"
+            data-new-chat-contact
             class="block w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
-            @click="startChatWith(student)"
+            @click="startChatWith(contact)"
           >
-            {{ studentLabel(student) }}
+            {{ contact.label }}
           </button>
         </div>
       </div>
@@ -500,7 +562,7 @@ defineExpose({ loadThreads });
         </div>
 
         <div ref="messagesEl" class="mt-2 flex-1 overflow-y-auto">
-          <p v-if="isSupportActive && messages.length === 0" class="m-auto max-w-sm p-4 text-center text-sm text-slate-400" data-support-hint>
+          <p v-if="isSupportActive && shownMessages.length === 0" class="m-auto max-w-sm p-4 text-center text-sm text-slate-400" data-support-hint>
             Опишите вопрос или проблему — при необходимости приложите скриншот. Ответ придёт сюда же, и мы пришлём
             уведомление.
           </p>
@@ -524,11 +586,11 @@ defineExpose({ loadThreads });
               </span>
               <div
                 class="max-w-[80%] rounded-md px-3 py-1.5 text-sm"
-                :class="
-                  message.sender_id === auth.user?.id
-                    ? 'bg-brand-500 text-white'
-                    : 'bg-slate-100 dark:bg-slate-800'
-                "
+                :class="[
+                  message.sender_id === auth.user?.id ? 'bg-brand-500 text-white' : 'bg-slate-100 dark:bg-slate-800',
+                  message.id.startsWith('pending-') ? 'opacity-60' : '',
+                ]"
+                :data-message="message.id"
               >
                 <p v-if="message.content" class="whitespace-pre-wrap">{{ message.content }}</p>
                 <a v-if="message.file_path && isImagePath(message.file_path)" :href="message.file_path" target="_blank">
@@ -537,7 +599,9 @@ defineExpose({ loadThreads });
                 <a v-else-if="message.file_path" :href="message.file_path" target="_blank" class="mt-1 flex items-center gap-1 underline">
                   📎 Файл
                 </a>
-                <div class="mt-1 text-[10px] opacity-70">{{ formatLocalClock(message.created_at) }}</div>
+                <div class="mt-1 text-[10px] opacity-70">
+                  {{ message.id.startsWith("pending-") ? "отправляется…" : formatLocalClock(message.created_at) }}
+                </div>
               </div>
             </div>
           </template>

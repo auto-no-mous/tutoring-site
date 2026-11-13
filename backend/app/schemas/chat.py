@@ -21,6 +21,13 @@ class ChatThreadOut(BaseModel):
     last_message_at: UTCDateTime | None = None
 
 
+class ChatTutorOut(BaseModel):
+    """Репетитор, с которым ученик может начать новый чат (id - профиля репетитора)."""
+
+    id: uuid.UUID
+    display_name: str
+
+
 class ChatMessageCreate(BaseModel):
     content: str | None = None
 

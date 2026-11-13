@@ -319,3 +319,35 @@ async def test_attachment_upload_ignores_client_supplied_extension(client: Async
     file_path = resp.json()["file_path"]
     assert file_path.endswith(".txt")
     assert not file_path.endswith(".html")
+
+
+async def test_student_can_start_a_chat_with_tutors_they_booked(client: AsyncClient) -> None:
+    """«Новый чат» у ученика: репетиторы, к которым он записывался, пока чата с ними нет."""
+    booked = await _register(client, "chat-new-booked@example.com", "tutor")
+    stranger = await _register(client, "chat-new-stranger@example.com", "tutor")
+    student = await _register(client, "chat-new-student@example.com", "student")
+    booked_id = (await client.get("/api/v1/tutors/me", headers=booked["headers"])).json()["id"]
+
+    start = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=3)
+    resp = await client.post(
+        "/api/v1/bookings/manual",
+        headers=booked["headers"],
+        json={
+            "student_id": student["user"]["id"],
+            "start_at": start.isoformat(),
+            "end_at": (start + dt.timedelta(hours=1)).isoformat(),
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    tutors = (await client.get("/api/v1/chat/tutors", headers=student["headers"])).json()
+    assert [t["id"] for t in tutors] == [booked_id]
+    assert tutors[0]["display_name"] == "tutor Test"
+    assert stranger["user"]["id"] not in {t["id"] for t in tutors}
+
+    # Как только чат открыт, репетитор уходит из «Нового чата» в обычный список.
+    await client.post(f"/api/v1/chat/threads/with-tutor/{booked_id}", headers=student["headers"])
+    assert (await client.get("/api/v1/chat/tutors", headers=student["headers"])).json() == []
+
+    # Ручка - только для учеников.
+    assert (await client.get("/api/v1/chat/tutors", headers=booked["headers"])).status_code == 403

@@ -8,7 +8,7 @@ from app.models.enums import ChatThreadType, UserRole
 from app.models.group import Group
 from app.models.tutor import TutorProfile
 from app.models.user import User
-from app.schemas.chat import ChatMessageOut, ChatThreadOut
+from app.schemas.chat import ChatMessageOut, ChatThreadOut, ChatTutorOut
 from app.schemas.tutor import TutorStudentOut
 from app.services import chat_service, file_service, tutor_service
 from app.services.booking_service import get_student_names
@@ -99,6 +99,14 @@ async def list_messageable_students(current_user: CurrentUser, db: DbSession) ->
     profile = await tutor_service.get_profile_by_user_id(db, current_user.id)
     rows = await chat_service.list_messageable_students_for_tutor(db, profile.id)
     return [TutorStudentOut(**row) for row in rows]
+
+
+@router.get("/tutors", response_model=list[ChatTutorOut])
+async def list_messageable_tutors(current_user: CurrentUser, db: DbSession) -> list[ChatTutorOut]:
+    """«Новый чат» у ученика: его репетиторы, с которыми личного чата ещё нет."""
+    _require_student(current_user)
+    rows = await chat_service.list_messageable_tutors_for_student(db, current_user.id)
+    return [ChatTutorOut(**row) for row in rows]
 
 
 @router.post("/threads/with-student/{student_id}", response_model=ChatThreadOut)

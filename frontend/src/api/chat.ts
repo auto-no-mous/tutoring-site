@@ -14,6 +14,12 @@ export async function listMessageableStudents() {
   return data;
 }
 
+// Ученику: его репетиторы, с которыми ещё нет личного чата - «Новый чат» в ChatPanel.
+export async function listMessageableTutors() {
+  const { data } = await apiClient.get<{ id: string; display_name: string }[]>("/chat/tutors");
+  return data;
+}
+
 export async function openThreadWithStudent(studentId: string) {
   const { data } = await apiClient.post<ChatThread>(`/chat/threads/with-student/${studentId}`);
   return data;
